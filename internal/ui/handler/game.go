@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/timer"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/timer"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -61,7 +61,7 @@ func handleMsgBidTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	}
 	m.Game().SetTimerDuration(time.Duration(payload.Timeout) * time.Second)
 	m.Game().SetTimerStartTime(time.Now())
-	t := timer.NewWithInterval(m.Game().TimerDuration(), time.Second)
+	t := timer.New(m.Game().TimerDuration(), timer.WithInterval(time.Second))
 	m.SetTimer(t)
 	return t.Start()
 }
@@ -115,7 +115,7 @@ func handleMsgPlayTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	}
 	m.Game().SetTimerDuration(time.Duration(payload.Timeout) * time.Second)
 	m.Game().SetTimerStartTime(time.Now())
-	t := timer.NewWithInterval(m.Game().TimerDuration(), time.Second)
+	t := timer.New(m.Game().TimerDuration(), timer.WithInterval(time.Second))
 	m.SetTimer(t)
 	return t.Start()
 }

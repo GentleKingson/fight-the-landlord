@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"charm.land/bubbles/v2/textinput"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"

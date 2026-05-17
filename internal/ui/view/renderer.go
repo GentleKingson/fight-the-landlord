@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	gameClient "github.com/palemoky/fight-the-landlord/internal/client"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"

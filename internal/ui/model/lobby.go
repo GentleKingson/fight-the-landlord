@@ -2,8 +2,8 @@
 package model
 
 import (
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/transport"
@@ -45,7 +45,7 @@ func NewLobbyModel(c *transport.Client, input *textinput.Model) *LobbyModel {
 	chatInput := textinput.New()
 	chatInput.Placeholder = "按 / 键聊天..."
 	chatInput.CharLimit = 50
-	chatInput.Width = chatInputWidth
+	chatInput.SetWidth(chatInputWidth)
 
 	return &LobbyModel{
 		client:    c,
@@ -58,8 +58,8 @@ func (m *LobbyModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m *LobbyModel) View() string {
-	return "" // Not used directly, managed by OnlineModel
+func (m *LobbyModel) View() tea.View {
+	return tea.NewView("") // Not used directly, managed by OnlineModel
 }
 
 func (m *LobbyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

@@ -2,7 +2,7 @@
 package common
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 )

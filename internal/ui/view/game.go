@@ -2,7 +2,7 @@
 package view
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/palemoky/fight-the-landlord/internal/ui/common"
 )

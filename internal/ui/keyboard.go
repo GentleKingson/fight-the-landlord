@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -54,7 +54,7 @@ func handleLobbyChatInput(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
 	}
 
 	// Chat input is focused - handle input
-	switch msg.Type {
+	switch msg.Key().Code {
 	case tea.KeyEnter:
 		if content := chatInput.Value(); content != "" {
 			if cmd := sendChatMessage(m, content, "lobby"); cmd != nil {
@@ -103,7 +103,7 @@ func tryToggleQuickMenu(m model.Model, msg tea.KeyMsg) bool {
 }
 
 func processQuickMenuKey(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
-	switch msg.Type {
+	switch msg.Key().Code {
 	case tea.KeyEsc:
 		m.Game().SetShowQuickMsgMenu(false)
 		return true, nil
@@ -111,15 +111,19 @@ func processQuickMenuKey(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
 		return handleQuickMsgScroll(m, msg)
 	case tea.KeyEnter:
 		return handleQuickMsgEnter(m)
-	case tea.KeyBackspace, tea.KeyRunes:
+	case tea.KeyBackspace:
 		return handleQuickMsgInput(m, msg)
+	default:
+		if msg.Key().Text != "" {
+			return handleQuickMsgInput(m, msg)
+		}
 	}
 	return true, nil
 }
 
 func handleQuickMsgScroll(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
 	scroll := m.Game().QuickMsgScroll()
-	if msg.Type == tea.KeyUp {
+	if msg.Key().Code == tea.KeyUp {
 		if scroll > 0 {
 			m.Game().SetQuickMsgScroll(scroll - 1)
 		}
@@ -153,7 +157,7 @@ func handleQuickMsgEnter(m model.Model) (bool, tea.Cmd) {
 }
 
 func handleQuickMsgInput(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
-	if msg.Type == tea.KeyBackspace {
+	if msg.Key().Code == tea.KeyBackspace {
 		input := m.Game().QuickMsgInput()
 		if input != "" {
 			m.Game().SetQuickMsgInput(input[:len(input)-1])
@@ -161,16 +165,16 @@ func handleQuickMsgInput(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	}
 
-	// KeyRunes
 	if msg.String() == "t" || msg.String() == "T" {
 		m.Game().SetShowQuickMsgMenu(false)
 		return true, nil
 	}
 	// Accumulate digits for message selection
-	if len(msg.Runes) == 1 && msg.Runes[0] >= '0' && msg.Runes[0] <= '9' {
+	runes := []rune(msg.Key().Text)
+	if len(runes) == 1 && runes[0] >= '0' && runes[0] <= '9' {
 		input := m.Game().QuickMsgInput()
 		if len(input) < 2 {
-			m.Game().AppendQuickMsgInput(msg.Runes[0])
+			m.Game().AppendQuickMsgInput(runes[0])
 		}
 	}
 	return true, nil
@@ -189,8 +193,8 @@ func HandleKeyPress(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
 	}
 
 	// General key handling
-	switch msg.Type {
-	case tea.KeyCtrlC, tea.KeyEsc:
+	switch msg.Key().Code {
+	case tea.KeyEsc:
 		return handleEscKey(m)
 	case tea.KeyUp:
 		m.Lobby().HandleUpKey(m.Phase())
@@ -198,11 +202,16 @@ func HandleKeyPress(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
 	case tea.KeyDown:
 		m.Lobby().HandleDownKey(m.Phase())
 		return false, nil
-	case tea.KeyRunes:
-		return handleRuneKey(m, msg)
 	case tea.KeyEnter:
 		cmd := handleEnter(m)
 		return false, cmd
+	default:
+		if msg.String() == "ctrl+c" {
+			return handleEscKey(m)
+		}
+		if msg.Key().Text != "" {
+			return handleRuneKey(m, msg)
+		}
 	}
 	return false, nil
 }
@@ -231,13 +240,14 @@ func handleEscKey(m model.Model) (bool, tea.Cmd) {
 }
 
 func handleRuneKey(m model.Model, msg tea.KeyMsg) (bool, tea.Cmd) {
-	if len(msg.Runes) == 0 {
+	runes := []rune(msg.Key().Text)
+	if len(runes) == 0 {
 		return false, nil
 	}
 
 	// Handle game toggles (only during bidding/playing)
 	if m.Phase() == model.PhaseBidding || m.Phase() == model.PhasePlaying {
-		switch msg.Runes[0] {
+		switch runes[0] {
 		case 'c', 'C':
 			m.Game().SetCardCounterEnabled(!m.Game().CardCounterEnabled())
 			return true, nil
