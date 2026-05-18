@@ -4,8 +4,12 @@
 !.vscode/launch.json
 .DS_Store
 
-# Environment file
+# Environment files
 .env
+.env.local
+
+# Secrets (Docker/K8s secret files, never commit)
+secrets/
 
 # Go test coverage output
 cover.out
