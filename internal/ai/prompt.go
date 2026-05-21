@@ -61,8 +61,27 @@ func buildPlayPrompt(gctx GameContext) string {
 
 	fmt.Fprintf(&sb, "当前状态:\n角色:%s\n手牌(%d张):%s\n", role, len(gctx.Hand), cardsToStr(gctx.Hand))
 
-	writePlayRecord(&sb, "上家", gctx.RecentPlays[0], gctx.IsLandlord, false)
-	writePlayRecord(&sb, "上上家", gctx.RecentPlays[1], gctx.IsLandlord, true)
+	recentPlays := []struct {
+		label  string
+		record PlayRecord
+	}{
+		{label: "上家", record: gctx.RecentPlays[0]},
+		{label: "上上家", record: gctx.RecentPlays[1]},
+	}
+	parts := make([]string, 0, len(recentPlays))
+	for _, rp := range recentPlays {
+		if rp.record.Played.IsEmpty() {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s(%s)出:%s",
+			rp.label,
+			roleLabel(rp.record, gctx.IsLandlord),
+			cardsToStr(rp.record.Played.Cards),
+		))
+	}
+	if len(parts) > 0 {
+		fmt.Fprintf(&sb, "%s\n", strings.Join(parts, "，"))
+	}
 
 	fmt.Fprintf(&sb, "上家（%s）剩余：%d张，下家（%s）剩余：%d张\n",
 		playerRoleLabel(gctx.PlayerRoles[0]), gctx.PlayerCounts[0],
@@ -83,7 +102,7 @@ func buildPlayPrompt(gctx GameContext) string {
 			remParts[i] = fmt.Sprintf("%s×%d", e.rank, e.count)
 		}
 		fmt.Fprintf(&sb, "底牌:%s\n", cardsToStr(gctx.BottomCards))
-		fmt.Fprintf(&sb, "记牌器:%s\n", strings.Join(remParts, " "))
+		fmt.Fprintf(&sb, "记牌器（其他玩家各点数剩余张数）:%s\n", strings.Join(remParts, " "))
 	}
 
 	var actionStr string
@@ -91,11 +110,7 @@ func buildPlayPrompt(gctx GameContext) string {
 	case gctx.MustPlay:
 		actionStr = "出什么?(自由出牌，禁止大牌/炸弹开局)"
 	case gctx.CanBeat:
-		if gctx.RecentPlays[0].Played.IsEmpty() {
-			actionStr = "出什么?(有牌可打，压过上家)"
-		} else {
-			actionStr = fmt.Sprintf("出什么?(有牌可打，压过上家 %s)", cardsToStr(gctx.RecentPlays[0].Played.Cards))
-		}
+		actionStr = buildCanBeatAction(gctx.RecentPlays[0])
 	default:
 		actionStr = "出什么?(无牌可打，只能pass)"
 	}
@@ -106,23 +121,12 @@ func buildPlayPrompt(gctx GameContext) string {
 	return sb.String()
 }
 
-func writePlayRecord(sb *strings.Builder, label string, record PlayRecord, selfIsLandlord, lineBreak bool) {
-	if record.Played.IsEmpty() {
-		return
+func buildCanBeatAction(play PlayRecord) string {
+	if play.Played.IsEmpty() {
+		return "出什么?(有牌可打，压过上家)"
 	}
 
-	format := "%s(%s)出:%s"
-	if lineBreak {
-		format += "\n"
-	} else {
-		format = " " + format
-	}
-
-	fmt.Fprintf(sb, format,
-		label,
-		roleLabel(record, selfIsLandlord),
-		cardsToStr(record.Played.Cards),
-	)
+	return fmt.Sprintf("出什么?(有牌可打，压过上家 %s)", cardsToStr(play.Played.Cards))
 }
 
 func buildBidBasicPrompt() string {
