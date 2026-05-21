@@ -1,7 +1,8 @@
 package session
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
@@ -59,8 +60,8 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 	// 对出的牌进行排序（从大到小），确保显示顺序正确
 	sortedCards := make([]card.Card, len(cards))
 	copy(sortedCards, cards)
-	sort.Slice(sortedCards, func(i, j int) bool {
-		return sortedCards[i].Rank > sortedCards[j].Rank
+	slices.SortFunc(sortedCards, func(a, b card.Card) int {
+		return cmp.Compare(b.Rank, a.Rank)
 	})
 
 	// 广播出牌信息

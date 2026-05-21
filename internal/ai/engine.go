@@ -2,11 +2,11 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	openai "github.com/openai/openai-go/v3"
@@ -21,10 +21,8 @@ const llmTimeout = 15 * time.Second
 
 // Engine LLM 决策引擎
 type Engine struct {
-	client    openai.Client
-	cfg       config.AIConfig
-	histories map[string]*History
-	mu        sync.Mutex
+	client openai.Client
+	cfg    config.AIConfig
 }
 
 // NewEngine 创建 LLM 引擎
@@ -33,25 +31,30 @@ func NewEngine(cfg config.AIConfig) *Engine {
 		option.WithBaseURL(cfg.BaseURL),
 		option.WithAPIKey(cfg.APIKey),
 	)
-	return &Engine{
-		client:    client,
-		cfg:       cfg,
-		histories: make(map[string]*History),
-	}
+	return &Engine{client: client, cfg: cfg}
 }
 
 // DecidePlay 决定出什么牌，返回 nil 表示 pass
-func (e *Engine) DecidePlay(ctx context.Context, botID, botName string, gctx GameContext) []card.Card {
+func (e *Engine) DecidePlay(ctx context.Context, botName string, gctx GameContext) []card.Card {
 	if !e.cfg.Enabled || e.cfg.APIKey == "" {
-		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.LastPlayed)
+		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
 	}
 
-	h := e.getHistory(botID)
+	// 无牌可打时直接 pass，不消耗 token
+	if !gctx.MustPlay && !gctx.CanBeat {
+		log.Printf("🤖 AI %s 无牌可打，直接 pass", botName)
+		return nil
+	}
+
 	userMsg := buildPlayPrompt(gctx)
+	msgs := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(buildBasicPrompt()),
+		openai.UserMessage(userMsg),
+	}
 
 	for attempt := 0; attempt < e.cfg.MaxRetries; attempt++ {
 		tctx, cancel := context.WithTimeout(ctx, llmTimeout)
-		raw, err := e.callLLM(tctx, h.BuildMessages(userMsg))
+		raw, err := e.callLLM(tctx, msgs)
 		cancel()
 
 		if err != nil {
@@ -61,7 +64,6 @@ func (e *Engine) DecidePlay(ctx context.Context, botID, botName string, gctx Gam
 
 		cards, err := e.validateResponse(raw, gctx)
 		if err == nil {
-			h.AddTurn(userMsg, raw)
 			if cards == nil {
 				log.Printf("🤖 AI %s 选择 pass", botName)
 			} else {
@@ -71,37 +73,44 @@ func (e *Engine) DecidePlay(ctx context.Context, botID, botName string, gctx Gam
 		}
 
 		log.Printf("🤖 LLM %s 输出校验失败 (attempt %d): %v, raw: %q", botName, attempt+1, err, raw)
-		userMsg += fmt.Sprintf("\n[错误:%s，只输出合法牌型的牌面，不要输出解释]", err.Error())
+		msgs[1] = openai.UserMessage(userMsg + fmt.Sprintf("\n[错误:%s，只输出合法牌型的牌面，不要输出解释]", err.Error()))
 	}
 
 	log.Printf("🤖 LLM 决策失败，使用本地兜底")
-	return rule.FindSmallestBeatingCards(gctx.Hand, gctx.LastPlayed)
+	return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
 }
 
-// DecideBid 决定是否叫地主（启发式规则，不消耗 LLM token）
-func (e *Engine) DecideBid(_ context.Context, _ string, hand []card.Card) bool {
-	return scoredBid(hand)
-}
-
-// ClearHistory 游戏结束后清除该 bot 的对话历史
-func (e *Engine) ClearHistory(botID string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	delete(e.histories, botID)
-}
-
-func (e *Engine) getHistory(botID string) *History {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if h, ok := e.histories[botID]; ok {
-		return h
+// DecideBid 决定是否叫地主
+func (e *Engine) DecideBid(ctx context.Context, botName string, hand []card.Card, prevBid *bool) bool {
+	if !e.cfg.Enabled || e.cfg.APIKey == "" {
+		return scoredBid(hand)
 	}
-	h := newHistory()
-	e.histories[botID] = h
-	return h
+
+	msgs := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(buildBidBasicPrompt()),
+		openai.UserMessage(buildBidPrompt(hand, prevBid)),
+	}
+
+	tctx, cancel := context.WithTimeout(ctx, llmTimeout)
+	raw, err := e.callLLM(tctx, msgs)
+	cancel()
+
+	if err != nil {
+		log.Printf("🤖 LLM %s 叫地主失败: %v，使用启发式兜底", botName, err)
+		return scoredBid(hand)
+	}
+
+	raw = strings.TrimSpace(raw)
+	bid := strings.EqualFold(raw, "true")
+	log.Printf("🤖 AI %s 叫地主: %v (raw: %q)", botName, bid, raw)
+	return bid
 }
 
 func (e *Engine) callLLM(ctx context.Context, msgs []openai.ChatCompletionMessageParamUnion) (string, error) {
+	if e.cfg.Debug {
+		e.logMessages(msgs)
+	}
+
 	resp, err := e.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Model:    e.cfg.Model,
 		Messages: msgs,
@@ -120,7 +129,35 @@ func (e *Engine) callLLM(ctx context.Context, msgs []openai.ChatCompletionMessag
 	if content == "" {
 		return "", errors.New("模型返回空内容（可能思考模式未完全关闭）")
 	}
+
+	if e.cfg.Debug {
+		log.Printf("🤖 [AI DEBUG] assistant: %s", content)
+	}
+
 	return content, nil
+}
+
+func (e *Engine) logMessages(msgs []openai.ChatCompletionMessageParamUnion) {
+	log.Printf("🤖 [AI DEBUG] ---- 请求开始（共 %d 条消息）----", len(msgs))
+	for i, m := range msgs {
+		// openai-go 的消息是联合类型，通过 JSON 序列化取出 role 和 content
+		type msgShape struct {
+			Role    string `json:"role"`
+			Content any    `json:"content"`
+		}
+		raw, _ := m.MarshalJSON()
+		var shape msgShape
+		if err := json.Unmarshal(raw, &shape); err != nil {
+			log.Printf("🤖 [AI DEBUG] [%d] (解析失败: %v)", i, err)
+			continue
+		}
+		// 跳过 LLM 的 system 部分日志输出
+		if shape.Role == "system" {
+			continue
+		}
+		log.Printf("🤖 [AI DEBUG] [%d] %s: %v", i, shape.Role, shape.Content)
+	}
+	log.Printf("🤖 [AI DEBUG] ---- 请求结束 ----")
 }
 
 // validateResponse 校验 LLM 输出是否合法可出
@@ -144,8 +181,8 @@ func (e *Engine) validateResponse(raw string, gctx GameContext) ([]card.Card, er
 		return nil, errors.New("非法牌型")
 	}
 
-	if !gctx.LastPlayed.IsEmpty() && !gctx.MustPlay {
-		if !rule.CanBeat(parsed, gctx.LastPlayed) {
+	if !gctx.RecentPlays[0].Played.IsEmpty() && !gctx.MustPlay {
+		if !rule.CanBeat(parsed, gctx.RecentPlays[0].Played) {
 			return nil, errors.New("无法压过上家")
 		}
 	}

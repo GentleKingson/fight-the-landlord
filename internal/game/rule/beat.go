@@ -2,7 +2,6 @@ package rule
 
 import (
 	"slices"
-	"sort"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 )
@@ -83,7 +82,7 @@ func findWinningStraight(analysis HandAnalysis, opponentHand ParsedHand) bool {
 			availableRanks = append(availableRanks, r)
 		}
 	}
-	sort.Slice(availableRanks, func(i, j int) bool { return availableRanks[i] < availableRanks[j] })
+	slices.Sort(availableRanks)
 
 	if len(availableRanks) < length {
 		return false

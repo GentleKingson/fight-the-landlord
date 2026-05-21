@@ -1,7 +1,8 @@
 package rule
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -364,7 +365,7 @@ func TestCanBeatWithHand(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// Sort the hand as it would be in the game, which might affect some logic.
-			sort.Slice(tc.playerHand, func(i, j int) bool { return tc.playerHand[i].Rank < tc.playerHand[j].Rank })
+			slices.SortFunc(tc.playerHand, func(a, b card.Card) int { return cmp.Compare(a.Rank, b.Rank) })
 
 			actual := CanBeatWithHand(tc.playerHand, tc.opponentHand)
 			assert.Equal(t, tc.expected, actual)

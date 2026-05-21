@@ -1,11 +1,12 @@
 package storage
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -307,7 +308,7 @@ func (lm *LeaderboardManager) GetPlayerRank(ctx context.Context, playerID string
 
 // SortByScore 按积分排序
 func SortByScore(entries []LeaderboardEntry) {
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Score > entries[j].Score
+	slices.SortFunc(entries, func(a, b LeaderboardEntry) int {
+		return cmp.Compare(b.Score, a.Score)
 	})
 }

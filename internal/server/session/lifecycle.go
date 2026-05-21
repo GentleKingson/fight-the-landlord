@@ -1,10 +1,11 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"log"
 	"math/rand/v2"
-	"sort"
+	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -50,8 +51,8 @@ func (gs *GameSession) deal() {
 
 	// 排序手牌
 	for _, p := range gs.players {
-		sort.Slice(p.Hand, func(i, j int) bool {
-			return p.Hand[i].Rank > p.Hand[j].Rank
+		slices.SortFunc(p.Hand, func(a, b card.Card) int {
+			return cmp.Compare(b.Rank, a.Rank)
 		})
 	}
 

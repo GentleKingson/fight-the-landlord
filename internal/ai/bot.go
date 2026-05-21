@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"maps"
 	"math/rand/v2"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/palemoky/fight-the-landlord/internal/client"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -42,15 +42,20 @@ type AIBotClient struct {
 }
 
 type botState struct {
-	mu             sync.RWMutex
-	hand           []card.Card
-	isLandlord     bool
-	cardCounts     map[string]int    // playerID → 剩余牌数
-	playerNames    map[string]string // playerID → name
-	orderedOthers  []string          // 除自己外按座位顺序的 playerID（2人）
-	lastPlayed     rule.ParsedHand
-	lastPlayerName string
-	seenCards      map[card.Rank]int
+	mu            sync.RWMutex
+	seat          int       // 本机器人的座位号（0-2）
+	seatPlayerIDs [3]string // seatPlayerIDs[i] = 座位 i 的 playerID
+	seatNames     [3]string // seatNames[i] = 座位 i 的玩家名
+	hand          []card.Card
+	isLandlord    bool
+	landlordID    string            // 地主的 playerID
+	cardCounts    map[string]int    // playerID → 剩余牌数
+	playerNames   map[string]string // playerID → name
+	orderedOthers []string          // 除自己外按座位顺序的 playerID（2人）
+	bottomCards   []card.Card
+	recentPlays   [2]PlayRecord // [0]=最近一次出牌, [1]=上上次出牌
+	prevBid       *bool         // 叫地主阶段上一个玩家的决策（nil=尚无）
+	cardCounter   *client.CardCounter
 }
 
 // NewAIBotClient 创建 AI 机器人客户端
@@ -63,7 +68,7 @@ func NewAIBotClient(engine *Engine) *AIBotClient {
 		state: botState{
 			cardCounts:  make(map[string]int),
 			playerNames: make(map[string]string),
-			seenCards:   make(map[card.Rank]int),
+			cardCounter: client.NewCardCounter(),
 		},
 	}
 }
@@ -113,6 +118,8 @@ func (b *AIBotClient) SendMessage(msg *protocol.Message) {
 		b.handleGameStart(msg)
 	case protocol.MsgDealCards:
 		b.handleDealCards(msg)
+	case protocol.MsgBidResult:
+		b.handleBidResult(msg)
 	case protocol.MsgLandlord:
 		b.handleLandlord(msg)
 	case protocol.MsgCardPlayed:
@@ -121,8 +128,6 @@ func (b *AIBotClient) SendMessage(msg *protocol.Message) {
 		go b.handleBidTurn(msg)
 	case protocol.MsgPlayTurn:
 		go b.handlePlayTurn(msg)
-	case protocol.MsgGameOver:
-		b.engine.ClearHistory(b.id)
 	}
 }
 
@@ -145,14 +150,19 @@ func (b *AIBotClient) handleGameStart(msg *protocol.Message) {
 	for _, p := range payload.Players {
 		b.state.playerNames[p.ID] = p.Name
 		b.state.cardCounts[p.ID] = 17
-		if p.ID != b.id {
+		b.state.seatPlayerIDs[p.Seat] = p.ID
+		b.state.seatNames[p.Seat] = p.Name
+		if p.ID == b.id {
+			b.state.seat = p.Seat
+		} else {
 			b.state.orderedOthers = append(b.state.orderedOthers, p.ID)
 		}
 	}
-	b.state.seenCards = make(map[card.Rank]int)
-	b.state.lastPlayed = rule.ParsedHand{}
-	b.state.lastPlayerName = ""
+	b.state.cardCounter.Reset()
+	b.state.recentPlays = [2]PlayRecord{}
+	b.state.prevBid = nil
 	b.state.isLandlord = false
+	b.state.landlordID = ""
 }
 
 func (b *AIBotClient) handleDealCards(msg *protocol.Message) {
@@ -163,9 +173,24 @@ func (b *AIBotClient) handleDealCards(msg *protocol.Message) {
 	}
 
 	b.state.mu.Lock()
-	defer b.state.mu.Unlock()
 	b.state.hand = convert.InfosToCards(payload.Cards)
 	log.Printf("🤖 %s 收到手牌 %d 张", b.name, len(b.state.hand))
+	b.state.mu.Unlock()
+}
+
+func (b *AIBotClient) handleBidResult(msg *protocol.Message) {
+	payload, err := codec.ParsePayload[protocol.BidResultPayload](msg)
+	if err != nil {
+		log.Printf("🤖 handleBidResult decode error: %v", err)
+		return
+	}
+	if payload.PlayerID == b.id {
+		return // 自己的叫地主结果不需要记录为"上家"
+	}
+	b.state.mu.Lock()
+	defer b.state.mu.Unlock()
+	bid := payload.Bid
+	b.state.prevBid = &bid
 }
 
 func (b *AIBotClient) handleLandlord(msg *protocol.Message) {
@@ -176,16 +201,18 @@ func (b *AIBotClient) handleLandlord(msg *protocol.Message) {
 	}
 
 	b.state.mu.Lock()
-	defer b.state.mu.Unlock()
 
 	if payload.PlayerID == b.id {
 		b.state.isLandlord = true
-		// 地主手牌已通过 MsgDealCards 更新（session 会单独发送含底牌的手牌）
 	}
+	b.state.landlordID = payload.PlayerID
 	// 更新地主的牌数（+3 底牌）
 	if _, ok := b.state.cardCounts[payload.PlayerID]; ok {
 		b.state.cardCounts[payload.PlayerID] += 3
 	}
+	b.state.bottomCards = convert.InfosToCards(payload.BottomCards)
+
+	b.state.mu.Unlock()
 }
 
 func (b *AIBotClient) handleCardPlayed(msg *protocol.Message) {
@@ -208,16 +235,17 @@ func (b *AIBotClient) handleCardPlayed(msg *protocol.Message) {
 		b.state.hand = removeCards(b.state.hand, played)
 	}
 
-	// 更新已出牌记录
-	for _, c := range played {
-		b.state.seenCards[c.Rank]++
-	}
+	b.state.cardCounter.DeductCards(played)
 
-	// 更新上家出牌
+	// 更新最近两次出牌（shift：旧的[0]→[1]，新的→[0]）
 	parsed, parseErr := rule.ParseHand(played)
 	if parseErr == nil && parsed.Type != rule.Invalid {
-		b.state.lastPlayed = parsed
-		b.state.lastPlayerName = payload.PlayerName
+		b.state.recentPlays[1] = b.state.recentPlays[0]
+		b.state.recentPlays[0] = PlayRecord{
+			Played:     parsed,
+			PlayerName: payload.PlayerName,
+			IsLandlord: payload.PlayerID == b.state.landlordID,
+		}
 	}
 }
 
@@ -236,9 +264,10 @@ func (b *AIBotClient) handleBidTurn(msg *protocol.Message) {
 	b.state.mu.RLock()
 	hand := make([]card.Card, len(b.state.hand))
 	copy(hand, b.state.hand)
+	prevBid := b.state.prevBid
 	b.state.mu.RUnlock()
 
-	bid := b.engine.DecideBid(context.Background(), b.id, hand)
+	bid := b.engine.DecideBid(context.Background(), b.name, hand, prevBid)
 
 	b.sessionMu.RLock()
 	sess := b.session
@@ -279,7 +308,7 @@ func (b *AIBotClient) handlePlayTurn(msg *protocol.Message) {
 		return
 	}
 
-	cards := b.engine.DecidePlay(context.Background(), b.id, b.name, gctx)
+	cards := b.engine.DecidePlay(context.Background(), b.name, gctx)
 
 	var playErr error
 	if cards == nil {
@@ -298,34 +327,30 @@ func (b *AIBotClient) buildGameContext(mustPlay, canBeat bool) GameContext {
 	hand := make([]card.Card, len(b.state.hand))
 	copy(hand, b.state.hand)
 
-	seenCards := make(map[card.Rank]int, len(b.state.seenCards))
-	maps.Copy(seenCards, b.state.seenCards)
-
 	var counts [2]int
+	var roles [2]bool
 	if len(b.state.orderedOthers) > 0 {
-		counts[0] = b.state.cardCounts[b.state.orderedOthers[0]]
+		pid := b.state.orderedOthers[0]
+		counts[0] = b.state.cardCounts[pid]
+		roles[0] = pid == b.state.landlordID
 	}
 	if len(b.state.orderedOthers) > 1 {
-		counts[1] = b.state.cardCounts[b.state.orderedOthers[1]]
-	}
-
-	lastPlayed := b.state.lastPlayed
-	lastPlayerName := b.state.lastPlayerName
-	if mustPlay {
-		lastPlayed = rule.ParsedHand{}
-		lastPlayerName = ""
+		pid := b.state.orderedOthers[1]
+		counts[1] = b.state.cardCounts[pid]
+		roles[1] = pid == b.state.landlordID
 	}
 
 	return GameContext{
 		BotID:          b.id,
 		IsLandlord:     b.state.isLandlord,
 		Hand:           hand,
-		LastPlayed:     lastPlayed,
-		LastPlayerName: lastPlayerName,
+		BottomCards:    b.state.bottomCards,
+		RecentPlays:    b.state.recentPlays,
 		MustPlay:       mustPlay,
 		CanBeat:        canBeat,
 		PlayerCounts:   counts,
-		SeenCards:      seenCards,
+		PlayerRoles:    roles,
+		RemainingCards: b.state.cardCounter.GetRemaining(),
 	}
 }
 

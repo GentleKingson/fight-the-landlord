@@ -1,10 +1,12 @@
 package session
 
 import (
+	"cmp"
 	"math/rand/v2"
-	"sort"
+	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
+	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
@@ -67,8 +69,8 @@ func (gs *GameSession) setLandlord(idx int) {
 
 	// 底牌给地主
 	landlord.Hand = append(landlord.Hand, gs.bottomCards...)
-	sort.Slice(landlord.Hand, func(i, j int) bool {
-		return landlord.Hand[i].Rank > landlord.Hand[j].Rank
+	slices.SortFunc(landlord.Hand, func(a, b card.Card) int {
+		return cmp.Compare(b.Rank, a.Rank)
 	})
 
 	// 更新房间玩家状态

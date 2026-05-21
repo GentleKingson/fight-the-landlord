@@ -1,7 +1,8 @@
 package client
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -42,8 +43,8 @@ func NewGameState() *GameState {
 
 // SortHand 将玩家手牌按点数降序排序
 func (gs *GameState) SortHand() {
-	sort.Slice(gs.Hand, func(i, j int) bool {
-		return gs.Hand[i].Rank > gs.Hand[j].Rank
+	slices.SortFunc(gs.Hand, func(a, b card.Card) int {
+		return cmp.Compare(b.Rank, a.Rank)
 	})
 }
 

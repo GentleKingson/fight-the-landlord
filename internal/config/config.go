@@ -51,6 +51,7 @@ type AIConfig struct {
 	Model          string `yaml:"model"`
 	BotFillTimeout int    `yaml:"bot_fill_timeout"` // 等待玩家加入的超时秒数
 	MaxRetries     int    `yaml:"max_retries"`      // LLM 校验失败重试次数
+	Debug          bool   `yaml:"debug"`            // 打印完整的 LLM 请求与响应
 }
 
 // ServerConfig WebSocket 服务器配置
@@ -239,6 +240,9 @@ func loadFromEnv(cfg *Config) {
 	getEnvStr("AI_MODEL", &cfg.AI.Model)
 	getEnvInt("AI_BOT_FILL_TIMEOUT", &cfg.AI.BotFillTimeout)
 	getEnvInt("AI_MAX_RETRIES", &cfg.AI.MaxRetries)
+	if v := os.Getenv("AI_DEBUG"); v == "true" || v == "1" {
+		cfg.AI.Debug = true
+	}
 
 	// Security
 	getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins)
