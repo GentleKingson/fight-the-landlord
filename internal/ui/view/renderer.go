@@ -284,38 +284,42 @@ func renderMiddleSection(state *gameClient.GameState, myPlayerID string) string 
 
 	lastPlayView := "(等待出牌...)"
 	if len(state.LastPlayed) > 0 {
-		var cardStrs []string
-		for i := len(state.LastPlayed) - 1; i >= 0; i-- {
-			c := state.LastPlayed[i]
-			style := common.BlackStyle
-			if c.Color == card.Red {
-				style = common.RedStyle
-			}
-			cardStrs = append(cardStrs, style.Render(c.Rank.String()))
-		}
-
-		// 上家角色图标
-		icon := common.FarmerIcon
-		for _, p := range state.Players {
-			if p.ID == state.LastPlayedBy {
-				if p.IsLandlord {
-					icon = common.LandlordIcon
-				}
-				if p.IsBot {
-					icon = "🤖"
-				}
-				break
-			}
-		}
-
-		header := fmt.Sprintf("%s %s: %s", icon, state.LastPlayedName, state.LastHandType)
-		lastPlayView = fmt.Sprintf("%s\n%s", header, strings.Join(cardStrs, " "))
+		lastPlayView = renderLastPlayed(state)
 	}
 	// 宽度随出牌长度自适应：以原宽度为下限，20 张牌（点数最长 "10"）的极限宽度为上限
 	boxWidth := min(max(25, lipgloss.Width(lastPlayView)), 62)
 	parts = append(parts, common.BoxStyle.Width(boxWidth).Render(lastPlayView))
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
+func renderLastPlayed(state *gameClient.GameState) string {
+	var cardStrs []string
+	for i := len(state.LastPlayed) - 1; i >= 0; i-- {
+		c := state.LastPlayed[i]
+		style := common.BlackStyle
+		if c.Color == card.Red {
+			style = common.RedStyle
+		}
+		cardStrs = append(cardStrs, style.Render(c.Rank.String()))
+	}
+
+	// 上家角色图标
+	icon := common.FarmerIcon
+	for _, p := range state.Players {
+		if p.ID == state.LastPlayedBy {
+			if p.IsLandlord {
+				icon = common.LandlordIcon
+			}
+			if p.IsBot {
+				icon = "🤖"
+			}
+			break
+		}
+	}
+
+	header := fmt.Sprintf("%s %s: %s", icon, state.LastPlayedName, state.LastHandType)
+	return fmt.Sprintf("%s\n%s", header, strings.Join(cardStrs, " "))
 }
 
 func renderPlayerHand(hand []card.Card, isLandlord bool) string {
