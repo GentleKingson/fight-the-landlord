@@ -235,8 +235,10 @@ func encodeServerGameMessages(msgType protocol.MessageType, payload any) (proto.
 	case protocol.MsgBidTurn:
 		p := payload.(protocol.BidTurnPayload)
 		return &pb.BidTurnPayload{
-			PlayerId: p.PlayerID,
-			Timeout:  int64(p.Timeout),
+			PlayerId:   p.PlayerID,
+			Timeout:    int64(p.Timeout),
+			IsGrab:     p.IsGrab,
+			Multiplier: int64(p.Multiplier),
 		}, true
 	case protocol.MsgBidResult:
 		p := payload.(protocol.BidResultPayload)
@@ -244,6 +246,8 @@ func encodeServerGameMessages(msgType protocol.MessageType, payload any) (proto.
 			PlayerId:   p.PlayerID,
 			PlayerName: p.PlayerName,
 			Bid:        p.Bid,
+			IsGrab:     p.IsGrab,
+			Multiplier: int64(p.Multiplier),
 		}, true
 	case protocol.MsgLandlord:
 		p := payload.(protocol.LandlordPayload)
@@ -251,6 +255,7 @@ func encodeServerGameMessages(msgType protocol.MessageType, payload any) (proto.
 			PlayerId:    p.PlayerID,
 			PlayerName:  p.PlayerName,
 			BottomCards: convert.CardsToProto(p.BottomCards),
+			Multiplier:  int64(p.Multiplier),
 		}, true
 	case protocol.MsgPlayTurn:
 		p := payload.(protocol.PlayTurnPayload)
@@ -282,6 +287,8 @@ func encodeServerGameMessages(msgType protocol.MessageType, payload any) (proto.
 			WinnerName:  p.WinnerName,
 			IsLandlord:  p.IsLandlord,
 			PlayerHands: convert.PlayerHandsToProto(p.PlayerHands),
+			Multiplier:  int64(p.Multiplier),
+			Scores:      convert.PlayerScoresToProto(p.Scores),
 		}, true
 	}
 	return nil, false

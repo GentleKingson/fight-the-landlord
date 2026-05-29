@@ -50,6 +50,7 @@ func (r *Room) GetPlayerInfo(playerID string) protocol.PlayerInfo {
 		Ready:      player.Ready,
 		IsLandlord: player.IsLandlord,
 		CardsCount: cardsCount,
+		IsBot:      player.Client.IsBot(),
 	}
 }
 

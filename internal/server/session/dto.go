@@ -80,9 +80,14 @@ func (gs *GameSession) GetCurrentPlayerForSerialization() int {
 	return gs.currentPlayer
 }
 
-// GetHighestBidderForSerialization 获取highestBidder用于序列化
+// GetCurrentBidderForSerialization 获取当前叫/抢地主玩家索引
+func (gs *GameSession) GetCurrentBidderForSerialization() int {
+	return gs.currentBidder
+}
+
+// GetHighestBidderForSerialization 获取当前暂定地主索引用于序列化
 func (gs *GameSession) GetHighestBidderForSerialization() int {
-	return gs.highestBidder
+	return gs.landlordCandidate
 }
 
 // GetPlayersForSerialization 获取players用于序列化

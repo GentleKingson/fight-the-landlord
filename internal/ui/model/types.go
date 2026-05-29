@@ -4,9 +4,9 @@ package model
 import (
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/timer"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/timer"
+	tea "charm.land/bubbletea/v2"
 
 	gameClient "github.com/palemoky/fight-the-landlord/internal/client"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"

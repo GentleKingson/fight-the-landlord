@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	gameClient "github.com/palemoky/fight-the-landlord/internal/client"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
@@ -62,6 +62,8 @@ func WaitingView(m model.Model) string {
 		meStr := ""
 		if p.ID == m.PlayerID() {
 			meStr = " (你)"
+		} else if p.IsBot {
+			meStr = " (AI)"
 		}
 		fmt.Fprintf(&playerList, "  %s %s%s\n", readyStr, p.Name, meStr)
 	}
@@ -163,12 +165,27 @@ func GameOverView(m model.Model) string {
 		}
 	}
 
-	msg := fmt.Sprintf("🎮 游戏结束!\n\n🏆 %s (%s) 获胜!\n\n按 ESC 返回大厅", winnerName, winnerType)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "🎮 游戏结束!\n\n🏆 %s (%s) 获胜!\n", winnerName, winnerType)
+	if state.FinalMultiplier > 0 {
+		fmt.Fprintf(&sb, "\n💥 本局倍数: ×%d\n", state.FinalMultiplier)
+	}
+	if len(state.Scores) > 0 {
+		sb.WriteString("\n── 本局得分 ──\n")
+		for _, s := range state.Scores {
+			role := "农民"
+			if s.IsLandlord {
+				role = "地主"
+			}
+			fmt.Fprintf(&sb, "%s (%s): %+d\n", s.PlayerName, role, s.Score)
+		}
+	}
+	sb.WriteString("\n按 ESC 返回大厅")
 
 	return lipgloss.NewStyle().
 		Width(width).
 		Align(lipgloss.Center).
-		Render(msg)
+		Render(sb.String())
 }
 
 // --- Helper rendering functions ---
@@ -252,6 +269,9 @@ func renderMiddleSection(state *gameClient.GameState, myPlayerID string) string 
 		if p.IsLandlord {
 			icon = common.LandlordIcon
 		}
+		if p.IsBot {
+			icon = "🤖"
+		}
 
 		nameStyle := lipgloss.NewStyle()
 		if state.CurrentTurn == p.ID {
@@ -264,20 +284,42 @@ func renderMiddleSection(state *gameClient.GameState, myPlayerID string) string 
 
 	lastPlayView := "(等待出牌...)"
 	if len(state.LastPlayed) > 0 {
-		var cardStrs []string
-		for i := len(state.LastPlayed) - 1; i >= 0; i-- {
-			c := state.LastPlayed[i]
-			style := common.BlackStyle
-			if c.Color == card.Red {
-				style = common.RedStyle
-			}
-			cardStrs = append(cardStrs, style.Render(c.Rank.String()))
-		}
-		lastPlayView = fmt.Sprintf("%s: %s\n%s", state.LastPlayedName, strings.Join(cardStrs, " "), state.LastHandType)
+		lastPlayView = renderLastPlayed(state)
 	}
-	parts = append(parts, common.BoxStyle.Width(25).Render(lastPlayView))
+	// 宽度随出牌长度自适应：以原宽度为下限，20 张牌（点数最长 "10"）的极限宽度为上限
+	boxWidth := min(max(25, lipgloss.Width(lastPlayView)), 62)
+	parts = append(parts, common.BoxStyle.Width(boxWidth).Render(lastPlayView))
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
+func renderLastPlayed(state *gameClient.GameState) string {
+	var cardStrs []string
+	for i := len(state.LastPlayed) - 1; i >= 0; i-- {
+		c := state.LastPlayed[i]
+		style := common.BlackStyle
+		if c.Color == card.Red {
+			style = common.RedStyle
+		}
+		cardStrs = append(cardStrs, style.Render(c.Rank.String()))
+	}
+
+	// 上家角色图标
+	icon := common.FarmerIcon
+	for _, p := range state.Players {
+		if p.ID == state.LastPlayedBy {
+			if p.IsLandlord {
+				icon = common.LandlordIcon
+			}
+			if p.IsBot {
+				icon = "🤖"
+			}
+			break
+		}
+	}
+
+	header := fmt.Sprintf("%s %s: %s", icon, state.LastPlayedName, state.LastHandType)
+	return fmt.Sprintf("%s\n%s", header, strings.Join(cardStrs, " "))
 }
 
 func renderPlayerHand(hand []card.Card, isLandlord bool) string {
@@ -323,27 +365,35 @@ func renderPrompt(m model.Model, game model.GameAccessor, state *gameClient.Game
 
 	switch phase {
 	case model.PhaseBidding:
+		action := "叫地主"
+		if state.IsGrabTurn {
+			action = fmt.Sprintf("抢地主 (当前倍数 ×%d)", state.Multiplier)
+		}
 		if game.BidTurn() == myPlayerID {
-			fmt.Fprintf(&sb, "⏳ %s | 轮到你叫地主!\n", timerView)
+			fmt.Fprintf(&sb, "⏳ %s | 轮到你%s!\n", timerView, action)
 		} else {
 			for _, p := range state.Players {
 				if p.ID == game.BidTurn() {
-					fmt.Fprintf(&sb, "等待 %s 叫地主...\n", p.Name)
+					fmt.Fprintf(&sb, "等待 %s %s...\n", p.Name, action)
 					break
 				}
 			}
 		}
 	case model.PhasePlaying:
+		multInfo := ""
+		if state.Multiplier > 0 {
+			multInfo = fmt.Sprintf(" | 💥×%d", state.Multiplier)
+		}
 		if state.CurrentTurn == myPlayerID {
 			icon := common.FarmerIcon
 			if state.IsLandlord {
 				icon = common.LandlordIcon
 			}
-			fmt.Fprintf(&sb, "⏳ %s | 轮到你出牌! %s\n", timerView, icon)
+			fmt.Fprintf(&sb, "⏳ %s | 轮到你出牌! %s%s\n", timerView, icon, multInfo)
 		} else {
 			for _, p := range state.Players {
 				if p.ID == state.CurrentTurn {
-					fmt.Fprintf(&sb, "等待 %s 出牌...\n", p.Name)
+					fmt.Fprintf(&sb, "⏳ %s | 等待 %s 出牌...%s\n", timerView, p.Name, multInfo)
 					break
 				}
 			}

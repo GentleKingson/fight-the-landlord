@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/timer"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/timer"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/sound"
@@ -71,7 +71,7 @@ func NewOnlineModel(serverURL string) *OnlineModel {
 	ti := textinput.New()
 	ti.Placeholder = "输入选项 (1-6) 或房间号"
 	ti.CharLimit = 20
-	ti.Width = 30
+	ti.SetWidth(30)
 	ti.Focus()
 
 	c := transport.NewClient(serverURL)
@@ -330,9 +330,9 @@ func (m *OnlineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the model.
-func (m *OnlineModel) View() string {
+func (m *OnlineModel) View() tea.View {
 	if m.width == 0 {
-		return "Loading..."
+		return tea.NewView("Loading...")
 	}
 
 	var content string
@@ -351,7 +351,10 @@ func (m *OnlineModel) View() string {
 		}
 	}
 
-	return common.DocStyle.Render(content)
+	return tea.View{
+		Content:   common.DocStyle.Render(content),
+		AltScreen: true,
+	}
 }
 
 // SetViewRenderer sets the view rendering function.

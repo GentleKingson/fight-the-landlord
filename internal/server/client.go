@@ -229,3 +229,4 @@ func (c *Client) GetRoom() string {
 // Interface implementations for types.ClientInterface
 func (c *Client) GetID() string   { return c.ID }
 func (c *Client) GetName() string { return c.Name }
+func (c *Client) IsBot() bool     { return false }

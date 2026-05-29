@@ -263,8 +263,10 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 	t.Run("BidTurn", func(t *testing.T) {
 		t.Parallel()
 		original := protocol.BidTurnPayload{
-			PlayerID: "p1",
-			Timeout:  30,
+			PlayerID:   "p1",
+			Timeout:    30,
+			IsGrab:     true,
+			Multiplier: 2,
 		}
 
 		data, err := EncodePayload(protocol.MsgBidTurn, original)
@@ -276,6 +278,8 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 
 		assert.Equal(t, original.PlayerID, result.PlayerID)
 		assert.Equal(t, original.Timeout, result.Timeout)
+		assert.True(t, result.IsGrab)
+		assert.Equal(t, 2, result.Multiplier)
 	})
 
 	t.Run("BidResult", func(t *testing.T) {
@@ -284,6 +288,8 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 			PlayerID:   "p1",
 			PlayerName: "Player1",
 			Bid:        true,
+			IsGrab:     true,
+			Multiplier: 4,
 		}
 
 		data, err := EncodePayload(protocol.MsgBidResult, original)
@@ -295,6 +301,8 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 
 		assert.Equal(t, original.PlayerID, result.PlayerID)
 		assert.True(t, result.Bid)
+		assert.True(t, result.IsGrab)
+		assert.Equal(t, 4, result.Multiplier)
 	})
 
 	t.Run("Landlord", func(t *testing.T) {
@@ -303,6 +311,7 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 			PlayerID:    "p1",
 			PlayerName:  "Player1",
 			BottomCards: []protocol.CardInfo{{Suit: 0, Rank: 3, Color: 0}},
+			Multiplier:  3,
 		}
 
 		data, err := EncodePayload(protocol.MsgLandlord, original)
@@ -314,6 +323,7 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 
 		assert.Equal(t, original.PlayerID, result.PlayerID)
 		assert.Len(t, result.BottomCards, 1)
+		assert.Equal(t, 3, result.Multiplier)
 	})
 
 	t.Run("PlayTurn", func(t *testing.T) {
@@ -385,6 +395,11 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 			PlayerHands: []protocol.PlayerHand{
 				{PlayerID: "p1", PlayerName: "Player1", Cards: []protocol.CardInfo{}},
 			},
+			Multiplier: 8,
+			Scores: []protocol.PlayerScore{
+				{PlayerID: "p1", PlayerName: "Player1", IsLandlord: true, Score: 16},
+				{PlayerID: "p2", PlayerName: "Player2", IsLandlord: false, Score: -8},
+			},
 		}
 
 		data, err := EncodePayload(protocol.MsgGameOver, original)
@@ -397,6 +412,11 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 		assert.Equal(t, original.WinnerID, result.WinnerID)
 		assert.True(t, result.IsLandlord)
 		assert.Len(t, result.PlayerHands, 1)
+		assert.Equal(t, 8, result.Multiplier)
+		require.Len(t, result.Scores, 2)
+		assert.Equal(t, 16, result.Scores[0].Score)
+		assert.True(t, result.Scores[0].IsLandlord)
+		assert.Equal(t, -8, result.Scores[1].Score)
 	})
 }
 

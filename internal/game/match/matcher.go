@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/palemoky/fight-the-landlord/internal/ai"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -24,8 +25,11 @@ type Matcher struct {
 	redisStore      *storage.RedisStore
 	leaderboard     *storage.LeaderboardManager
 	gameConfig      config.GameConfig
+	aiEngine        ai.DecisionEngine
+	aiCfg           config.AIConfig
 	registerSession SessionRegistrationFunc
 	queue           []types.ClientInterface
+	botFillTimer    *time.Timer
 	mu              sync.Mutex
 }
 
@@ -35,6 +39,8 @@ type MatcherDeps struct {
 	RedisStore      *storage.RedisStore
 	Leaderboard     *storage.LeaderboardManager
 	GameConfig      config.GameConfig
+	AIEngine        ai.DecisionEngine
+	AIConfig        config.AIConfig
 	RegisterSession SessionRegistrationFunc
 }
 
@@ -45,6 +51,8 @@ func NewMatcher(deps MatcherDeps) *Matcher {
 		redisStore:      deps.RedisStore,
 		leaderboard:     deps.Leaderboard,
 		gameConfig:      deps.GameConfig,
+		aiEngine:        deps.AIEngine,
+		aiCfg:           deps.AIConfig,
 		registerSession: deps.RegisterSession,
 		queue:           make([]types.ClientInterface, 0),
 	}
@@ -65,8 +73,15 @@ func (m *Matcher) AddToQueue(client types.ClientInterface) {
 	m.queue = append(m.queue, client)
 	log.Printf("🔍 玩家 %s 加入匹配队列，当前队列长度: %d", client.GetName(), len(m.queue))
 
-	// 检查是否可以匹配
-	m.tryMatch()
+	switch {
+	case len(m.queue) >= 3:
+		m.cancelBotFillTimer()
+		m.tryMatch()
+	case m.aiCfg.Enabled && m.aiEngine != nil && m.botFillTimer == nil:
+		m.startBotFillTimer()
+	default:
+		m.tryMatch()
+	}
 }
 
 // RemoveFromQueue 从匹配队列移除
@@ -78,8 +93,37 @@ func (m *Matcher) RemoveFromQueue(client types.ClientInterface) {
 		if c.GetID() == client.GetID() {
 			m.queue = append(m.queue[:i], m.queue[i+1:]...)
 			log.Printf("🔍 玩家 %s 离开匹配队列", client.GetName())
+			if len(m.queue) == 0 {
+				m.cancelBotFillTimer()
+			}
 			return
 		}
+	}
+}
+
+func (m *Matcher) startBotFillTimer() {
+	timeout := time.Duration(m.aiCfg.BotFillTimeout) * time.Second
+	log.Printf("🤖 等待玩家加入（%ds 后由 AI 填充剩余座位）", m.aiCfg.BotFillTimeout)
+	m.botFillTimer = time.AfterFunc(timeout, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.botFillTimer = nil
+		if len(m.queue) == 0 {
+			return
+		}
+		for len(m.queue) < 3 {
+			bot := ai.NewAIBotClient(m.aiEngine)
+			m.queue = append(m.queue, bot)
+			log.Printf("🤖 AI 机器人 %s 加入匹配队列", bot.GetName())
+		}
+		m.tryMatch()
+	})
+}
+
+func (m *Matcher) cancelBotFillTimer() {
+	if m.botFillTimer != nil {
+		m.botFillTimer.Stop()
+		m.botFillTimer = nil
 	}
 }
 
@@ -151,6 +195,13 @@ func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
 
 	// 创建游戏会话并开始
 	gs := session.NewGameSession(room, m.leaderboard, m.gameConfig)
+
+	// 将 session 注入 AI 机器人（AIBotClient 通过 SessionInterface 回调出牌）
+	for _, client := range players {
+		if bot, ok := client.(*ai.AIBotClient); ok {
+			bot.SetSession(gs)
+		}
+	}
 
 	// 注册游戏会话
 	if m.registerSession != nil {

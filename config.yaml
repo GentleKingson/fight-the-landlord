@@ -52,6 +52,18 @@ security:
     # 触发限流后的冷却时间（秒）
     cooldown: 5
 
+ai:
+  # 是否启用 AI 机器人（冷启动填充）
+  enabled: true
+  # 玩家等待多少秒后由 AI 填充剩余座位
+  bot_fill_timeout: 15
+
+  # --- DouZero 引擎 ---
+  # 启用后使用 DouZero 神经网络引擎；关闭时使用内置规则启发式机器人（无外部依赖）
+  douzero_enabled: true
+  # Python DouZero 服务地址
+  douzero_url: "http://localhost:2021"
+
 # 通知配置（可选）
 notification:
   # 小米音箱通知配置

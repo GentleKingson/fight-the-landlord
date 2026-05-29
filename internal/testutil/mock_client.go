@@ -40,6 +40,8 @@ func (m *MockClient) Close() {
 	m.Called()
 }
 
+func (m *MockClient) IsBot() bool { return false }
+
 // SimpleClient 简单的 mock 客户端，不使用 testify（用于不需要断言的测试）
 type SimpleClient struct {
 	ID       string
@@ -63,6 +65,7 @@ func (m *SimpleClient) GetRoom() string                   { return m.RoomCode }
 func (m *SimpleClient) SetRoom(code string)               { m.RoomCode = code }
 func (m *SimpleClient) SendMessage(msg *protocol.Message) { m.Messages = append(m.Messages, msg) }
 func (m *SimpleClient) Close()                            {}
+func (m *SimpleClient) IsBot() bool                       { return false }
 
 // SentMessages 返回已发送的消息列表（用于测试断言）
 func (m *SimpleClient) SentMessages() []*protocol.Message {

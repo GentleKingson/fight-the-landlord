@@ -374,8 +374,10 @@ func decodeBiddingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.BidTurnPayload) = protocol.BidTurnPayload{
-			PlayerID: pbMsg.PlayerId,
-			Timeout:  int(pbMsg.Timeout),
+			PlayerID:   pbMsg.PlayerId,
+			Timeout:    int(pbMsg.Timeout),
+			IsGrab:     pbMsg.IsGrab,
+			Multiplier: int(pbMsg.Multiplier),
 		}
 		return true, nil
 	case protocol.MsgBidResult:
@@ -387,6 +389,8 @@ func decodeBiddingMessages(msgType protocol.MessageType, data []byte, target any
 			PlayerID:   pbMsg.PlayerId,
 			PlayerName: pbMsg.PlayerName,
 			Bid:        pbMsg.Bid,
+			IsGrab:     pbMsg.IsGrab,
+			Multiplier: int(pbMsg.Multiplier),
 		}
 		return true, nil
 	case protocol.MsgLandlord:
@@ -398,6 +402,7 @@ func decodeBiddingMessages(msgType protocol.MessageType, data []byte, target any
 			PlayerID:    pbMsg.PlayerId,
 			PlayerName:  pbMsg.PlayerName,
 			BottomCards: convert.ProtoToCards(pbMsg.BottomCards),
+			Multiplier:  int(pbMsg.Multiplier),
 		}
 		return true, nil
 	}
@@ -452,6 +457,8 @@ func decodePlayingMessages(msgType protocol.MessageType, data []byte, target any
 			WinnerName:  pbMsg.WinnerName,
 			IsLandlord:  pbMsg.IsLandlord,
 			PlayerHands: convert.ProtoToPlayerHands(pbMsg.PlayerHands),
+			Multiplier:  int(pbMsg.Multiplier),
+			Scores:      convert.ProtoToPlayerScores(pbMsg.Scores),
 		}
 		return true, nil
 	}

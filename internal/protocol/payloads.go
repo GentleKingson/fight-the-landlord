@@ -132,15 +132,19 @@ type DealCardsPayload struct {
 
 // BidTurnPayload 轮到叫地主通知
 type BidTurnPayload struct {
-	PlayerID string `json:"player_id"`
-	Timeout  int    `json:"timeout"` // 超时时间（秒）
+	PlayerID   string `json:"player_id"`
+	Timeout    int    `json:"timeout"`    // 超时时间（秒）
+	IsGrab     bool   `json:"is_grab"`    // true=抢地主阶段, false=叫地主阶段
+	Multiplier int    `json:"multiplier"` // 当前倍数
 }
 
 // BidResultPayload 叫地主结果通知
 type BidResultPayload struct {
 	PlayerID   string `json:"player_id"`
 	PlayerName string `json:"player_name"`
-	Bid        bool   `json:"bid"`
+	Bid        bool   `json:"bid"`        // 是否叫/抢
+	IsGrab     bool   `json:"is_grab"`    // 该决策是否处于抢地主阶段
+	Multiplier int    `json:"multiplier"` // 决策后的当前倍数
 }
 
 // LandlordPayload 地主确定通知
@@ -148,6 +152,7 @@ type LandlordPayload struct {
 	PlayerID    string     `json:"player_id"`
 	PlayerName  string     `json:"player_name"`
 	BottomCards []CardInfo `json:"bottom_cards"` // 底牌
+	Multiplier  int        `json:"multiplier"`   // 底倍（叫抢结束后的倍数）
 }
 
 // PlayTurnPayload 轮到出牌通知
@@ -175,10 +180,12 @@ type PlayerPassPayload struct {
 
 // GameOverPayload 游戏结束通知
 type GameOverPayload struct {
-	WinnerID    string       `json:"winner_id"`
-	WinnerName  string       `json:"winner_name"`
-	IsLandlord  bool         `json:"is_landlord"`  // 获胜者是否是地主
-	PlayerHands []PlayerHand `json:"player_hands"` // 所有玩家剩余手牌
+	WinnerID    string        `json:"winner_id"`
+	WinnerName  string        `json:"winner_name"`
+	IsLandlord  bool          `json:"is_landlord"`  // 获胜者是否是地主
+	PlayerHands []PlayerHand  `json:"player_hands"` // 所有玩家剩余手牌
+	Multiplier  int           `json:"multiplier"`   // 最终倍数
+	Scores      []PlayerScore `json:"scores"`       // 每位玩家本局得分
 }
 
 // PlayerHand 玩家手牌信息（用于游戏结束展示）
@@ -186,6 +193,14 @@ type PlayerHand struct {
 	PlayerID   string     `json:"player_id"`
 	PlayerName string     `json:"player_name"`
 	Cards      []CardInfo `json:"cards"`
+}
+
+// PlayerScore 玩家本局得分（用于游戏结束结算）
+type PlayerScore struct {
+	PlayerID   string `json:"player_id"`
+	PlayerName string `json:"player_name"`
+	IsLandlord bool   `json:"is_landlord"` // 是否是地主
+	Score      int    `json:"score"`       // 本局得分（输为负，赢为正）
 }
 
 // MaintenancePayload 维护模式通知
@@ -266,11 +281,12 @@ type ChatPayload struct {
 type PlayerInfo struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
-	Seat       int    `json:"seat"`        // 座位号 0-2
-	Ready      bool   `json:"ready"`       // 是否准备
-	IsLandlord bool   `json:"is_landlord"` // 是否是地主
-	CardsCount int    `json:"cards_count"` // 手牌数量
-	Online     bool   `json:"online"`      // 是否在线
+	Seat       int    `json:"seat"`             // 座位号 0-2
+	Ready      bool   `json:"ready"`            // 是否准备
+	IsLandlord bool   `json:"is_landlord"`      // 是否是地主
+	CardsCount int    `json:"cards_count"`      // 手牌数量
+	Online     bool   `json:"online"`           // 是否在线
+	IsBot      bool   `json:"is_bot,omitempty"` // 是否是 AI 机器人
 }
 
 // CardInfo 牌信息

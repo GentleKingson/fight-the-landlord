@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/palemoky/fight-the-landlord/internal/ai"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
@@ -106,12 +107,26 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	// 初始化房间管理器
 	s.roomManager = room.NewRoomManager(s.redisStore, cfg.Game)
 
+	// 初始化 AI 引擎（AI 未启用时为 nil）
+	var aiEngine ai.DecisionEngine
+	if cfg.AI.Enabled {
+		if cfg.AI.DouZeroEnabled {
+			aiEngine = ai.NewDouZeroEngine(cfg.AI.DouZeroURL)
+			log.Printf("🎮 DouZero 引擎已启用（服务地址: %s，等待超时: %ds）", cfg.AI.DouZeroURL, cfg.AI.BotFillTimeout)
+		} else {
+			aiEngine = ai.NewHeuristicEngine()
+			log.Printf("🤖 规则启发式机器人已启用（等待超时: %ds）", cfg.AI.BotFillTimeout)
+		}
+	}
+
 	// 初始化匹配器
 	s.matcher = match.NewMatcher(match.MatcherDeps{
 		RoomManager: s.roomManager,
 		RedisStore:  s.redisStore,
 		Leaderboard: s.leaderboard,
 		GameConfig:  cfg.Game,
+		AIEngine:    aiEngine,
+		AIConfig:    cfg.AI,
 		RegisterSession: func(roomCode string, gs *session.GameSession) {
 			s.handler.SetGameSession(roomCode, gs)
 		},

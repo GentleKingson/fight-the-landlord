@@ -4,8 +4,8 @@ package model
 import (
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	gameClient "github.com/palemoky/fight-the-landlord/internal/client"
 	"github.com/palemoky/fight-the-landlord/internal/transport"
@@ -55,7 +55,7 @@ func NewGameModel(c *transport.Client, input *textinput.Model) *GameModel {
 	chatInput := textinput.New()
 	chatInput.Placeholder = "按 / 键聊天, T 键快捷消息..."
 	chatInput.CharLimit = 50
-	chatInput.Width = 30
+	chatInput.SetWidth(30)
 
 	return &GameModel{
 		client:    c,
@@ -69,8 +69,8 @@ func (m *GameModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m *GameModel) View() string {
-	return "" // Not used directly, managed by OnlineModel
+func (m *GameModel) View() tea.View {
+	return tea.NewView("") // Not used directly, managed by OnlineModel
 }
 
 func (m *GameModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

@@ -42,10 +42,19 @@ type GameSession struct {
 	deck        card.Deck
 	bottomCards []card.Card
 
-	// 叫地主相关
-	currentBidder int // 当前叫地主的玩家索引
-	highestBidder int // 叫地主的玩家索引，-1 表示没人叫
-	bidCount      int // 叫地主轮数
+	// 叫抢地主相关
+	currentBidder     int // 当前叫/抢地主的玩家索引
+	landlordCaller    int // 第一个叫地主的玩家索引，-1 表示尚无人叫
+	landlordCandidate int // 当前暂定地主索引，-1 表示尚无
+	bidPasses         int // 连续"不叫/不抢"次数（用于流局与结束判断）
+	grabActions       int // 抢地主阶段已进行的决策次数（每人最多一次，最多 3 次后强制结束）
+	bidMultiplier     int // 叫抢阶段产生的底倍
+	redealCount       int // 已发生的流局次数（达到上限后随机强制指定地主）
+
+	// 倍数相关（出牌阶段累计）
+	bombCount     int // 已打出的炸弹+王炸数量，每个翻一倍
+	landlordPlays int // 地主实际出牌次数（用于反春天判断）
+	farmerPlays   int // 农民实际出牌次数（用于春天判断）
 
 	// 出牌相关
 	currentPlayer     int             // 当前出牌玩家索引
@@ -77,11 +86,13 @@ func NewGameSession(r *room.Room, lb *storage.LeaderboardManager, gameCfg config
 	}
 
 	return &GameSession{
-		room:          r,
-		leaderboard:   lb,
-		gameConfig:    gameCfg,
-		state:         GameStateInit,
-		players:       players,
-		highestBidder: -1,
+		room:              r,
+		leaderboard:       lb,
+		gameConfig:        gameCfg,
+		state:             GameStateInit,
+		players:           players,
+		landlordCaller:    -1,
+		landlordCandidate: -1,
+		bidMultiplier:     1,
 	}
 }

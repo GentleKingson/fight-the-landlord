@@ -19,20 +19,24 @@ func (s *Server) monitorStats() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
+	var lastOnline, lastGoroutines, lastActiveConns int
 
+	for range ticker.C {
 		onlineCount := s.GetOnlineCount()
 		goroutines := runtime.NumGoroutine()
 		activeConns := len(s.semaphore)
 
+		if onlineCount == lastOnline && goroutines == lastGoroutines && activeConns == lastActiveConns {
+			continue
+		}
+
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
 		log.Printf("📊 [监控] 在线: %d | Goroutines: %d | 活跃连接: %d/%d | 内存: %.2f MB",
-			onlineCount,
-			goroutines,
-			activeConns,
-			s.maxConnections,
+			onlineCount, goroutines, activeConns, s.maxConnections,
 			float64(m.Alloc)/1024/1024)
+
+		lastOnline, lastGoroutines, lastActiveConns = onlineCount, goroutines, activeConns
 	}
 }
 
@@ -68,6 +72,7 @@ func (s *Server) GracefulShutdown(timeout time.Duration) {
 	ticker := time.NewTicker(s.config.Game.ShutdownCheckIntervalDuration())
 	defer ticker.Stop()
 
+	lastActiveGames := 0
 	for time.Now().Before(deadline) {
 		activeGames := s.roomManager.GetActiveGamesCount()
 		if activeGames == 0 {
@@ -81,7 +86,12 @@ func (s *Server) GracefulShutdown(timeout time.Duration) {
 
 			break
 		}
-		log.Printf("⏳ 等待 %d 个房间结束...", activeGames)
+
+		if lastActiveGames != activeGames {
+			lastActiveGames = activeGames
+			log.Printf("⏳ 等待 %d 个房间结束...", activeGames)
+		}
+
 		<-ticker.C
 	}
 

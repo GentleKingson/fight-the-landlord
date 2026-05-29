@@ -137,6 +137,34 @@ func ProtoToPlayerHands(pbs []*pb.PlayerHand) []protocol.PlayerHand {
 	return result
 }
 
+// --- PlayerScore conversion ---
+
+func PlayerScoresToProto(scores []protocol.PlayerScore) []*pb.PlayerScore {
+	result := make([]*pb.PlayerScore, len(scores))
+	for i, s := range scores {
+		result[i] = &pb.PlayerScore{
+			PlayerId:   s.PlayerID,
+			PlayerName: s.PlayerName,
+			IsLandlord: s.IsLandlord,
+			Score:      int64(s.Score),
+		}
+	}
+	return result
+}
+
+func ProtoToPlayerScores(pbs []*pb.PlayerScore) []protocol.PlayerScore {
+	result := make([]protocol.PlayerScore, len(pbs))
+	for i, pb := range pbs {
+		result[i] = protocol.PlayerScore{
+			PlayerID:   pb.PlayerId,
+			PlayerName: pb.PlayerName,
+			IsLandlord: pb.IsLandlord,
+			Score:      int(pb.Score),
+		}
+	}
+	return result
+}
+
 // --- Leaderboard conversion ---
 
 func LeaderboardEntriesToProto(entries []protocol.LeaderboardEntry) []*pb.LeaderboardEntry {

@@ -31,6 +31,14 @@ message PlayerHand {
   repeated CardInfo cards = 3;
 }
 
+// PlayerScore 玩家本局得分（用于游戏结束结算）
+message PlayerScore {
+  string player_id = 1;
+  string player_name = 2;
+  bool is_landlord = 3; // 是否是地主
+  int64 score = 4;      // 本局得分（输为负，赢为正）
+}
+
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）
 message GameStateDTO {
   string phase = 1;                      // bidding/playing

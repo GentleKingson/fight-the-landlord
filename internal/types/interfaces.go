@@ -22,6 +22,7 @@ type ClientInterface interface {
 	SetRoom(code string)
 	SendMessage(msg *protocol.Message)
 	Close()
+	IsBot() bool
 }
 
 // ChatLimiter 聊天速率限制器接口

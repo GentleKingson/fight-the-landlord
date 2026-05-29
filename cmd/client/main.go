@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/palemoky/fight-the-landlord/internal/logger"
 	"github.com/palemoky/fight-the-landlord/internal/ui"
@@ -52,7 +52,7 @@ func main() {
 
 	model := ui.NewOnlineModel(serverURL)
 
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model)
 	if _, err := p.Run(); err != nil {
 		logger.LogError("Client error: %v", err)
 		log.Printf("启动客户端时出错: %v", err)

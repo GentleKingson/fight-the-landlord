@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/timer"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/timer"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
+	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 	payloadconv "github.com/palemoky/fight-the-landlord/internal/protocol/convert/payload"
@@ -47,13 +48,20 @@ func handleMsgBidTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	m.SetPhase(model.PhaseBidding)
 	m.Game().SetBidTurn(payload.PlayerID)
 	m.Game().SetBellPlayed(false)
+	m.Game().State().IsGrabTurn = payload.IsGrab
+	m.Game().State().Multiplier = payload.Multiplier
+
+	action := "叫地主"
+	if payload.IsGrab {
+		action = "抢地主"
+	}
 	if payload.PlayerID == m.PlayerID() {
-		m.Input().Placeholder = "叫地主? (Y/N)"
+		m.Input().Placeholder = fmt.Sprintf("%s? (Y/N)", action)
 		m.Input().Focus()
 	} else {
 		for _, p := range m.Game().State().Players {
 			if p.ID == payload.PlayerID {
-				m.Input().Placeholder = fmt.Sprintf("等待 %s 叫地主...", p.Name)
+				m.Input().Placeholder = fmt.Sprintf("等待 %s %s...", p.Name, action)
 				break
 			}
 		}
@@ -61,9 +69,17 @@ func handleMsgBidTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	}
 	m.Game().SetTimerDuration(time.Duration(payload.Timeout) * time.Second)
 	m.Game().SetTimerStartTime(time.Now())
-	t := timer.NewWithInterval(m.Game().TimerDuration(), time.Second)
+	t := timer.New(m.Game().TimerDuration(), timer.WithInterval(time.Second))
 	m.SetTimer(t)
 	return t.Start()
+}
+
+func handleMsgBidResult(m model.Model, msg *protocol.Message) tea.Cmd {
+	var payload protocol.BidResultPayload
+	_ = payloadconv.DecodePayload(msg.Type, msg.Payload, &payload)
+	// 同步当前倍数（抢地主会翻倍）
+	m.Game().State().Multiplier = payload.Multiplier
+	return nil
 }
 
 func handleMsgLandlord(m model.Model, msg *protocol.Message) tea.Cmd {
@@ -80,6 +96,8 @@ func handleMsgLandlord(m model.Model, msg *protocol.Message) tea.Cmd {
 		m.Game().State().IsLandlord = true
 		m.Game().State().CardCounter.DeductCards(m.Game().State().BottomCards)
 	}
+	m.Game().State().IsGrabTurn = false
+	m.Game().State().Multiplier = payload.Multiplier
 
 	m.PlaySound("landlord")
 	return nil
@@ -115,7 +133,7 @@ func handleMsgPlayTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	}
 	m.Game().SetTimerDuration(time.Duration(payload.Timeout) * time.Second)
 	m.Game().SetTimerStartTime(time.Now())
-	t := timer.NewWithInterval(m.Game().TimerDuration(), time.Second)
+	t := timer.New(m.Game().TimerDuration(), timer.WithInterval(time.Second))
 	m.SetTimer(t)
 	return t.Start()
 }
@@ -127,6 +145,10 @@ func handleMsgCardPlayed(m model.Model, msg *protocol.Message) tea.Cmd {
 	m.Game().State().LastPlayedName = payload.PlayerName
 	m.Game().State().LastPlayed = convert.InfosToCards(payload.Cards)
 	m.Game().State().LastHandType = payload.HandType
+	// 炸弹 / 王炸：本地同步倍数翻倍（与服务端结算一致）
+	if payload.HandType == rule.Bomb.String() || payload.HandType == rule.Rocket.String() {
+		m.Game().State().Multiplier = max(m.Game().State().Multiplier, 1) * 2
+	}
 	for i, p := range m.Game().State().Players {
 		if p.ID == payload.PlayerID {
 			m.Game().State().Players[i].CardsCount = payload.CardsLeft
@@ -150,6 +172,8 @@ func handleMsgGameOver(m model.Model, msg *protocol.Message) tea.Cmd {
 	m.SetPhase(model.PhaseGameOver)
 	m.Game().State().Winner = payload.WinnerName
 	m.Game().State().WinnerIsLandlord = payload.IsLandlord
+	m.Game().State().FinalMultiplier = payload.Multiplier
+	m.Game().State().Scores = payload.Scores
 	m.Input().Placeholder = "按回车返回大厅"
 
 	// 判断是否获胜：玩家身份和赢家身份一致即为胜利

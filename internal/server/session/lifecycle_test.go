@@ -123,7 +123,9 @@ func TestNewGameSession_Initialization(t *testing.T) {
 	// Verify initialization
 	assert.Equal(t, GameStateInit, gs.state)
 	assert.Len(t, gs.players, 3)
-	assert.Equal(t, -1, gs.highestBidder)
+	assert.Equal(t, -1, gs.landlordCaller)
+	assert.Equal(t, -1, gs.landlordCandidate)
+	assert.Equal(t, 1, gs.bidMultiplier)
 
 	// Verify players are in correct seats
 	for i, p := range gs.players {

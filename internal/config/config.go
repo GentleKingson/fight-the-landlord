@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,6 +40,17 @@ type Config struct {
 	Redis    RedisConfig    `yaml:"redis"`
 	Game     GameConfig     `yaml:"game"`
 	Security SecurityConfig `yaml:"security"`
+	AI       AIConfig       `yaml:"ai"`
+}
+
+// AIConfig AI 机器人配置
+type AIConfig struct {
+	Enabled        bool `yaml:"enabled"`
+	BotFillTimeout int  `yaml:"bot_fill_timeout"` // 等待玩家加入的超时秒数
+
+	// DouZero 引擎配置；未启用时使用内置规则启发式机器人
+	DouZeroEnabled bool   `yaml:"douzero_enabled"` // 使用 DouZero 神经网络引擎
+	DouZeroURL     string `yaml:"douzero_url"`     // Python 服务地址
 }
 
 // ServerConfig WebSocket 服务器配置
@@ -143,6 +155,12 @@ func Load(path string) (*Config, error) {
 	}
 
 	setDefaults(&cfg)
+
+	// 本地开发便利：自动加载 .env.local（仅本地，已 gitignore）。
+	// .env 是 Docker 专用（含 REDIS_ADDR=redis:6379 等容器内地址），
+	if err := godotenv.Load(".env.local"); err != nil && !os.IsNotExist(err) {
+		log.Printf("⚠️  加载 .env.local 失败: %v", err)
+	}
 	loadFromEnv(&cfg)
 
 	return &cfg, nil
@@ -189,6 +207,16 @@ func loadFromEnv(cfg *Config) {
 	getEnvInt("GAME_SHUTDOWN_TIMEOUT", &cfg.Game.ShutdownTimeout)
 	getEnvInt("GAME_SHUTDOWN_CHECK_INTERVAL", &cfg.Game.ShutdownCheckInterval)
 	getEnvInt("GAME_ROOM_CLEANUP_DELAY", &cfg.Game.RoomCleanupDelay)
+
+	// AI
+	if v := os.Getenv("AI_ENABLED"); v == "true" || v == "1" {
+		cfg.AI.Enabled = true
+	}
+	getEnvInt("AI_BOT_FILL_TIMEOUT", &cfg.AI.BotFillTimeout)
+	if v := os.Getenv("AI_DOUZERO_ENABLED"); v == "true" || v == "1" {
+		cfg.AI.DouZeroEnabled = true
+	}
+	getEnvStr("AI_DOUZERO_URL", &cfg.AI.DouZeroURL)
 
 	// Security
 	getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins)
@@ -244,6 +272,10 @@ func setDefaults(cfg *Config) {
 	setDefaultInt(&cfg.Security.ChatLimit.MaxPerSecond, defaultChatLimitPerSecond)
 	setDefaultInt(&cfg.Security.ChatLimit.MaxPerMinute, defaultChatLimitPerMinute)
 	setDefaultInt(&cfg.Security.ChatLimit.Cooldown, defaultChatCooldown)
+
+	// AI
+	setDefaultInt(&cfg.AI.BotFillTimeout, 30)
+	setDefaultStr(&cfg.AI.DouZeroURL, "http://localhost:2021")
 }
 
 // Default 返回默认配置

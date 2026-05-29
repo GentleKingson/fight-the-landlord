@@ -1,7 +1,8 @@
 package client
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -25,9 +26,15 @@ type GameState struct {
 	LastPlayed     []card.Card
 	LastHandType   string
 
+	// 叫抢地主 / 倍数
+	Multiplier int  // 当前倍数（叫抢阶段为底倍，出牌阶段含炸弹等累计）
+	IsGrabTurn bool // 当前叫地主轮是否处于抢地主阶段
+
 	// 游戏结果
 	Winner           string
 	WinnerIsLandlord bool
+	FinalMultiplier  int                    // 结算最终倍数
+	Scores           []protocol.PlayerScore // 各玩家本局得分
 
 	// 功能组件
 	CardCounter *CardCounter
@@ -42,8 +49,8 @@ func NewGameState() *GameState {
 
 // SortHand 将玩家手牌按点数降序排序
 func (gs *GameState) SortHand() {
-	sort.Slice(gs.Hand, func(i, j int) bool {
-		return gs.Hand[i].Rank > gs.Hand[j].Rank
+	slices.SortFunc(gs.Hand, func(a, b card.Card) int {
+		return cmp.Compare(b.Rank, a.Rank)
 	})
 }
 
@@ -59,7 +66,11 @@ func (gs *GameState) Reset() {
 	gs.LastPlayed = nil
 	gs.LastHandType = ""
 	gs.IsLandlord = false
+	gs.Multiplier = 0
+	gs.IsGrabTurn = false
 	gs.Winner = ""
 	gs.WinnerIsLandlord = false
+	gs.FinalMultiplier = 0
+	gs.Scores = nil
 	gs.CardCounter = NewCardCounter()
 }
