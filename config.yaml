@@ -58,22 +58,11 @@ ai:
   # 玩家等待多少秒后由 AI 填充剩余座位
   bot_fill_timeout: 15
 
-  # --- DouZero 引擎（推荐，优先级高于 LLM）---
-  # 启用后忽略下方 LLM 配置
+  # --- DouZero 引擎 ---
+  # 启用后使用 DouZero 神经网络引擎；关闭时使用内置规则启发式机器人（无外部依赖）
   douzero_enabled: true
   # Python DouZero 服务地址
   douzero_url: "http://localhost:2021"
-
-  # --- LLM 引擎 ---
-  # LLM 调试日志
-  debug: false
-  # DeepSeek API 地址（OpenAI 兼容）
-  base_url: "https://api.deepseek.com"
-  # API Key 出于安全不写在此文件，本地开发推荐 `.env.local`，Docker 推荐 `.env` 或 Docker secret
-  # 使用的模型
-  model: "deepseek-v4-flash"
-  # LLM 出牌校验失败后最多重试次数
-  max_retries: 3
 
 # 通知配置（可选）
 notification:

@@ -45,16 +45,11 @@ type Config struct {
 
 // AIConfig AI 机器人配置
 type AIConfig struct {
-	Enabled        bool   `yaml:"enabled"`
-	BaseURL        string `yaml:"base_url"`
-	APIKey         string `yaml:"api_key"`
-	Model          string `yaml:"model"`
-	BotFillTimeout int    `yaml:"bot_fill_timeout"` // 等待玩家加入的超时秒数
-	MaxRetries     int    `yaml:"max_retries"`      // LLM 校验失败重试次数
-	Debug          bool   `yaml:"debug"`            // 打印完整的 LLM 请求与响应
+	Enabled        bool `yaml:"enabled"`
+	BotFillTimeout int  `yaml:"bot_fill_timeout"` // 等待玩家加入的超时秒数
 
-	// DouZero 引擎配置（优先级高于 LLM）
-	DouZeroEnabled bool   `yaml:"douzero_enabled"` // 使用 DouZero 代替 LLM
+	// DouZero 引擎配置；未启用时使用内置规则启发式机器人
+	DouZeroEnabled bool   `yaml:"douzero_enabled"` // 使用 DouZero 神经网络引擎
 	DouZeroURL     string `yaml:"douzero_url"`     // Python 服务地址
 }
 
@@ -168,11 +163,6 @@ func Load(path string) (*Config, error) {
 	}
 	loadFromEnv(&cfg)
 
-	if cfg.AI.Enabled && cfg.AI.APIKey == "" {
-		log.Print("⚠️  AI 已启用但未配置 API Key，将回退到本地规则出牌。" +
-			"请通过环境变量 AI_API_KEY 或 AI_API_KEY_FILE（Docker/K8s secret）配置")
-	}
-
 	return &cfg, nil
 }
 
@@ -190,23 +180,6 @@ func getEnvInt(key string, target *int) {
 			*target = n
 		}
 	}
-}
-
-// getEnvSecret 优先从 <KEY>_FILE 指向的文件读取密钥（Docker/K8s secret 推荐方式，
-// 避免密钥出现在配置文件或进程环境变量中），否则回退到 <KEY> 环境变量。
-func getEnvSecret(key string, target *string) {
-	if path := os.Getenv(key + "_FILE"); path != "" {
-		data, err := os.ReadFile(filepath.Clean(path)) // #nosec G703 -- config secret path is provided by the operator and read as a local file
-		if err != nil {
-			log.Printf("⚠️  读取 %s_FILE 失败: %v", key, err)
-		} else if v := strings.TrimSpace(string(data)); v != "" {
-			*target = v
-			return
-		} else {
-			log.Printf("⚠️  %s_FILE 指向的文件为空: %s", key, path)
-		}
-	}
-	getEnvStr(key, target)
 }
 
 func getEnvStrSlice(key string, target *[]string) {
@@ -239,14 +212,7 @@ func loadFromEnv(cfg *Config) {
 	if v := os.Getenv("AI_ENABLED"); v == "true" || v == "1" {
 		cfg.AI.Enabled = true
 	}
-	getEnvSecret("AI_API_KEY", &cfg.AI.APIKey)
-	getEnvStr("AI_BASE_URL", &cfg.AI.BaseURL)
-	getEnvStr("AI_MODEL", &cfg.AI.Model)
 	getEnvInt("AI_BOT_FILL_TIMEOUT", &cfg.AI.BotFillTimeout)
-	getEnvInt("AI_MAX_RETRIES", &cfg.AI.MaxRetries)
-	if v := os.Getenv("AI_DEBUG"); v == "true" || v == "1" {
-		cfg.AI.Debug = true
-	}
 	if v := os.Getenv("AI_DOUZERO_ENABLED"); v == "true" || v == "1" {
 		cfg.AI.DouZeroEnabled = true
 	}
@@ -308,10 +274,7 @@ func setDefaults(cfg *Config) {
 	setDefaultInt(&cfg.Security.ChatLimit.Cooldown, defaultChatCooldown)
 
 	// AI
-	setDefaultStr(&cfg.AI.BaseURL, "https://api.deepseek.com")
-	setDefaultStr(&cfg.AI.Model, "deepseek-v4-flash")
 	setDefaultInt(&cfg.AI.BotFillTimeout, 30)
-	setDefaultInt(&cfg.AI.MaxRetries, 3)
 	setDefaultStr(&cfg.AI.DouZeroURL, "http://localhost:2021")
 }
 

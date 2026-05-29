@@ -15,7 +15,7 @@ const (
 	DouZeroPosLandlordUp = "landlord_up"
 )
 
-// DecisionEngine 决策引擎接口，LLM 和 DouZero 均实现此接口
+// DecisionEngine 决策引擎接口，规则启发式引擎和 DouZero 均实现此接口
 type DecisionEngine interface {
 	DecideBid(ctx context.Context, botName string, hand []card.Card, prevBid *bool) bool
 	DecidePlay(ctx context.Context, botName string, gctx GameContext) []card.Card
