@@ -47,7 +47,13 @@ func handleMsgReconnected(m model.Model, msg *protocol.Message) tea.Cmd {
 	if payload.RoomCode != "" {
 		m.Game().State().RoomCode = payload.RoomCode
 		if payload.GameState != nil {
-			m.SetPhase(model.PhasePlaying)
+			// 用服务器快照覆盖本地状态，避免显示掉线前的过期数据
+			restoreGameState(m, payload.GameState)
+			if payload.GameState.Phase == "bidding" {
+				m.SetPhase(model.PhaseBidding)
+			} else {
+				m.SetPhase(model.PhasePlaying)
+			}
 		} else {
 			m.SetPhase(model.PhaseWaiting)
 		}

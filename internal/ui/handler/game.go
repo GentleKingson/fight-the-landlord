@@ -16,10 +16,74 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/ui/model"
 )
 
+// restoreGameState 用重连快照覆盖本地游戏状态，避免沿用掉线前的过期数据（例如上家出牌、各家剩余牌数、地主标记等）
+func restoreGameState(m model.Model, dto *protocol.GameStateDTO) {
+	st := m.Game().State()
+	myID := m.PlayerID()
+
+	// 玩家信息：剩余牌数、地主标记、在线状态
+	st.Players = dto.Players
+
+	// 自己的手牌
+	st.Hand = convert.InfosToCards(dto.Hand)
+	st.SortHand()
+
+	// 自己是否地主（从权威的玩家信息里取，而非沿用旧标记）
+	st.IsLandlord = false
+	for _, p := range dto.Players {
+		if p.ID == myID {
+			st.IsLandlord = p.IsLandlord
+			break
+		}
+	}
+
+	// 底牌仅在出牌阶段（地主已确定）才揭晓；叫地主阶段保持隐藏，避免提前泄露
+	if dto.Phase == "playing" {
+		st.BottomCards = convert.InfosToCards(dto.BottomCards)
+	} else {
+		st.BottomCards = nil
+	}
+
+	// 当前回合
+	st.CurrentTurn = dto.CurrentTurn
+
+	// 上家出牌（DTO 不含出牌者名字与牌型，分别从玩家列表查名、按牌重新识别牌型）
+	st.LastPlayed = convert.InfosToCards(dto.LastPlayed)
+	st.LastPlayedBy = dto.LastPlayerID
+	st.LastPlayedName = ""
+	st.LastHandType = ""
+	if len(st.LastPlayed) > 0 {
+		for _, p := range dto.Players {
+			if p.ID == dto.LastPlayerID {
+				st.LastPlayedName = p.Name
+				break
+			}
+		}
+		if ph, err := rule.ParseHand(st.LastPlayed); err == nil {
+			st.LastHandType = ph.Type.String()
+		}
+	}
+
+	// 记牌器：快照不含完整出牌历史，只能按可见信息尽力重建
+	// （自己的手牌、底牌(若为地主)、可见的上家牌）；后续出牌事件会继续修正。
+	st.CardCounter.Reset()
+	st.CardCounter.DeductCards(st.Hand)
+	if st.IsLandlord {
+		st.CardCounter.DeductCards(st.BottomCards)
+	}
+	if dto.LastPlayerID != myID {
+		st.CardCounter.DeductCards(st.LastPlayed)
+	}
+
+	m.Game().SetMustPlay(dto.MustPlay)
+}
+
 func handleMsgGameStart(m model.Model, msg *protocol.Message) tea.Cmd {
 	var payload protocol.GameStartPayload
 	_ = payloadconv.DecodePayload(msg.Type, msg.Payload, &payload)
 	m.Game().State().Players = payload.Players
+	// 新一局重置自己的地主标记，避免沿用上一局导致手牌区误显示地主图标
+	m.Game().State().IsLandlord = false
 	return nil
 }
 
