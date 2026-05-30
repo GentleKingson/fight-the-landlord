@@ -296,9 +296,9 @@ func renderMiddleSection(state *gameClient.GameState, myPlayerID string) string 
 }
 
 func renderLastPlayed(state *gameClient.GameState) string {
+	// 服务器已将出牌按点数从大到小排序，正序渲染即与手牌方向一致（大牌在左）
 	var cardStrs []string
-	for i := len(state.LastPlayed) - 1; i >= 0; i-- {
-		c := state.LastPlayed[i]
+	for _, c := range state.LastPlayed {
 		style := common.BlackStyle
 		if c.Color == card.Red {
 			style = common.RedStyle
