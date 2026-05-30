@@ -1,9 +1,6 @@
 services:
   # DouZero AI 推理服务
   douzero:
-    build:
-      context: ./douzero
-      dockerfile: Dockerfile
     image: palemoky/fight-the-landlord-douzero:latest
     container_name: poker-douzero
     restart: unless-stopped

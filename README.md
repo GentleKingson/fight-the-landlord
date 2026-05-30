@@ -7,6 +7,7 @@
 
 基于 Go 语言实现的斗地主游戏，支持联网对战、断线重连、排行榜等功能。
 
+[![Docker Image Size](https://img.shields.io/docker/image-size/palemoky/fight-the-landlord/latest)](https://hub.docker.com/r/palemoky/fight-the-landlord)
 [![Test](https://github.com/palemoky/fight-the-landlord/actions/workflows/test.yml/badge.svg)](https://github.com/palemoky/fight-the-landlord/actions/workflows/test.yml)
 [![Release](https://github.com/palemoky/fight-the-landlord/actions/workflows/release.yml/badge.svg)](https://github.com/palemoky/fight-the-landlord/actions/workflows/release.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/palemoky/fight-the-landlord)](https://goreportcard.com/report/github.com/palemoky/fight-the-landlord)
