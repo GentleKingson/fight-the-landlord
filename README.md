@@ -139,7 +139,6 @@ go run ./cmd/client
 | C    | 开关记牌器（默认关闭） |
 | P    | Pass                   |
 | H    | 帮助                   |
-| 10/T | 出 10                  |
 | B    | 小王（Black Joker）    |
 | R    | 大王（Red Joker）      |
 | Esc  | 返回上一页             |
