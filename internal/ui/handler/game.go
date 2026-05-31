@@ -109,8 +109,12 @@ func handleMsgDealCards(m model.Model, msg *protocol.Message) tea.Cmd {
 	m.Game().State().LastPlayedName = ""
 	m.Game().State().LastHandType = ""
 
-	m.StopBGM() // 停止大厅音乐
-	m.PlaySound("deal")
+	// 地主确定后服务端会再发一次 MsgDealCards 更新地主手牌（含底牌），
+	// 此时已处于 PhaseBidding，不应重复播放发牌音效。
+	if m.Phase() != model.PhaseBidding {
+		m.StopBGM()
+		m.PlaySound("deal")
+	}
 	return nil
 }
 
@@ -304,24 +308,23 @@ func playCardPlayedSounds(m model.Model, payload protocol.CardPlayedPayload, isB
 func handleMsgGameOver(m model.Model, msg *protocol.Message) tea.Cmd {
 	var payload protocol.GameOverPayload
 	_ = payloadconv.DecodePayload(msg.Type, msg.Payload, &payload)
-	m.SetPhase(model.PhaseGameOver)
+
+	// 先存好结算数据，保持当前出牌画面展示最后一手牌，2 秒后再切结算页
 	m.Game().State().Winner = payload.WinnerName
 	m.Game().State().WinnerIsLandlord = payload.IsLandlord
 	m.Game().State().FinalMultiplier = payload.Multiplier
 	m.Game().State().Scores = payload.Scores
-	m.Input().Placeholder = "按回车返回大厅"
 
-	// 判断是否获胜：玩家身份和赢家身份一致即为胜利
 	if m.Game().State().IsLandlord == m.Game().State().WinnerIsLandlord {
 		m.PlaySound("win")
 	} else {
 		m.PlaySound("lose")
 	}
-
-	// 结算页面只保留胜负音效，停止背景音乐
 	m.StopBGM()
 
-	return nil
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return model.GameOverDelayMsg{}
+	})
 }
 
 // playCardVoice 用男声播报刚打出的牌：单/对/三张报点数，其余报牌型。

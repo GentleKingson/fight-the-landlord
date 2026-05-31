@@ -289,6 +289,11 @@ func (m *OnlineModel) dispatchMessage(msg tea.Msg) (cmds []tea.Cmd, earlyReturn 
 		m.ClearNotification(NotifyError)
 		m.ClearNotification(NotifyRateLimit)
 
+	case GameOverDelayMsg:
+		m.phase = PhaseGameOver
+		m.input.Placeholder = "按回车返回大厅"
+		m.input.Focus()
+
 	case ClearInputErrorMsg:
 		m.handleClearInputError()
 

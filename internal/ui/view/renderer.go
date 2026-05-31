@@ -273,9 +273,6 @@ func renderMiddleSection(state *gameClient.GameState, myPlayerID string) string 
 		if p.IsLandlord {
 			icon = common.LandlordIcon
 		}
-		if p.IsBot {
-			icon = "🤖"
-		}
 
 		nameStyle := lipgloss.NewStyle()
 		if state.CurrentTurn == p.ID {
@@ -361,9 +358,6 @@ func renderLastPlayed(state *gameClient.GameState) string {
 		if p.ID == state.LastPlayedBy {
 			if p.IsLandlord {
 				icon = common.LandlordIcon
-			}
-			if p.IsBot {
-				icon = "🤖"
 			}
 			break
 		}

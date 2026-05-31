@@ -87,6 +87,9 @@ type ClearInputErrorMsg struct{}
 // ClearSystemNotificationMsg clears system notification.
 type ClearSystemNotificationMsg struct{}
 
+// GameOverDelayMsg triggers the transition to PhaseGameOver after a delay.
+type GameOverDelayMsg struct{}
+
 // --- Model Interface ---
 
 // Model is the main interface for OnlineModel, used by handler/view/input packages.
