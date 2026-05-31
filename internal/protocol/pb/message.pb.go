@@ -72,6 +72,7 @@ const (
 	MessageType_MSG_MAINTENANCE_STATUS MessageType = 125
 	MessageType_MSG_MAINTENANCE        MessageType = 126
 	MessageType_MSG_ERROR              MessageType = 200
+	MessageType_MSG_PRACTICE_MATCH     MessageType = 201
 )
 
 // Enum value maps for MessageType.
@@ -123,6 +124,7 @@ var (
 		125: "MSG_MAINTENANCE_STATUS",
 		126: "MSG_MAINTENANCE",
 		200: "MSG_ERROR",
+		201: "MSG_PRACTICE_MATCH",
 	}
 	MessageType_value = map[string]int32{
 		"MSG_UNKNOWN":                0,
@@ -171,6 +173,7 @@ var (
 		"MSG_MAINTENANCE_STATUS":     125,
 		"MSG_MAINTENANCE":            126,
 		"MSG_ERROR":                  200,
+		"MSG_PRACTICE_MATCH":         201,
 	}
 )
 
@@ -261,7 +264,7 @@ const file_internal_protocol_proto_message_proto_rawDesc = "" +
 	"%internal/protocol/proto/message.proto\x12\bprotocol\"N\n" +
 	"\aMessage\x12)\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x15.protocol.MessageTypeR\x04type\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\fR\apayload*\xbf\a\n" +
+	"\apayload\x18\x02 \x01(\fR\apayload*\xd8\a\n" +
 	"\vMessageType\x12\x0f\n" +
 	"\vMSG_UNKNOWN\x10\x00\x12\x11\n" +
 	"\rMSG_RECONNECT\x10\x01\x12\f\n" +
@@ -309,7 +312,8 @@ const file_internal_protocol_proto_message_proto_rawDesc = "" +
 	"\x14MSG_ROOM_LIST_RESULT\x10|\x12\x1a\n" +
 	"\x16MSG_MAINTENANCE_STATUS\x10}\x12\x13\n" +
 	"\x0fMSG_MAINTENANCE\x10~\x12\x0e\n" +
-	"\tMSG_ERROR\x10\xc8\x01B=Z;github.com/palemoky/fight-the-landlord/internal/protocol/pbb\x06proto3"
+	"\tMSG_ERROR\x10\xc8\x01\x12\x17\n" +
+	"\x12MSG_PRACTICE_MATCH\x10\xc9\x01B=Z;github.com/palemoky/fight-the-landlord/internal/protocol/pbb\x06proto3"
 
 var (
 	file_internal_protocol_proto_message_proto_rawDescOnce sync.Once

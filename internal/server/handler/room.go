@@ -106,6 +106,21 @@ func (h *Handler) handleQuickMatch(client types.ClientInterface) {
 	h.matcher.AddToQueue(client)
 }
 
+// handlePracticeMatch 处理人机练习
+func (h *Handler) handlePracticeMatch(client types.ClientInterface) {
+	if h.server.IsMaintenanceMode() {
+		client.SendMessage(codec.NewErrorMessageWithText(
+			protocol.ErrCodeServerMaintenance, "服务器维护中，暂停人机练习"))
+		return
+	}
+
+	if client.GetRoom() != "" {
+		h.roomManager.LeaveRoom(client)
+	}
+
+	h.matcher.PracticeMatch(client)
+}
+
 // handleReady 处理准备
 func (h *Handler) handleReady(client types.ClientInterface, ready bool) {
 	err := h.roomManager.SetPlayerReady(client, ready)

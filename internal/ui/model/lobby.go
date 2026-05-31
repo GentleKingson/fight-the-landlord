@@ -107,8 +107,8 @@ func (m *LobbyModel) HandleNavigationKey(phase GamePhase, direction int) {
 	case PhaseLobby:
 		m.selectedIndex += direction
 		if m.selectedIndex < 0 {
-			m.selectedIndex = 5
-		} else if m.selectedIndex > 5 {
+			m.selectedIndex = 6
+		} else if m.selectedIndex > 6 {
 			m.selectedIndex = 0
 		}
 	}

@@ -99,9 +99,10 @@ func LobbyView(m model.Model) string {
 		"1. 快速匹配",
 		"2. 创建房间",
 		"3. 加入房间",
-		"4. 排行榜",
-		"5. 我的战绩",
-		"6. 游戏规则",
+		"4. 人机练习",
+		"5. 排行榜",
+		"6. 我的战绩",
+		"7. 游戏规则",
 	}
 
 	lobbyModel := m.Lobby()
@@ -130,10 +131,10 @@ func LobbyView(m model.Model) string {
 	if lobby.ChatInput().Focused() {
 		m.Input().Blur()
 		inputView = lipgloss.PlaceHorizontal(m.Width(), lipgloss.Center,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("> ↑↓ 选择 | 回车确认 | 或输入房间号"))
+			lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("> ↑↓ 选择 | 回车确认 | 或输入选项(1-7)/房间号"))
 	} else {
 		m.Input().Focus()
-		m.Input().Placeholder = "↑↓ 选择 | 回车确认 | 或输入房间号"
+		m.Input().Placeholder = "↑↓ 选择 | 回车确认 | 或输入选项(1-7)/房间号"
 		inputView = lipgloss.PlaceHorizontal(m.Width(), lipgloss.Center, m.Input().View())
 	}
 	sb.WriteString(inputView)

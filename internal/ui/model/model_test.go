@@ -345,7 +345,7 @@ func TestLobbyModel_HandleUpKey(t *testing.T) {
 		rooms       []protocol.RoomListItem
 		expectedIdx int
 	}{
-		{"lobby wrap around from 0", PhaseLobby, 0, nil, 5},
+		{"lobby wrap around from 0", PhaseLobby, 0, nil, 6},
 		{"lobby normal decrement", PhaseLobby, 3, nil, 2},
 		{"room list wrap around", PhaseRoomList, 0, []protocol.RoomListItem{{}, {}, {}}, 2},
 		{"room list normal decrement", PhaseRoomList, 2, []protocol.RoomListItem{{}, {}, {}}, 1},
@@ -385,7 +385,7 @@ func TestLobbyModel_HandleDownKey(t *testing.T) {
 		rooms       []protocol.RoomListItem
 		expectedIdx int
 	}{
-		{"lobby wrap around from 5", PhaseLobby, 5, nil, 0},
+		{"lobby wrap around from 6", PhaseLobby, 6, nil, 0},
 		{"lobby normal increment", PhaseLobby, 3, nil, 4},
 		{"room list wrap around", PhaseRoomList, 2, []protocol.RoomListItem{{}, {}, {}}, 0},
 		{"room list normal increment", PhaseRoomList, 0, []protocol.RoomListItem{{}, {}, {}}, 1},

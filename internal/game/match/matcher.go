@@ -216,6 +216,17 @@ func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
 	}
 }
 
+// PracticeMatch 人机练习：立即为玩家创建含 2 个机器人的房间
+func (m *Matcher) PracticeMatch(client types.ClientInterface) {
+	engine := m.botEngine
+	if engine == nil {
+		engine = bot.NewHeuristicEngine()
+	}
+	bot1 := bot.NewBotClient(engine)
+	bot2 := bot.NewBotClient(engine)
+	go m.createMatchRoom([]types.ClientInterface{client, bot1, bot2})
+}
+
 // GetQueueLength 获取队列长度
 func (m *Matcher) GetQueueLength() int {
 	m.mu.Lock()

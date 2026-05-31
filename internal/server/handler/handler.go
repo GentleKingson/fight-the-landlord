@@ -80,12 +80,13 @@ func (h *Handler) initHandlers() {
 		protocol.MsgReconnect: h.handleReconnect,
 
 		// 房间操作
-		protocol.MsgCreateRoom:  func(c types.ClientInterface, _ *protocol.Message) { h.handleCreateRoom(c) },
-		protocol.MsgJoinRoom:    h.handleJoinRoom,
-		protocol.MsgLeaveRoom:   func(c types.ClientInterface, _ *protocol.Message) { h.handleLeaveRoom(c) },
-		protocol.MsgQuickMatch:  func(c types.ClientInterface, _ *protocol.Message) { h.handleQuickMatch(c) },
-		protocol.MsgReady:       func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, true) },
-		protocol.MsgCancelReady: func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, false) },
+		protocol.MsgCreateRoom:    func(c types.ClientInterface, _ *protocol.Message) { h.handleCreateRoom(c) },
+		protocol.MsgJoinRoom:      h.handleJoinRoom,
+		protocol.MsgLeaveRoom:     func(c types.ClientInterface, _ *protocol.Message) { h.handleLeaveRoom(c) },
+		protocol.MsgQuickMatch:    func(c types.ClientInterface, _ *protocol.Message) { h.handleQuickMatch(c) },
+		protocol.MsgPracticeMatch: func(c types.ClientInterface, _ *protocol.Message) { h.handlePracticeMatch(c) },
+		protocol.MsgReady:         func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, true) },
+		protocol.MsgCancelReady:   func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, false) },
 
 		// 游戏操作
 		protocol.MsgBid:       h.handleBid,

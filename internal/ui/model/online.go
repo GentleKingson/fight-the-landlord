@@ -69,7 +69,7 @@ type OnlineModel struct {
 // NewOnlineModel creates a new OnlineModel.
 func NewOnlineModel(serverURL string) *OnlineModel {
 	ti := textinput.New()
-	ti.Placeholder = "输入选项 (1-6) 或房间号"
+	ti.Placeholder = "输入选项 (1-7) 或房间号"
 	ti.CharLimit = 20
 	ti.SetWidth(30)
 	ti.Focus()
@@ -201,7 +201,7 @@ func (m *OnlineModel) EnterLobby() {
 	// 大厅播放欢迎背景音乐（循环），覆盖上一局的对局 BGM
 	m.soundManager.PlayBGM("bgm_welcome")
 	m.input.Reset()
-	m.input.Placeholder = "输入选项 (1-6) 或房间号"
+	m.input.Placeholder = "输入选项 (1-7) 或房间号"
 	m.input.Focus()
 
 	// 清理游戏状态

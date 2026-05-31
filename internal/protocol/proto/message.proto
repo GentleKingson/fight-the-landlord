@@ -59,6 +59,7 @@ enum MessageType {
   MSG_MAINTENANCE_STATUS = 125;
   MSG_MAINTENANCE = 126;
   MSG_ERROR = 200;
+  MSG_PRACTICE_MATCH = 201;
 }
 
 // ========== 基础消息包装器 ==========

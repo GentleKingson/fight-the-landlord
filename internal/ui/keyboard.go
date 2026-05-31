@@ -358,15 +358,23 @@ func handleLobbyEnter(m model.Model, input string) tea.Cmd {
 		_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetRoomList, nil))
 		m.Input().Placeholder = "输入房间号或按 ESC 返回"
 
-	case "4": // 排行榜
+	case "4": // 人机练习
+		if blocked, cmd := checkServerAvailability(m); blocked {
+			return cmd
+		}
+		m.SetPhase(model.PhaseMatching)
+		m.SetMatchingStartTime(time.Now())
+		_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgPracticeMatch, nil))
+
+	case "5": // 排行榜
 		m.SetPhase(model.PhaseLeaderboard)
 		_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetLeaderboard, nil))
 
-	case "5": // 统计信息
+	case "6": // 统计信息
 		m.SetPhase(model.PhaseStats)
 		_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetStats, nil))
 
-	case "6": // 游戏规则
+	case "7": // 游戏规则
 		m.SetPhase(model.PhaseRules)
 
 	default: // 加入房间
