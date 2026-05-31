@@ -8,7 +8,7 @@ server:
   max_connections: 10000
   # 要求的最低客户端版本（如 "v1.2.0"），留空表示不限制。
   # 低于此版本的客户端启动时会被强制自动升级，用于发布不兼容变更时保证版本一致。
-  min_client_version: "v0.5.0"
+  min_client_version: "v0.5.1"
 
 redis:
   addr: "localhost:6379"
