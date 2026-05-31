@@ -109,6 +109,7 @@ func handleMsgDealCards(m model.Model, msg *protocol.Message) tea.Cmd {
 	m.Game().State().LastPlayedName = ""
 	m.Game().State().LastHandType = ""
 
+	m.StopBGM() // 停止大厅音乐
 	m.PlaySound("deal")
 	return nil
 }
