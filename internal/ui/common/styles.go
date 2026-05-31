@@ -10,7 +10,9 @@ import (
 // Icon constants
 const (
 	LandlordIcon = "👑"
-	FarmerIcon   = "🧑‍🌾"
+	// FarmerIcon 必须用单码点 emoji：ZWJ 序列（如 🧑‍🌾）会被部分终端渲染成 4 格宽，
+	// 而 lipgloss 按 2 格计算，导致固定宽度信息框被顶破、角色图标错位甚至显示异常。
+	FarmerIcon = "🌾"
 
 	TopBorderStart    = "┌──"
 	TopBorderEnd      = "┌──┐"
