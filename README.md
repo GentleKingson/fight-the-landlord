@@ -147,10 +147,10 @@ go run ./cmd/client
 
 欢迎贡献代码、报告问题或提出建议！
 
-<div align="center">
-
-[![Star History Chart](https://api.star-history.com/svg?repos=palemoky/fight-the-landlord&type=Date)](https://star-history.com/#palemoky/fight-the-landlord&Date)
-
+<div>
+  <a href="https://star-history.com/#palemoky/fight-the-landlord&Date">
+    <img src="https://api.star-history.com/svg?repos=palemoky/fight-the-landlord&type=Date" alt="Star History Chart" width="55%" />
+  </a>
 </div>
 
 ---
