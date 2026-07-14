@@ -263,7 +263,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           acceptProvisionalAfterReconnectFailure(set, state, payload.message || '旧会话已失效');
           break;
         }
-        set({ error: payload.message || '未知错误', phase: state.phase === 'matching' ? 'lobby' : state.phase });
+        set({
+          error: payload.message || '未知错误',
+          tableMessage: state.phase === 'playing' ? payload.message || '操作被服务器拒绝' : state.tableMessage,
+          phase: state.phase === 'matching' ? 'lobby' : state.phase
+        });
         break;
       }
       case MsgType.OnlineCount:
@@ -374,7 +378,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           cardCounter: isMe ? state.cardCounter : deductCounter(state.cardCounter, payload.cards ?? []),
           recentActions: pushAction(state.recentActions, action),
           seatActions: setSeatAction(state.mustPlay ? {} : state.seatActions, action),
-          selectedCards: new Set()
+          selectedCards: isMe ? new Set() : state.selectedCards
         });
         break;
       }

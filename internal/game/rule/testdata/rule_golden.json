@@ -1,0 +1,322 @@
+{
+  "version": 1,
+  "parse_cases": [
+    {
+      "name": "single",
+      "ranks": [5],
+      "expected": { "type": "single", "key_rank": 5, "length": 0 }
+    },
+    {
+      "name": "pair",
+      "ranks": [7, 7],
+      "expected": { "type": "pair", "key_rank": 7, "length": 0 }
+    },
+    {
+      "name": "trio",
+      "ranks": [9, 9, 9],
+      "expected": { "type": "trio", "key_rank": 9, "length": 0 }
+    },
+    {
+      "name": "trio with single",
+      "ranks": [3, 3, 3, 4],
+      "expected": { "type": "trio_with_single", "key_rank": 3, "length": 0 }
+    },
+    {
+      "name": "trio with pair",
+      "ranks": [14, 14, 14, 13, 13],
+      "expected": { "type": "trio_with_pair", "key_rank": 14, "length": 0 }
+    },
+    {
+      "name": "straight",
+      "ranks": [3, 4, 5, 6, 7],
+      "expected": { "type": "straight", "key_rank": 3, "length": 5 }
+    },
+    {
+      "name": "pair straight",
+      "ranks": [8, 8, 9, 9, 10, 10],
+      "expected": { "type": "pair_straight", "key_rank": 8, "length": 3 }
+    },
+    {
+      "name": "plane",
+      "ranks": [3, 3, 3, 4, 4, 4],
+      "expected": { "type": "plane", "key_rank": 3, "length": 2 }
+    },
+    {
+      "name": "plane with singles",
+      "ranks": [5, 5, 5, 6, 6, 6, 7, 8],
+      "expected": { "type": "plane_with_singles", "key_rank": 5, "length": 2 }
+    },
+    {
+      "name": "plane with pairs",
+      "ranks": [9, 9, 9, 10, 10, 10, 11, 11, 12, 12],
+      "expected": { "type": "plane_with_pairs", "key_rank": 9, "length": 2 }
+    },
+    {
+      "name": "bomb",
+      "ranks": [8, 8, 8, 8],
+      "expected": { "type": "bomb", "key_rank": 8, "length": 0 }
+    },
+    {
+      "name": "four with two singles",
+      "ranks": [4, 4, 4, 4, 5, 6],
+      "expected": { "type": "four_with_two", "key_rank": 4, "length": 0 }
+    },
+    {
+      "name": "four with one pair",
+      "ranks": [4, 4, 4, 4, 5, 5],
+      "expected": { "type": "four_with_two", "key_rank": 4, "length": 0 }
+    },
+    {
+      "name": "four with two pairs",
+      "ranks": [11, 11, 11, 11, 12, 12, 13, 13],
+      "expected": { "type": "four_with_two_pairs", "key_rank": 11, "length": 0 }
+    },
+    {
+      "name": "rocket",
+      "ranks": [16, 17],
+      "expected": { "type": "rocket", "key_rank": 17, "length": 0 }
+    },
+    {
+      "name": "empty selection",
+      "ranks": [],
+      "expected": null
+    },
+    {
+      "name": "two card pseudo straight",
+      "ranks": [3, 4],
+      "expected": null
+    },
+    {
+      "name": "three card pseudo straight",
+      "ranks": [3, 4, 5],
+      "expected": null
+    },
+    {
+      "name": "four card pseudo straight",
+      "ranks": [3, 4, 5, 6],
+      "expected": null
+    },
+    {
+      "name": "two consecutive pairs are too short",
+      "ranks": [3, 3, 4, 4],
+      "expected": null
+    },
+    {
+      "name": "count skewed pseudo pair straight",
+      "ranks": [3, 3, 3, 4, 4, 5],
+      "expected": null
+    },
+    {
+      "name": "gapped straight",
+      "ranks": [3, 4, 5, 7, 8],
+      "expected": null
+    },
+    {
+      "name": "straight containing 2",
+      "ranks": [10, 11, 12, 13, 14, 15],
+      "expected": null
+    },
+    {
+      "name": "straight containing joker",
+      "ranks": [10, 11, 12, 13, 16],
+      "expected": null
+    },
+    {
+      "name": "pseudo straight containing 2 and both jokers",
+      "ranks": [13, 14, 15, 16, 17],
+      "expected": null
+    },
+    {
+      "name": "pair straight containing 2",
+      "ranks": [13, 13, 14, 14, 15, 15],
+      "expected": null
+    },
+    {
+      "name": "plane containing 2",
+      "ranks": [14, 14, 14, 15, 15, 15],
+      "expected": null
+    },
+    {
+      "name": "non consecutive pseudo plane",
+      "ranks": [3, 3, 3, 5, 5, 5],
+      "expected": null
+    },
+    {
+      "name": "trio with two unrelated singles",
+      "ranks": [3, 3, 3, 4, 5],
+      "expected": null
+    },
+    {
+      "name": "paired wings are not plane single wings",
+      "ranks": [3, 3, 3, 4, 4, 4, 5, 5],
+      "expected": null
+    },
+    {
+      "name": "another bomb is not two pair wings",
+      "ranks": [3, 3, 3, 3, 4, 4, 4, 4],
+      "expected": null
+    },
+    {
+      "name": "rocket with an extra card",
+      "ranks": [3, 16, 17],
+      "expected": null
+    }
+  ],
+  "comparison_cases": [
+    {
+      "name": "higher single wins",
+      "candidate": [6],
+      "previous": [5],
+      "can_beat": true
+    },
+    {
+      "name": "equal single does not win",
+      "candidate": [5],
+      "previous": [5],
+      "can_beat": false
+    },
+    {
+      "name": "lower pair does not win",
+      "candidate": [6, 6],
+      "previous": [7, 7],
+      "can_beat": false
+    },
+    {
+      "name": "trio key rank wins regardless of kicker",
+      "candidate": [4, 4, 4, 3],
+      "previous": [3, 3, 3, 14],
+      "can_beat": true
+    },
+    {
+      "name": "ordinary shapes do not cross compare",
+      "candidate": [8, 8],
+      "previous": [7],
+      "can_beat": false
+    },
+    {
+      "name": "higher same length straight wins",
+      "candidate": [4, 5, 6, 7, 8],
+      "previous": [3, 4, 5, 6, 7],
+      "can_beat": true
+    },
+    {
+      "name": "different length straight does not compare",
+      "candidate": [4, 5, 6, 7, 8, 9],
+      "previous": [3, 4, 5, 6, 7],
+      "can_beat": false
+    },
+    {
+      "name": "bomb beats an ordinary hand",
+      "candidate": [3, 3, 3, 3],
+      "previous": [15, 15],
+      "can_beat": true
+    },
+    {
+      "name": "ordinary hand does not beat a bomb",
+      "candidate": [15, 15],
+      "previous": [3, 3, 3, 3],
+      "can_beat": false
+    },
+    {
+      "name": "higher bomb wins",
+      "candidate": [4, 4, 4, 4],
+      "previous": [3, 3, 3, 3],
+      "can_beat": true
+    },
+    {
+      "name": "lower bomb does not win",
+      "candidate": [3, 3, 3, 3],
+      "previous": [4, 4, 4, 4],
+      "can_beat": false
+    },
+    {
+      "name": "rocket beats the highest bomb",
+      "candidate": [16, 17],
+      "previous": [15, 15, 15, 15],
+      "can_beat": true
+    },
+    {
+      "name": "bomb does not beat rocket",
+      "candidate": [15, 15, 15, 15],
+      "previous": [16, 17],
+      "can_beat": false
+    },
+    {
+      "name": "rocket does not beat rocket",
+      "candidate": [16, 17],
+      "previous": [16, 17],
+      "can_beat": false
+    },
+    {
+      "name": "higher same length plane wins",
+      "candidate": [4, 4, 4, 5, 5, 5],
+      "previous": [3, 3, 3, 4, 4, 4],
+      "can_beat": true
+    }
+  ],
+  "response_cases": [
+    {
+      "name": "same type then bomb then rocket",
+      "hand": [7, 7, 3, 3, 3, 3, 16, 17],
+      "previous": [6, 6],
+      "responses": [[7, 7], [3, 3, 3, 3], [16, 17]],
+      "smallest": [7, 7]
+    },
+    {
+      "name": "same type responses sort by key rank",
+      "hand": [3, 6, 7, 9, 9, 9, 9],
+      "previous": [5],
+      "responses": [[6], [7], [9], [9, 9, 9, 9]],
+      "smallest": [6]
+    },
+    {
+      "name": "lead responses and smallest card are deterministic",
+      "hand": [14, 3, 10, 5],
+      "previous": [],
+      "responses": [[3], [5], [10], [14]],
+      "smallest": [3]
+    },
+    {
+      "name": "straight windows sort by key rank",
+      "hand": [4, 5, 6, 7, 8, 9],
+      "previous": [3, 4, 5, 6, 7],
+      "responses": [[4, 5, 6, 7, 8], [5, 6, 7, 8, 9]],
+      "smallest": [4, 5, 6, 7, 8]
+    },
+    {
+      "name": "pair straight windows sort by key rank",
+      "hand": [4, 4, 5, 5, 6, 6, 7, 7],
+      "previous": [3, 3, 4, 4, 5, 5],
+      "responses": [[4, 4, 5, 5, 6, 6], [5, 5, 6, 6, 7, 7]],
+      "smallest": [4, 4, 5, 5, 6, 6]
+    },
+    {
+      "name": "same trio may use ordered pair kickers",
+      "hand": [4, 4, 4, 6, 6, 7, 7],
+      "previous": [3, 3, 3, 5, 5],
+      "responses": [[4, 4, 4, 6, 6], [4, 4, 4, 7, 7]],
+      "smallest": [4, 4, 4, 6, 6]
+    },
+    {
+      "name": "rocket has no answer",
+      "hand": [15, 15, 15, 15],
+      "previous": [16, 17],
+      "responses": [],
+      "smallest": null
+    },
+    {
+      "name": "paired cards cannot become plane single wings",
+      "hand": [4, 4, 4, 5, 5, 5, 6, 6],
+      "previous": [3, 3, 3, 4, 4, 4, 7, 8],
+      "responses": [],
+      "smallest": null
+    },
+    {
+      "name": "no matching ordinary response",
+      "hand": [10, 10, 11, 11],
+      "previous": [3, 4, 5, 6, 7],
+      "responses": [],
+      "smallest": null
+    }
+  ]
+}

@@ -102,26 +102,6 @@ export function summarizeHand(cards: CardInfo[]): string {
   return `${cards.length} 张`;
 }
 
-export function generateSimpleSuggestions(hand: CardInfo[], lastPlayed: CardInfo[], mustPlay: boolean): CardInfo[][] {
-  const sorted = sortCards(hand);
-  if (mustPlay || lastPlayed.length === 0) return sorted.length ? [[sorted[sorted.length - 1]]] : [];
-
-  const targetLength = lastPlayed.length;
-  const targetRank = Math.max(...lastPlayed.map((card) => card.rank));
-  const byRank = new Map<number, CardInfo[]>();
-  for (const card of sorted) {
-    const group = byRank.get(card.rank) ?? [];
-    group.push(card);
-    byRank.set(card.rank, group);
-  }
-
-  return [...byRank.entries()]
-    .filter(([rank, cards]) => rank > targetRank && cards.length >= targetLength)
-    .sort(([a], [b]) => a - b)
-    .slice(0, 8)
-    .map(([, cards]) => cards.slice(0, targetLength));
-}
-
 export function initialCounter(myCards: CardInfo[]): Record<number, number> {
   const counts: Record<number, number> = {};
   for (let rank = 3; rank <= 15; rank += 1) counts[rank] = 4;

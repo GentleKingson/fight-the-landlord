@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MsgType } from '../../protocol/types';
+import { canBeat as canBeatHand, findSmallestLegalResponse, handTypeLabels, parseHand } from '../../game/rules';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
-import { cardKey, generateSimpleSuggestions, summarizeHand } from '../../shared/cards/cardModel';
+import { cardKey } from '../../shared/cards/cardModel';
 import { Card } from '../../shared/cards/Card';
 import { CardBack } from '../../shared/cards/CardBack';
 import { Hand } from '../../shared/cards/Hand';
@@ -219,21 +220,32 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   const selectedCards = useAppStore((state) => state.selectedCards);
   const lastPlayed = useAppStore((state) => state.lastPlayed);
   const mustPlay = useAppStore((state) => state.mustPlay);
-  const canBeat = useAppStore((state) => state.canBeat);
   const isGrabTurn = useAppStore((state) => state.isGrabTurn);
+  const connectionStatus = useAppStore((state) => state.connectionStatus);
+  const maintenance = useAppStore((state) => state.maintenance);
   const setSelection = useAppStore((state) => state.setSelection);
   const clearSelection = useAppStore((state) => state.clearSelection);
   const selected = hand.filter((card) => selectedCards.has(cardKey(card)));
-  const summary = summarizeHand(selected);
-  const canPlay = isMyTurn && phase === 'playing' && selected.length > 0 && (mustPlay || canBeat);
+  const parsedSelection = parseHand(selected);
+  const summary = parsedSelection ? handTypeLabels[parsedSelection.type] : (selected.length ? '无效牌型' : '');
+  const socketReady = connectionStatus === 'connected';
+  const selectionBeatsPrevious = mustPlay || canBeatHand(selected, lastPlayed);
+  const canPlay = isMyTurn
+    && phase === 'playing'
+    && parsedSelection !== null
+    && selectionBeatsPrevious
+    && socketReady
+    && !maintenance;
 
   function play() {
     if (!canPlay) {
       useAppStore.setState({ tableMessage: selected.length ? '当前牌型不可出' : '请选择要出的牌' });
       return;
     }
-    socket.send(MsgType.PlayCards, { cards: selected });
-    clearSelection();
+    const result = socket.send(MsgType.PlayCards, { cards: selected });
+    if (!result.ok) {
+      useAppStore.setState({ tableMessage: '出牌发送失败，请检查连接后重试' });
+    }
   }
 
   function pass() {
@@ -241,18 +253,21 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       useAppStore.setState({ tableMessage: '本轮必须出牌' });
       return;
     }
-    socket.send(MsgType.Pass);
-    clearSelection();
+    const result = socket.send(MsgType.Pass);
+    if (!result.ok) {
+      useAppStore.setState({ tableMessage: '不出操作发送失败，请检查连接后重试' });
+    }
   }
 
   function hint() {
-    const suggestions = generateSimpleSuggestions(hand, lastPlayed, mustPlay);
-    if (!suggestions.length) {
+    const suggestion = findSmallestLegalResponse(hand, mustPlay ? null : lastPlayed);
+    if (!suggestion) {
       useAppStore.setState({ tableMessage: mustPlay ? '暂无提示' : '没有可压过的牌' });
       return;
     }
-    setSelection(suggestions[0].map(cardKey));
-    useAppStore.setState({ tableMessage: `提示：${summarizeHand(suggestions[0])}` });
+    const parsedSuggestion = parseHand(suggestion);
+    setSelection(suggestion.map(cardKey));
+    useAppStore.setState({ tableMessage: `提示：${parsedSuggestion ? handTypeLabels[parsedSuggestion.type] : '合法牌型'}` });
   }
 
   if (phase === 'bidding') {
@@ -260,8 +275,8 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       <section className="action-bar action-bar--bidding" aria-label="叫地主操作">
         {isMyTurn ? (
           <>
-            <button className="primary-action" onClick={() => socket.send(MsgType.Bid, { bid: true })}>{isGrabTurn ? '抢地主' : '叫地主'}</button>
-            <button className="secondary-action secondary-action--muted" onClick={() => socket.send(MsgType.Bid, { bid: false })}>{isGrabTurn ? '不抢' : '不叫'}</button>
+            <button className="primary-action" disabled={!socketReady || maintenance} onClick={() => socket.send(MsgType.Bid, { bid: true })}>{isGrabTurn ? '抢地主' : '叫地主'}</button>
+            <button className="secondary-action secondary-action--muted" disabled={!socketReady || maintenance} onClick={() => socket.send(MsgType.Bid, { bid: false })}>{isGrabTurn ? '不抢' : '不叫'}</button>
           </>
         ) : <span>等待其他玩家{isGrabTurn ? '抢地主' : '叫地主'}...</span>}
       </section>
@@ -270,8 +285,8 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
 
   return (
     <section className="action-bar" aria-label="出牌操作">
-      <button className="secondary-action secondary-action--blue" disabled={!isMyTurn || mustPlay} onClick={pass}>不出</button>
-      <button className="secondary-action secondary-action--green" disabled={!isMyTurn} onClick={hint}>提示</button>
+      <button className="secondary-action secondary-action--blue" disabled={!isMyTurn || mustPlay || !socketReady || maintenance} onClick={pass}>不出</button>
+      <button className="secondary-action secondary-action--green" disabled={!isMyTurn || !socketReady || maintenance} onClick={hint}>提示</button>
       <button className="secondary-action secondary-action--muted" disabled={!selectedCards.size} onClick={clearSelection}>重选</button>
       <button className="primary-action" disabled={!canPlay} onClick={play}>出牌</button>
       <ActionSummary selectedCount={selected.length} summary={summary} />
