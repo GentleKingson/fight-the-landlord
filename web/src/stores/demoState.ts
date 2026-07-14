@@ -3,9 +3,9 @@ import type { CardInfo, PlayerInfo } from '../protocol/types';
 import { initialCounter, sortCards } from '../shared/cards/cardModel';
 
 const players: PlayerInfo[] = [
-  { id: 'p1', name: '青竹', seat: 0, ready: true, is_landlord: false, cards_count: 16, online: true },
-  { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: true, cards_count: 13, online: true },
-  { id: 'p3', name: '松风', seat: 2, ready: true, is_landlord: false, cards_count: 15, online: true }
+  { id: 'p1', name: '青竹', seat: 0, ready: true, is_landlord: false, cards_count: 16, online: true, is_bot: false },
+  { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: true, cards_count: 13, online: true, is_bot: false },
+  { id: 'p3', name: '松风', seat: 2, ready: true, is_landlord: false, cards_count: 15, online: true, is_bot: false }
 ];
 
 const hand: CardInfo[] = [
@@ -19,8 +19,8 @@ export function seedDemoState(mode: string): void {
   const demoPlayers = isBidding ? players.map((player) => ({ ...player, is_landlord: false })) : players;
   useChatStore.setState({
     messages: [
-      { sender_name: '山月', content: '这局节奏很快。', scope: 'room', time: Date.now() / 1000 },
-      { sender_name: '青竹', content: '我先看一手。', scope: 'room', time: Date.now() / 1000 }
+      demoChat('demo-chat-1', 'p2', '山月', '这局节奏很快。'),
+      demoChat('demo-chat-2', 'p1', '青竹', '我先看一手。')
     ]
   });
   useAppStore.setState({
@@ -76,4 +76,20 @@ export function seedDemoState(mode: string): void {
 
 function c(suit: number, rank: number): CardInfo {
   return { suit, rank, color: suit === 1 || suit === 3 || rank === 17 ? 1 : 0 };
+}
+
+function demoChat(messageId: string, senderId: string, senderName: string, content: string) {
+  const now = Date.now();
+  return {
+    sender_id: senderId,
+    sender_name: senderName,
+    content,
+    scope: 'room',
+    time: Math.floor(now / 1000),
+    is_system: false,
+    message_id: messageId,
+    room_code: '836219',
+    game_id: 'demo-game',
+    server_time: now
+  };
 }

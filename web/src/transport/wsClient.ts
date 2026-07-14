@@ -70,7 +70,7 @@ export class GameSocket {
     useAppStore.getState().setConnected(false);
   }
 
-  send(type: MessageType | string, payload?: OutgoingPayload): void {
+  send(type: MessageType, payload?: OutgoingPayload): void {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(encodeMessage(type, payload));
   }

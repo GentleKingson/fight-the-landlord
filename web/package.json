@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "tsc -b --pretty false",
+    "proto:generate": "node scripts/generate-protocol.mjs",
+    "proto:check": "node scripts/generate-protocol.mjs --check",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test"

@@ -347,8 +347,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.Maintenance:
       case MsgType.MaintenanceStatus:
-      case MsgType.MaintenancePull:
-      case MsgType.MaintenancePush:
         set({ maintenance: Boolean((message.payload as { maintenance: boolean }).maintenance) });
         break;
       default:

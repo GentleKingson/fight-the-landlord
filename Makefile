@@ -1,4 +1,4 @@
-.PHONY: help release test coverage lint fmt clean build install proto
+.PHONY: help release test coverage lint fmt clean build install proto proto-check
 
 # 默认目标
 .DEFAULT_GOAL := help
@@ -48,6 +48,12 @@ proto:  ## Regenerate Protocol Buffer and message type mapping code
 	@echo "$(BLUE)Generating MessageType mapping code...$(NC)"
 	@cd internal/protocol/convert/msgtype && go run gen.go
 	@echo "$(GREEN)✓ MessageType mapping code generated$(NC)"
+	npm --prefix web run proto:generate
+	@echo "$(GREEN)✓ Web protocol codec generated from canonical schema$(NC)"
+
+## proto-check: 验证所有 protobuf 生成物已提交且为最新
+proto-check: proto
+	git diff --exit-code -- internal/protocol/pb internal/protocol/convert/msgtype/mapping.go web/src/protocol/generated.ts
 
 ## release: 创建并推送版本标签
 release:  ## Create and push version tag

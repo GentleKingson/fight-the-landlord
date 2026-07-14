@@ -76,8 +76,9 @@ const (
 	MsgRoomListResult    MessageType = "room_list_result"   // 房间列表结果
 
 	// 系统通知
-	MsgMaintenancePush MessageType = "maintenance_push" // 主动推送
-	MsgMaintenancePull MessageType = "maintenance_pull" // 被动拉取
+	// 保留 Push/Pull 标识符兼容现有 Go 调用方，线上名称以 proto 枚举为准。
+	MsgMaintenancePush MessageType = "maintenance"        // 主动推送
+	MsgMaintenancePull MessageType = "maintenance_status" // 被动拉取
 
 	// 错误
 	MsgError MessageType = "error" // 错误消息

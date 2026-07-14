@@ -1,7 +1,7 @@
 package payload
 
 import (
-	"encoding/json"
+	"fmt"
 
 	"google.golang.org/protobuf/proto"
 
@@ -39,8 +39,7 @@ func EncodePayload(msgType protocol.MessageType, payload any) ([]byte, error) {
 		return proto.Marshal(pb)
 	}
 
-	// 未知类型，回退到 JSON
-	return json.Marshal(payload)
+	return nil, fmt.Errorf("unsupported protobuf payload for message type %q", msgType)
 }
 
 // encodeClientRequests 编码客户端请求
@@ -79,6 +78,28 @@ func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Mess
 			Offset: int64(p.Offset),
 			Limit:  int64(p.Limit),
 		}, true
+	case protocol.MsgChat:
+		var p protocol.ChatPayload
+		switch value := payload.(type) {
+		case protocol.ChatPayload:
+			p = value
+		case *protocol.ChatPayload:
+			p = *value
+		default:
+			return nil, false
+		}
+		return &pb.ChatPayload{
+			SenderId:   p.SenderID,
+			SenderName: p.SenderName,
+			Content:    p.Content,
+			Scope:      p.Scope,
+			Time:       p.Time,
+			IsSystem:   p.IsSystem,
+			MessageId:  p.MessageID,
+			RoomCode:   p.RoomCode,
+			GameId:     p.GameID,
+			ServerTime: p.ServerTime,
+		}, true
 	case protocol.MsgGetOnlineCount, protocol.MsgGetMaintenanceStatus:
 		// No payload needed for these messages
 		return nil, true
@@ -103,10 +124,11 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 			gameState = convert.GameStateDTOToProto(p.GameState)
 		}
 		return &pb.ReconnectedPayload{
-			PlayerId:   p.PlayerID,
-			PlayerName: p.PlayerName,
-			RoomCode:   p.RoomCode,
-			GameState:  gameState,
+			PlayerId:       p.PlayerID,
+			PlayerName:     p.PlayerName,
+			RoomCode:       p.RoomCode,
+			GameState:      gameState,
+			ReconnectToken: p.ReconnectToken,
 		}, true
 	case protocol.MsgPong:
 		p := payload.(protocol.PongPayload)

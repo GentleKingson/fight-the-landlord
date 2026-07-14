@@ -1,7 +1,7 @@
 package payload
 
 import (
-	"encoding/json"
+	"fmt"
 
 	"google.golang.org/protobuf/proto"
 
@@ -26,8 +26,7 @@ func DecodePayload(msgType protocol.MessageType, data []byte, target any) error 
 		return err
 	}
 
-	// 未知类型，回退到 JSON
-	return json.Unmarshal(data, target)
+	return fmt.Errorf("unsupported protobuf payload for message type %q", msgType)
 }
 
 // decodeClientPayload 解码客户端发送的消息
@@ -91,6 +90,24 @@ func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) 
 			Limit:  int(pbMsg.Limit),
 		}
 		return true, nil
+	case protocol.MsgChat:
+		var pbMsg pb.ChatPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.ChatPayload) = protocol.ChatPayload{
+			SenderID:   pbMsg.SenderId,
+			SenderName: pbMsg.SenderName,
+			Content:    pbMsg.Content,
+			Scope:      pbMsg.Scope,
+			Time:       pbMsg.Time,
+			IsSystem:   pbMsg.IsSystem,
+			MessageID:  pbMsg.MessageId,
+			RoomCode:   pbMsg.RoomCode,
+			GameID:     pbMsg.GameId,
+			ServerTime: pbMsg.ServerTime,
+		}
+		return true, nil
 	}
 	return false, nil
 }
@@ -150,10 +167,11 @@ func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target 
 			gameState = convert.ProtoToGameStateDTO(pbMsg.GameState)
 		}
 		*target.(*protocol.ReconnectedPayload) = protocol.ReconnectedPayload{
-			PlayerID:   pbMsg.PlayerId,
-			PlayerName: pbMsg.PlayerName,
-			RoomCode:   pbMsg.RoomCode,
-			GameState:  gameState,
+			PlayerID:       pbMsg.PlayerId,
+			PlayerName:     pbMsg.PlayerName,
+			RoomCode:       pbMsg.RoomCode,
+			GameState:      gameState,
+			ReconnectToken: pbMsg.ReconnectToken,
 		}
 		return true, nil
 	case protocol.MsgError:

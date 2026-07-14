@@ -21,6 +21,7 @@ message ReconnectedPayload {
   string player_name = 2;
   string room_code = 3;
   GameStateDTO game_state = 4;
+  string reconnect_token = 5;
 }
 
 // PongPayload 心跳响应

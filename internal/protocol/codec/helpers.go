@@ -1,11 +1,14 @@
 package codec
 
 import (
+	"fmt"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert/msgtype"
 	payloadconv "github.com/palemoky/fight-the-landlord/internal/protocol/convert/payload"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/pb"
 )
 
 // NewMessage 创建一个新消息
@@ -41,6 +44,9 @@ func Encode(m *protocol.Message) ([]byte, error) {
 	defer PutPBMessage(pbMsg)
 
 	pbMsg.Type = msgtype.StringToProtoMessageType(string(m.Type))
+	if pbMsg.Type == pb.MessageType_MSG_UNKNOWN {
+		return nil, fmt.Errorf("unknown message type %q", m.Type)
+	}
 	pbMsg.Payload = m.Payload // Protobuf payload
 
 	return proto.Marshal(pbMsg)
@@ -55,9 +61,16 @@ func Decode(data []byte) (*protocol.Message, error) {
 	if err := proto.Unmarshal(data, pbMsg); err != nil {
 		return nil, err
 	}
+	if pbMsg.Type == pb.MessageType_MSG_UNKNOWN {
+		return nil, fmt.Errorf("unknown protobuf message type %d", pbMsg.Type)
+	}
 
 	msg := GetMessage()
-	msg.Type = protocol.MessageType(msgtype.ProtoMessageTypeToString(pbMsg.Type))
+	typeName := msgtype.ProtoMessageTypeToString(pbMsg.Type)
+	if typeName == "unknown" {
+		return nil, fmt.Errorf("unknown protobuf message type %d", pbMsg.Type)
+	}
+	msg.Type = protocol.MessageType(typeName)
 	msg.Payload = append([]byte(nil), pbMsg.Payload...) // 复制 payload 避免引用
 
 	return msg, nil
