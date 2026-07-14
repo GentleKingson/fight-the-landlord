@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
-import { useAppStore, useChatStore } from '../../stores/appStore';
+import { selectChatMessages, useAppStore, useChatStore } from '../../stores/appStore';
 import { Icon } from '../../shared/ui/Icon';
 import { createChatCommand, dispatchCommand } from '../../transport/commandDispatcher';
 
@@ -272,12 +272,14 @@ function StatsPanel() {
 }
 
 function LobbyChat({ socket }: LobbyProps) {
-  const messages = useChatStore((state) => state.messages);
+  const messages = useChatStore(selectChatMessages('lobby'));
   const chatInput = useAppStore((state) => state.chatInput);
   const setChatInput = useAppStore((state) => state.setChatInput);
   const chatPending = useAppStore((state) => Boolean(state.pendingCommands.chat));
+  const composingRef = useRef(false);
 
   function send() {
+    if (chatPending || composingRef.current) return;
     const content = chatInput.trim();
     if (!content) return;
     const result = dispatchCommand(socket, createChatCommand(content, 'lobby'));
@@ -287,17 +289,20 @@ function LobbyChat({ socket }: LobbyProps) {
   return (
     <section className="sub-panel chat-panel">
       <h2>大厅聊天</h2>
-      <div className="chat-feed">
-        {messages.filter((message) => message.scope !== 'room').slice(-20).map((message, index) => (
-          <p key={index}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
+      <div className="chat-feed" role="log" aria-label="大厅聊天记录" tabIndex={0}>
+        {messages.slice(-20).map((message) => (
+          <p key={message.message_id}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
         ))}
       </div>
       <div className="chat-input-row">
         <input
+          aria-label="大厅聊天消息"
           value={chatInput}
           maxLength={240}
           onChange={(event) => setChatInput(event.target.value)}
           placeholder="和大厅里的玩家聊聊"
+          onCompositionStart={() => { composingRef.current = true; }}
+          onCompositionEnd={() => { composingRef.current = false; }}
           onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) send(); }}
         />
         <button disabled={chatPending} onClick={send}>{chatPending ? '发送中...' : '发送'}</button>

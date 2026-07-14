@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/google/uuid"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -25,8 +26,9 @@ func clearSystemNotification() tea.Cmd {
 // sendChatMessage sends a chat message and returns error command if failed
 func sendChatMessage(m model.Model, content, scope string) tea.Cmd {
 	chatMsg := codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{
-		Content: content,
-		Scope:   scope,
+		Content:   content,
+		Scope:     scope,
+		MessageID: uuid.NewString(),
 	})
 	if err := m.Client().SendMessage(chatMsg); err != nil {
 		m.SetNotification(model.NotifyError, fmt.Sprintf("⚠️ 发送消息失败: %v", err), true)

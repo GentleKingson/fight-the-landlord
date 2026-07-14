@@ -22,10 +22,13 @@ export function seedDemoState(mode: string): void {
   const playedCardsLedger: PlayedCardLedger = isBidding ? {} : { p3: [c(2, 8), c(3, 8)] };
   const turnDeadlineMs = Date.now() + 25_000;
   useChatStore.setState({
-    messages: [
-      demoChat('demo-chat-1', 'p2', '山月', '这局节奏很快。'),
-      demoChat('demo-chat-2', 'p1', '青竹', '我先看一手。')
-    ]
+    buckets: {
+      lobby: [demoLobbyChat('demo-lobby-chat-1', 'p3', '松风', '大厅里有人开桌吗？')],
+      'game:demo-game': [
+        demoGameChat('demo-chat-1', 'p2', '山月', '这局节奏很快。'),
+        demoGameChat('demo-chat-2', 'p1', '青竹', '我先看一手。')
+      ]
+    }
   });
   useAppStore.setState({
     connected: true,
@@ -98,18 +101,32 @@ function c(suit: number, rank: number): CardInfo {
   return { suit, rank, color: suit === 1 || suit === 3 || rank === 17 ? 1 : 0 };
 }
 
-function demoChat(messageId: string, senderId: string, senderName: string, content: string) {
+function demoGameChat(messageId: string, senderId: string, senderName: string, content: string) {
   const now = Date.now();
   return {
     sender_id: senderId,
     sender_name: senderName,
     content,
-    scope: 'room',
+    scope: 'game',
     time: Math.floor(now / 1000),
     is_system: false,
     message_id: messageId,
     room_code: '836219',
     game_id: 'demo-game',
+    server_time: now
+  };
+}
+
+function demoLobbyChat(messageId: string, senderId: string, senderName: string, content: string) {
+  const now = Date.now();
+  return {
+    sender_id: senderId,
+    sender_name: senderName,
+    content,
+    scope: 'lobby',
+    time: Math.floor(now / 1000),
+    is_system: false,
+    message_id: messageId,
     server_time: now
   };
 }

@@ -142,6 +142,17 @@ describe('authoritative event ordering', () => {
     expect(useAppStore.getState().lastPlayed).toEqual([]);
 
     useAppStore.getState().handleMessage({
+      type: MsgType.DealCards,
+      payload: { cards: [card(1, 9)], bottom_cards: [] }
+    });
+    useAppStore.getState().handleMessage({
+      type: MsgType.GameStart,
+      payload: { players: [] }
+    });
+    expect(useAppStore.getState().gameId).toBe('g1');
+    expect(useAppStore.getState().hand).toEqual([card(0, 3)]);
+
+    useAppStore.getState().handleMessage({
       type: MsgType.GameStart,
       payload: { players },
       event: event('g2', 1, 0)

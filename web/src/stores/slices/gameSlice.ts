@@ -411,9 +411,10 @@ function gateEvent(
   state: Pick<GameSlice, 'streamId' | 'gameId' | 'eventVersion' | 'turnId' | 'seenGameStreams'>,
   event: EventMeta | undefined
 ): { accepted: true; patch: Partial<GameSlice> } | { accepted: false } {
-  // Legacy/unit-test messages can be unversioned. Production game events are
-  // schema-validated with EventMeta and take the strict path below.
-  if (!event) return { accepted: true, patch: {} };
+  // Allow an entirely legacy stream only until a versioned stream has been
+  // established. Once authoritative ordering is active, an unversioned frame
+  // cannot safely be distinguished from a delayed event.
+  if (!event) return state.streamId ? { accepted: false } : { accepted: true, patch: {} };
 
   if (!event.stream_id || event.event_version <= 0) return { accepted: false };
   if (state.streamId && event.stream_id !== state.streamId) return { accepted: false };
@@ -427,7 +428,7 @@ function gateGameStart(
   state: Pick<GameSlice, 'streamId' | 'seenGameStreams'>,
   event: EventMeta | undefined
 ): Partial<GameSlice> | null {
-  if (!event) return {};
+  if (!event) return state.streamId ? null : {};
   if (!event.stream_id || event.event_version <= 0) return null;
   if (state.streamId === event.stream_id) return null;
   if (event.stream_id in state.seenGameStreams) return null;

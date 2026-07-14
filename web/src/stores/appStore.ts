@@ -11,7 +11,7 @@ import { useChatStore } from './slices/chatSlice';
 export type { ConnectionStatus, StoredIdentity } from './slices/connectionSlice';
 export type { BusinessError, BusinessErrorCategory, CommandKind, CommandRequest, PendingCommand } from './slices/uiSlice';
 export type { SeatAction, TableAction } from './slices/gameSlice';
-export { useChatStore } from './slices/chatSlice';
+export { gameChatContext, roomChatContext, selectChatMessages, useChatStore } from './slices/chatSlice';
 
 interface AppActions {
   setConnected: (connected: boolean) => void;

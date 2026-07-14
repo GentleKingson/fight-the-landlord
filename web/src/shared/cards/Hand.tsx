@@ -1,4 +1,12 @@
-import { useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent
+} from 'react';
 import type { CardInfo } from '../../protocol/types';
 import { cardKey } from './cardModel';
 import { Card } from './Card';
@@ -32,96 +40,209 @@ interface HandGroup {
   startIndex: number;
 }
 
+interface ActiveDrag {
+  pointerId: number;
+  startIndex: number;
+  lastIndex: number;
+  moved: boolean;
+  mode: 'add' | 'remove';
+  originalSelection: Set<string>;
+}
+
 export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelect }: HandProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const lastHitIndexRef = useRef<number | null>(null);
-  const [dragStart, setDragStart] = useState<number | null>(null);
-  const [dragMoved, setDragMoved] = useState(false);
-  const [dragKeys, setDragKeys] = useState<Set<string>>(new Set());
+  const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const activeDragRef = useRef<ActiveDrag | null>(null);
+  const suppressPointerClickRef = useRef(false);
+  const suppressedClickTimerRef = useRef<number | null>(null);
+  const doubleClickSelectionRef = useRef<Set<string> | null>(null);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPreview, setDragPreview] = useState<Set<string> | null>(null);
   const layout = useMemo(() => buildHandLayout(cards), [cards]);
   const keys = useMemo(() => layout.map((item) => item.key), [layout]);
+  const displayedSelection = dragPreview ?? selected;
+
+  useEffect(() => {
+    buttonRefs.current.length = layout.length;
+    setFocusedIndex((current) => Math.max(0, Math.min(current, layout.length - 1)));
+  }, [layout.length]);
+
+  useEffect(() => () => {
+    if (suppressedClickTimerRef.current !== null) {
+      window.clearTimeout(suppressedClickTimerRef.current);
+    }
+  }, []);
 
   function indexFromPoint(clientX: number, clientY: number): number {
-    const target = document.elementFromPoint(clientX, clientY);
+    const target = typeof document.elementFromPoint === 'function'
+      ? document.elementFromPoint(clientX, clientY)
+      : null;
     return indexFromTarget(target);
   }
 
   function indexFromTarget(target: EventTarget | Element | null): number {
     const element = (target as HTMLElement | null)?.closest?.('[data-card-index]');
-    return element ? Number((element as HTMLElement).dataset.cardIndex) : -1;
+    const index = element ? Number((element as HTMLElement).dataset.cardIndex) : -1;
+    return Number.isInteger(index) ? index : -1;
   }
 
-  function applyRange(endIndex: number) {
-    if (dragStart === null || endIndex < 0) return;
-    lastHitIndexRef.current = endIndex;
-    if (endIndex !== dragStart) setDragMoved(true);
-    const min = Math.min(dragStart, endIndex);
-    const max = Math.max(dragStart, endIndex);
-    const rangedKeys = keys.slice(min, max + 1);
-    setDragKeys(new Set(rangedKeys));
-    onRangeSelect(Array.from(new Set([...selected, ...rangedKeys])));
+  function orderedSelection(selection: Set<string>): string[] {
+    return keys.filter((key) => selection.has(key));
   }
 
-  function selectGroup(groupIndex: number) {
+  function selectGroup(groupIndex: number, baseSelection = selected) {
     const groupKeys = layout.filter((item) => item.groupIndex === groupIndex).map((item) => item.key);
     if (!groupKeys.length) return;
-    const allSelected = groupKeys.every((key) => selected.has(key));
-    const next = new Set(selected);
+    const allSelected = groupKeys.every((key) => baseSelection.has(key));
+    const next = new Set(baseSelection);
     for (const key of groupKeys) {
       if (allSelected) next.delete(key);
       else next.add(key);
     }
-    onRangeSelect([...next]);
+    onRangeSelect(orderedSelection(next));
+  }
+
+  function moveFocus(nextIndex: number) {
+    if (disabled || layout.length === 0) return;
+    const normalizedIndex = (nextIndex + layout.length) % layout.length;
+    setFocusedIndex(normalizedIndex);
+    buttonRefs.current[normalizedIndex]?.focus();
+  }
+
+  function handleCardKeyDown(event: KeyboardEvent<HTMLButtonElement>, item: HandCardLayout) {
+    if (disabled) return;
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        event.preventDefault();
+        moveFocus(item.index - 1);
+        return;
+      case 'ArrowRight':
+      case 'ArrowDown':
+        event.preventDefault();
+        moveFocus(item.index + 1);
+        return;
+      case 'Home':
+        event.preventDefault();
+        moveFocus(0);
+        return;
+      case 'End':
+        event.preventDefault();
+        moveFocus(layout.length - 1);
+        return;
+      case 'Enter':
+      case ' ':
+      case 'Spacebar':
+        event.preventDefault();
+        if (event.repeat) return;
+        if (event.shiftKey) selectGroup(item.groupIndex);
+        else onToggle(item.key);
+        return;
+      default:
+    }
+  }
+
+  function applyDragRange(drag: ActiveDrag, endIndex: number) {
+    if (endIndex < 0 || endIndex >= keys.length) return;
+    drag.lastIndex = endIndex;
+    if (endIndex !== drag.startIndex) drag.moved = true;
+    if (!drag.moved) return;
+
+    const min = Math.min(drag.startIndex, endIndex);
+    const max = Math.max(drag.startIndex, endIndex);
+    const next = new Set(drag.originalSelection);
+    for (const key of keys.slice(min, max + 1)) {
+      if (drag.mode === 'add') next.add(key);
+      else next.delete(key);
+    }
+    setDragPreview(next);
+    onRangeSelect(orderedSelection(next));
+  }
+
+  function suppressNextPointerClick() {
+    suppressPointerClickRef.current = true;
+    if (suppressedClickTimerRef.current !== null) {
+      window.clearTimeout(suppressedClickTimerRef.current);
+    }
+    suppressedClickTimerRef.current = window.setTimeout(() => {
+      suppressPointerClickRef.current = false;
+      suppressedClickTimerRef.current = null;
+    }, 0);
+  }
+
+  function releasePointer(event: PointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+  }
+
+  function finishDrag(event: PointerEvent<HTMLDivElement>, cancelled: boolean) {
+    const drag = activeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    if (cancelled) {
+      onRangeSelect(orderedSelection(drag.originalSelection));
+      suppressNextPointerClick();
+    } else {
+      const pointIndex = indexFromPoint(event.clientX, event.clientY);
+      const endIndex = pointIndex >= 0 ? pointIndex : indexFromTarget(event.target);
+      if (endIndex >= 0 && endIndex !== drag.lastIndex) applyDragRange(drag, endIndex);
+      if (drag.moved) suppressNextPointerClick();
+    }
+
+    activeDragRef.current = null;
+    setIsDragging(false);
+    setDragPreview(null);
+    releasePointer(event);
   }
 
   return (
     <div
       ref={rootRef}
-      className={`hand ${disabled ? 'is-disabled' : ''} ${dragStart !== null ? 'is-dragging' : ''}`}
+      className={`hand ${disabled ? 'is-disabled' : ''} ${isDragging ? 'is-dragging' : ''}`}
       style={{ '--hand-count': cards.length } as CSSProperties}
-      role="listbox"
+      role="group"
       aria-label="手牌"
+      aria-disabled={disabled || undefined}
       onPointerDown={(event) => {
         if (disabled) return;
+        if (activeDragRef.current || event.isPrimary === false) return;
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
         const index = indexFromTarget(event.target);
-        if (index >= 0) {
-          setDragStart(index);
-          setDragMoved(false);
-          lastHitIndexRef.current = index;
-          setDragKeys(new Set([keys[index]]));
-          rootRef.current?.setPointerCapture(event.pointerId);
-        }
+        if (index < 0 || index >= keys.length) return;
+
+        const originalSelection = new Set(selected);
+        activeDragRef.current = {
+          pointerId: event.pointerId,
+          startIndex: index,
+          lastIndex: index,
+          moved: false,
+          mode: originalSelection.has(keys[index]) ? 'remove' : 'add',
+          originalSelection
+        };
+        setFocusedIndex(index);
+        setIsDragging(true);
+        setDragPreview(null);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
       }}
       onPointerMove={(event) => {
-        if (disabled || dragStart === null) return;
-        event.preventDefault();
-        const index = indexFromPoint(event.clientX, event.clientY);
-        applyRange(index);
-      }}
-      onPointerUp={(event) => {
-        if (disabled) return;
-        const index = indexFromPoint(event.clientX, event.clientY);
-        const hitIndex = index >= 0 ? index : lastHitIndexRef.current;
-        if (dragStart !== null && !dragMoved && hitIndex === dragStart) onToggle(keys[dragStart]);
-        setDragStart(null);
-        setDragMoved(false);
-        lastHitIndexRef.current = null;
-        setDragKeys(new Set());
-        try {
-          rootRef.current?.releasePointerCapture(event.pointerId);
-        } catch {
-          // Pointer capture may already be released by the browser.
+        const drag = activeDragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        if (disabled) {
+          finishDrag(event, true);
+          return;
         }
+        event.preventDefault();
+        const pointIndex = indexFromPoint(event.clientX, event.clientY);
+        const index = pointIndex >= 0 ? pointIndex : indexFromTarget(event.target);
+        applyDragRange(drag, index);
       }}
-      onPointerCancel={() => {
-        setDragStart(null);
-        setDragMoved(false);
-        lastHitIndexRef.current = null;
-        setDragKeys(new Set());
-      }}
+      onPointerUp={(event) => finishDrag(event, disabled)}
+      onPointerCancel={(event) => finishDrag(event, true)}
     >
       {layout.map((item) => {
-        const isSelected = selected.has(item.key) || dragKeys.has(item.key);
+        const isSelected = displayedSelection.has(item.key);
         return (
           <div
             key={`${item.key}_${item.index}`}
@@ -143,13 +264,38 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
               '--row-x': `${item.rowX}px`,
               zIndex: item.index + (item.row === 1 ? 40 : 0)
             } as CSSProperties}
-            role="option"
-            aria-selected={isSelected}
-            onDoubleClick={() => {
-              if (!disabled) selectGroup(item.groupIndex);
-            }}
           >
-            <Card card={item.card} selected={isSelected} />
+            <Card
+              ref={(node) => {
+                buttonRefs.current[item.index] = node;
+              }}
+              card={item.card}
+              selected={isSelected}
+              disabled={disabled}
+              tabIndex={disabled ? -1 : item.index === focusedIndex ? 0 : -1}
+              onFocus={() => setFocusedIndex(item.index)}
+              onKeyDown={(event) => handleCardKeyDown(event, item)}
+              onClick={(event) => {
+                if (disabled) return;
+                if (event.detail > 0 && suppressPointerClickRef.current) {
+                  suppressPointerClickRef.current = false;
+                  if (suppressedClickTimerRef.current !== null) {
+                    window.clearTimeout(suppressedClickTimerRef.current);
+                    suppressedClickTimerRef.current = null;
+                  }
+                  event.preventDefault();
+                  return;
+                }
+                if (event.detail > 1) return;
+                if (event.detail === 1) doubleClickSelectionRef.current = new Set(selected);
+                onToggle(item.key);
+              }}
+              onDoubleClick={() => {
+                if (disabled) return;
+                selectGroup(item.groupIndex, doubleClickSelectionRef.current ?? selected);
+                doubleClickSelectionRef.current = null;
+              }}
+            />
           </div>
         );
       })}

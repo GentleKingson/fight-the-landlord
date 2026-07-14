@@ -1,0 +1,607 @@
+/* Card faces, card backs, played cards, and responsive hand layout. */
+
+.played-cards--compact {
+  justify-items: start;
+}
+
+.mini-card-placeholder {
+  width: 30px;
+  height: 42px;
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.14), transparent 38%),
+    repeating-linear-gradient(45deg, #315eab, #315eab 4px, #4d82d1 4px, #4d82d1 8px);
+  border: 1px solid rgba(255,255,255,.5);
+  box-shadow: 0 4px 9px rgba(0,0,0,.24);
+}
+
+.card-back-stack {
+  position: relative;
+  width: 112px;
+  height: 84px;
+  display: block;
+}
+
+.seat-panel--right .card-back-stack {
+  transform: scaleX(-1);
+}
+
+.card-back-stack strong {
+  position: absolute;
+  right: -8px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(180deg, #4d89dc, #1e5db7);
+  border: 2px solid rgba(255,255,255,.72);
+  box-shadow: 0 4px 12px rgba(0,0,0,.28);
+  font-weight: 950;
+}
+
+.seat-panel--right .card-back-stack strong {
+  transform: scaleX(-1);
+}
+
+.card-back {
+  position: absolute;
+  left: calc(var(--i, 0) * 4px);
+  top: calc(var(--i, 0) * .6px);
+  width: 42px;
+  height: 60px;
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,.18) 0 2px, transparent 3px),
+    repeating-linear-gradient(45deg, #2e5fac, #2e5fac 5px, #477fd2 5px, #477fd2 10px);
+  border: 2px solid rgba(239, 247, 255, .82);
+  box-shadow: 0 5px 10px rgba(0,0,0,.22);
+}
+
+.card-back:nth-child(1) { --i: 0; }
+
+.card-back:nth-child(2) { --i: 1; }
+
+.card-back:nth-child(3) { --i: 2; }
+
+.card-back:nth-child(4) { --i: 3; }
+
+.card-back:nth-child(5) { --i: 4; }
+
+.card-back:nth-child(6) { --i: 5; }
+
+.card-back:nth-child(7) { --i: 6; }
+
+.card-back:nth-child(8) { --i: 7; }
+
+.card-back:nth-child(9) { --i: 8; }
+
+.card-back:nth-child(10) { --i: 9; }
+
+.card-back:nth-child(11) { --i: 10; }
+
+.card-back:nth-child(12) { --i: 11; }
+
+.card-back:nth-child(13) { --i: 12; }
+
+.card-back:nth-child(14) { --i: 13; }
+
+.card-back:nth-child(15) { --i: 14; }
+
+.card-back:nth-child(16) { --i: 15; }
+
+.card-back:nth-child(17) { --i: 16; }
+
+.played-cards {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-width: 170px;
+  color: var(--text-light);
+}
+
+.played-cards--empty {
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.18);
+  color: rgba(255,255,255,.68);
+  font-weight: 800;
+}
+
+.played-cards__meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(2, 49, 34, .58);
+  color: #ffe28e;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.played-cards__row {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: min(520px, 58vw);
+}
+
+.felt-table > .played-cards {
+  display: none;
+}
+
+.played-action__cards .card {
+  margin-left: -7px;
+  box-shadow: 0 4px 10px rgba(0,0,0,.25);
+}
+
+.played-action__cards .card:first-child {
+  margin-left: 0;
+}
+
+.hand {
+  --hand-step: 52px;
+  position: relative;
+  height: 136px;
+  min-width: 0;
+  overflow: visible;
+  border-radius: 22px 22px 12px 12px;
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(255, 213, 121, .12), transparent 52%),
+    linear-gradient(180deg, rgba(12, 56, 41, .62), rgba(5, 25, 20, .76));
+  border: 1px solid rgba(255, 224, 147, .16);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 -8px 22px rgba(0,0,0,.18);
+  touch-action: none;
+}
+
+.hand.is-disabled {
+  opacity: .82;
+}
+
+.hand__slot {
+  position: absolute;
+  left: calc(50% + var(--single-x, 0px) - (var(--card-w, 72px) / 2));
+  bottom: 10px;
+  transform: translateY(0);
+  transform-origin: 50% 115%;
+  transition: transform .14s ease, filter .14s ease;
+  top: auto;
+  height: auto;
+  will-change: transform, left, bottom;
+}
+
+.hand__slot.is-selected {
+  transform: translateY(-22px);
+  z-index: 90 !important;
+}
+
+.card {
+  --w: 72px;
+  --h: 104px;
+  --card-w: var(--w);
+  position: relative;
+  display: block;
+  width: var(--w);
+  height: var(--h);
+  flex: 0 0 auto;
+  border-radius: 10px;
+  border: 1px solid rgba(20, 26, 30, .2);
+  background:
+    linear-gradient(150deg, rgba(255,255,255,.98), rgba(244, 241, 233, .96)),
+    #fff;
+  color: var(--black-card);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.9), 0 7px 15px rgba(0, 0, 0, .22);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 900;
+  user-select: none;
+}
+
+.card--red {
+  color: var(--red-card);
+}
+
+.card--played {
+  --w: 58px;
+  --h: 82px;
+  border-radius: 9px;
+}
+
+.card--mini {
+  --w: 34px;
+  --h: 48px;
+  border-radius: 6px;
+}
+
+.card.is-selected {
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.92), 0 16px 24px rgba(0, 0, 0, .3);
+  filter: brightness(1.08) saturate(1.04);
+}
+
+.card__index {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 0;
+  line-height: .9;
+  font-size: 17px;
+}
+
+.card__index b,
+.card__index i {
+  display: block;
+  font-style: normal;
+}
+
+.card__index i {
+  margin-top: 1px;
+  font-size: 15px;
+}
+
+.card__index--top {
+  left: 6px;
+  top: 6px;
+}
+
+.card__index--bottom {
+  right: 6px;
+  bottom: 6px;
+  transform: rotate(180deg);
+}
+
+.card__pip {
+  position: absolute;
+  left: 50%;
+  top: 53%;
+  transform: translate(-50%, -50%);
+  font-size: 42px;
+  line-height: 1;
+}
+
+.card--played .card__index {
+  font-size: 13px;
+}
+
+.card--played .card__index i {
+  font-size: 12px;
+}
+
+.card--played .card__pip {
+  font-size: 31px;
+}
+
+.card--mini .card__index {
+  font-size: 9px;
+}
+
+.card--mini .card__index i {
+  font-size: 8px;
+}
+
+.card--mini .card__pip {
+  font-size: 17px;
+}
+
+.card.is-joker {
+  background:
+    linear-gradient(155deg, #fff, #f2eee4 64%, #e9dfcf),
+    #fff;
+}
+
+.card__joker-word,
+.card__joker-star {
+  position: absolute;
+}
+
+.card__joker-word {
+  left: 11px;
+  bottom: 10px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0;
+  font-size: 14px;
+}
+
+.card__joker-star {
+  right: 12px;
+  bottom: 12px;
+  font-size: 32px;
+  line-height: 1;
+}
+
+.card--played .card__joker-word {
+  font-size: 11px;
+}
+
+.card--played .card__joker-star {
+  font-size: 24px;
+}
+
+.card--mini .card__joker-word {
+  left: 7px;
+  bottom: 5px;
+  font-size: 7px;
+}
+
+.card--mini .card__joker-star {
+  right: 5px;
+  bottom: 6px;
+  font-size: 14px;
+}
+
+@media (max-width: 880px) {
+  .seat-panel .card-back-stack {
+    display: none;
+  }
+
+  .seat-panel .played-action__cards .card {
+    --w: 28px;
+    --h: 40px;
+    margin-left: -8px;
+  }
+
+  .played-cards__row {
+    max-width: 88vw;
+  }
+
+  .hand {
+    height: 126px;
+    border-radius: 28px 28px 12px 12px;
+  }
+
+  .hand__slot {
+    left: calc(50% - (var(--card-w, 62px) / 2) + (var(--offset) * var(--hand-step)));
+    bottom: 8px;
+    transform: rotate(calc(var(--offset) * 1.35deg));
+  }
+
+  .hand__slot.is-selected {
+    transform: translateY(-18px) rotate(calc(var(--offset) * .55deg));
+  }
+
+  .card {
+    --w: 58px;
+    --h: 88px;
+  }
+
+  .card--played {
+    --w: 50px;
+    --h: 72px;
+  }
+
+  .card__pip {
+    font-size: 36px;
+  }
+
+  .card__index {
+    font-size: 15px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .card-back-stack {
+    width: 78px;
+    height: 58px;
+  }
+
+  .card-back {
+    width: 30px;
+    height: 44px;
+  }
+
+  .card-back-stack strong {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .bottom-cards .card--mini {
+    --w: 24px;
+    --h: 34px;
+  }
+
+  .mini-card-placeholder {
+    width: 24px;
+    height: 34px;
+  }
+
+  .hand {
+    height: 82px;
+    --hand-step: clamp(18px, 2.8vw, 26px) !important;
+  }
+
+  .hand__slot {
+    bottom: 5px;
+  }
+
+  .card {
+    --w: 46px;
+    --h: 68px;
+    border-radius: 7px;
+  }
+
+  .card--played {
+    --w: 38px;
+    --h: 54px;
+  }
+
+  .card__index {
+    font-size: 11px;
+  }
+
+  .card__index i {
+    font-size: 10px;
+  }
+
+  .card__pip {
+    font-size: 24px;
+  }
+}
+
+.hand.is-dragging .card {
+  cursor: grabbing;
+}
+
+.bottom-cards.is-hidden .mini-card-placeholder {
+  width: 24px;
+  height: 34px;
+  border-radius: 5px;
+}
+
+@media (max-width: 880px) {
+  .hand__slot.is-selected {
+    transform: translateY(-18px) rotate(calc(var(--offset) * .45deg));
+  }
+
+  .bottom-cards.is-hidden .mini-card-placeholder {
+    width: 22px;
+    height: 31px;
+  }
+}
+
+.hand.is-dragging .hand__slot {
+  transition: none;
+}
+
+.card--action {
+  --w: 46px;
+  --h: 64px;
+  border-radius: 8px;
+  background:
+    linear-gradient(150deg, rgba(255,255,255,.99), rgba(247, 244, 237, .98)),
+    #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.9), 0 5px 12px rgba(0, 0, 0, .28);
+}
+
+.card--action .card__index {
+  font-size: 11px;
+}
+
+.card--action .card__index i {
+  font-size: 10px;
+}
+
+.card--action .card__pip {
+  font-size: 24px;
+}
+
+.card--action .card__joker-word {
+  left: 8px;
+  bottom: 6px;
+  font-size: 8px;
+}
+
+.card--action .card__joker-star {
+  right: 7px;
+  bottom: 8px;
+  font-size: 18px;
+}
+
+@media (max-width: 880px) {
+  .hand__slot {
+    left: calc(50% + var(--compact-x, 0px) - (var(--card-w, 58px) / 2));
+    transform: translateY(0);
+  }
+
+  .hand__slot.is-selected {
+    transform: translateY(-18px);
+  }
+
+  .seat-panel .played-action__cards .card--action {
+    --w: 34px;
+    --h: 48px;
+    margin-left: -5px;
+  }
+
+  .seat-panel .played-action__cards .card--action .card__index {
+    font-size: 9px;
+  }
+
+  .seat-panel .played-action__cards .card--action .card__index i {
+    font-size: 8px;
+  }
+
+  .seat-panel .played-action__cards .card--action .card__pip {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 700px) and (orientation: portrait) {
+  .hand {
+    height: 180px;
+    border-radius: 24px 24px 12px 12px;
+  }
+
+  .hand__slot {
+    left: calc(50% + var(--row-x, 0px) - (var(--card-w, 58px) / 2));
+    bottom: 9px;
+  }
+
+  .hand__slot[data-row="0"] {
+    bottom: 84px;
+  }
+
+  .hand__slot[data-row="1"] {
+    bottom: 9px;
+  }
+
+  .hand__slot.is-selected {
+    transform: translateY(-16px);
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .hand__slot {
+    left: calc(50% + var(--compact-x, 0px) - (var(--card-w, 46px) / 2));
+    bottom: 5px;
+  }
+
+  .hand__slot.is-selected {
+    transform: translateY(-14px);
+  }
+
+  .played-action__cards .card--action {
+    --w: 30px;
+    --h: 42px;
+    margin-left: -5px;
+  }
+}
+
+.hand-zone {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  min-height: 142px;
+  padding-bottom: 2px;
+}
+
+@media (max-width: 880px) {
+  .hand-zone {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 132px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .hand-zone {
+    position: fixed;
+    z-index: 5;
+    left: 8px;
+    right: calc(34vw + 18px);
+    bottom: 8px;
+    min-height: 82px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) and (orientation: portrait) {
+  .hand-zone {
+    min-height: 190px;
+  }
+}

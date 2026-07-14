@@ -36,6 +36,12 @@ input {
   outline: 0;
 }
 
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--amber-hi);
+  outline-offset: 2px;
+}
+
 #root {
   min-height: 100dvh;
 }

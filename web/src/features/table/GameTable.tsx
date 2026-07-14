@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { canBeat as canBeatHand, findSmallestLegalResponse, handTypeLabels, parseHand } from '../../game/rules';
 import type { GameSocket } from '../../transport/wsClient';
-import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
+import { gameChatContext, selectChatMessages, useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
 import { cardKey } from '../../shared/cards/cardModel';
 import { Card } from '../../shared/cards/Card';
 import { CardBack } from '../../shared/cards/CardBack';
@@ -342,12 +342,14 @@ function UtilityDrawer({ socket, drawer, onClose, returnFocusRef }: GameTablePro
   onClose: () => void;
   returnFocusRef: RefObject<HTMLButtonElement | null>;
 }) {
-  const messages = useChatStore((state) => state.messages);
+  const gameId = useAppStore((state) => state.gameId);
+  const messages = useChatStore(selectChatMessages(gameChatContext(gameId)));
   const chatInput = useAppStore((state) => state.chatInput);
   const setChatInput = useAppStore((state) => state.setChatInput);
   const counter = useAppStore((state) => state.cardCounter);
   const actions = useAppStore((state) => state.recentActions);
   const chatPending = useAppStore((state) => Boolean(state.pendingCommands.chat));
+  const composingRef = useRef(false);
   const open = drawer !== 'none';
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const closeAndRestoreFocus = useCallback(() => {
@@ -374,9 +376,10 @@ function UtilityDrawer({ socket, drawer, onClose, returnFocusRef }: GameTablePro
   }, [drawer, open]);
 
   function sendChat() {
+    if (chatPending || composingRef.current) return;
     const content = chatInput.trim();
     if (!content) return;
-    const result = dispatchCommand(socket, createChatCommand(content, 'room'));
+    const result = dispatchCommand(socket, createChatCommand(content, 'game'));
     if (result.ok) setChatInput('');
   }
 
@@ -396,18 +399,20 @@ function UtilityDrawer({ socket, drawer, onClose, returnFocusRef }: GameTablePro
       </header>
       {drawer === 'chat' ? (
         <>
-          <div className="chat-feed">
-            {messages.filter((message) => message.scope === 'room').slice(-24).map((message, index) => (
-              <p key={index}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
+          <div className="chat-feed" role="log" aria-label="牌局聊天记录" tabIndex={0}>
+            {messages.slice(-24).map((message) => (
+              <p key={message.message_id}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
             ))}
           </div>
           <div className="chat-input-row">
             <input
-              aria-label="房间聊天消息"
+              aria-label="牌局聊天消息"
               value={chatInput}
               maxLength={240}
               onChange={(event) => setChatInput(event.target.value)}
-              placeholder="房间聊天"
+              placeholder="牌局聊天"
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={() => { composingRef.current = false; }}
               onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) sendChat(); }}
             />
             <button disabled={chatPending} onClick={sendChat}>{chatPending ? '发送中...' : '发送'}</button>
@@ -465,7 +470,7 @@ function arrangeSeats(players: PlayerInfo[], playerId: string): { me?: PlayerInf
 }
 
 function drawerTitle(drawer: UtilityDrawer): string {
-  return ({ chat: '房间聊天', counter: '记牌器', history: '动作历史', rules: '玩法说明', none: '' } satisfies Record<UtilityDrawer, string>)[drawer];
+  return ({ chat: '牌局聊天', counter: '记牌器', history: '动作历史', rules: '玩法说明', none: '' } satisfies Record<UtilityDrawer, string>)[drawer];
 }
 
 function rankName(rank: number): string {
