@@ -90,6 +90,18 @@ docker compose up -d
 docker compose down
 ```
 
+启动后可在浏览器打开 `http://localhost:1780/`。互联网部署前必须把 `.env`
+中的 `SECURITY_ALLOWED_ORIGINS` 改为实际 HTTPS 来源，并在反向代理中保留
+`/ws` 的 WebSocket Upgrade 头。
+
+```bash
+curl --fail http://localhost:1780/health
+curl --fail http://localhost:1780/version
+```
+
+完整的 TLS、缓存、版本门禁、镜像构建和回滚说明见
+[Web 生产部署](docs/deployment.md)。
+
 💡 推荐使用 [lazydocker](https://github.com/jesseduffield/lazydocker) 管理服务
 
 ### 本地开发
@@ -104,8 +116,13 @@ cd douzero && uv sync && uv run python server.py
 # 3. 启动服务端
 go run ./cmd/server
 
-# 4. 启动客户端
+# 4. 启动终端客户端
 go run ./cmd/client
+
+# 5. 启动 Web 开发服务器（另一个终端）
+cd web
+npm ci
+npm run dev
 ```
 
 ## 游戏规则

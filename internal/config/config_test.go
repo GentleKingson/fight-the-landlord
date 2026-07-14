@@ -136,6 +136,7 @@ func TestGameConfig_DurationMethods(t *testing.T) {
 		ShutdownTimeout:       60,
 		ShutdownCheckInterval: 5,
 		RoomCleanupDelay:      20,
+		OfflineWaitTimeout:    8,
 	}
 
 	assert.Equal(t, 30*time.Second, cfg.TurnTimeoutDuration())
@@ -144,6 +145,7 @@ func TestGameConfig_DurationMethods(t *testing.T) {
 	assert.Equal(t, 60*time.Minute, cfg.ShutdownTimeoutDuration())
 	assert.Equal(t, 5*time.Second, cfg.ShutdownCheckIntervalDuration())
 	assert.Equal(t, 20*time.Second, cfg.RoomCleanupDelayDuration())
+	assert.Equal(t, 8*time.Second, cfg.OfflineWaitTimeoutDuration())
 }
 
 func TestRateLimitConfig_BanDurationTime(t *testing.T) {
@@ -166,12 +168,22 @@ func TestLoadFromEnv(t *testing.T) {
 	// Set environment variables
 	t.Setenv("SERVER_HOST", "env-host")
 	t.Setenv("SERVER_PORT", "9999")
+	t.Setenv("SERVER_MIN_CLIENT_VERSION", "")
 	t.Setenv("REDIS_ADDR", "env-redis:6380")
 	t.Setenv("GAME_TURN_TIMEOUT", "120")
-	t.Setenv("SECURITY_ALLOWED_ORIGINS", "http://a.com,http://b.com")
+	t.Setenv("GAME_OFFLINE_WAIT_TIMEOUT", "7")
+	t.Setenv("SECURITY_ALLOWED_ORIGINS", " http://a.com, http://b.com ")
+	t.Setenv("BOT_ENABLED", "false")
+	t.Setenv("DOUZERO_ENABLED", "false")
 
 	// Create minimal config file
-	content := `{}`
+	content := `
+server:
+  min_client_version: "v9.9.9"
+bot:
+  enabled: true
+  douzero_enabled: true
+`
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "env.yaml")
 	err := os.WriteFile(configPath, []byte(content), 0o600)
@@ -184,7 +196,11 @@ func TestLoadFromEnv(t *testing.T) {
 	// Verify env vars override defaults
 	assert.Equal(t, "env-host", cfg.Server.Host)
 	assert.Equal(t, 9999, cfg.Server.Port)
+	assert.Empty(t, cfg.Server.MinClientVersion)
 	assert.Equal(t, "env-redis:6380", cfg.Redis.Addr)
 	assert.Equal(t, 120, cfg.Game.TurnTimeout)
+	assert.Equal(t, 7, cfg.Game.OfflineWaitTimeout)
 	assert.Equal(t, []string{"http://a.com", "http://b.com"}, cfg.Security.AllowedOrigins)
+	assert.False(t, cfg.BOT.Enabled)
+	assert.False(t, cfg.BOT.DouZeroEnabled)
 }

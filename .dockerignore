@@ -1,5 +1,6 @@
 # Docker 相关
 .docker/
+.git/
 
 # 环境变量文件（可能包含密钥）
 .env
@@ -17,6 +18,12 @@ configs/local.yaml
 /server
 /client
 *.exe
+web/dist/
+web/node_modules/
+web/test-results/
+web/playwright-report/
+web/coverage/
+web/*.tsbuildinfo
 
 # 系统文件
 .DS_Store

@@ -14,12 +14,13 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  go:
+    name: Go checks
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -28,7 +29,7 @@ jobs:
           cache: false
 
       - name: Restore Go cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/go/pkg/mod
@@ -43,12 +44,35 @@ jobs:
           version: v2.11.1
           args: --build-tags=ci
 
+      - name: Check gofmt
+        run: |
+          unformatted="$(git ls-files '*.go' | xargs gofmt -l)"
+          test -z "$unformatted" || { printf 'Run gofmt on:\n%s\n' "$unformatted"; exit 1; }
+
+      - name: Set up protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "3.13.0"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install protoc-gen-go
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+
+      - name: Check generated Go protocol
+        run: |
+          protoc --proto_path=. --go_out=. \
+            --go_opt=module=github.com/palemoky/fight-the-landlord \
+            internal/protocol/proto/*.proto
+          (cd internal/protocol/convert/msgtype && go run gen.go)
+          gofmt -w internal/protocol/convert/msgtype/mapping.go
+          git diff --exit-code -- internal/protocol/pb internal/protocol/convert/msgtype
+
       - name: Run tests
         # Use ci tag to skip sound tests/deps
         run: go test -tags=ci -race -p 4 -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Save Go cache
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@v5
         if: github.ref == 'refs/heads/main'
         with:
           path: |
@@ -57,8 +81,167 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@v6
         with:
           files: ./coverage.out
           flags: unittests
           fail_ci_if_error: false
+
+  web:
+    name: Web checks
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check generated Web protocol
+        run: npm run proto:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build production client
+        env:
+          VITE_APP_VERSION: ci
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run mock Playwright accessibility and screenshot tests
+        run: npm run test:e2e
+
+  web-real:
+    name: Real-server three-client Playwright
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run real-server three-client integration
+        env:
+          E2E_REDIS_ADDR: 127.0.0.1:6379
+          GAME_ROOM_CLEANUP_DELAY: "0"
+        run: npm run test:e2e:real
+
+  container:
+    name: Production container smoke test
+    needs: [go, web, web-real]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.example config --quiet
+
+      - name: Build production image
+        run: |
+          docker build \
+            --build-arg VERSION=ci \
+            --tag fight-the-landlord:ci \
+            .
+
+      - name: Run Compose production smoke test
+        run: |
+          set -euo pipefail
+          export COMPOSE_PROJECT_NAME=fight-the-landlord-ci
+          export GAME_IMAGE=fight-the-landlord
+          export IMAGE_TAG=ci
+          export SERVER_PORT=1780
+          export REDIS_PORT=6380
+          export REDIS_ADDR=redis:6379
+          export BOT_ENABLED=false
+          export DOUZERO_ENABLED=false
+          export GAME_ROOM_CLEANUP_DELAY=0
+          export SERVER_MIN_CLIENT_VERSION=
+          export SECURITY_ALLOWED_ORIGINS=http://127.0.0.1:1780
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              docker compose --env-file .env.example ps || true
+              docker compose --env-file .env.example logs --no-color || true
+            fi
+            docker compose --env-file .env.example down --volumes --remove-orphans || true
+            return "$status"
+          }
+          trap cleanup EXIT
+
+          docker compose --env-file .env.example up -d --wait redis poker-server
+
+          if docker compose --env-file .env.example ps --services --status running | grep -qx douzero; then
+            echo "DouZero must remain disabled without the optional profile"
+            exit 1
+          fi
+
+          curl --fail --show-error http://127.0.0.1:1780/health
+          curl --fail --show-error http://127.0.0.1:1780/version | jq -e \
+            '.server_version == "ci" and .web_client_version == "ci"'
+          curl --fail --show-error http://127.0.0.1:1780/ >/tmp/index.html
+          curl --fail --show-error http://127.0.0.1:1780/room/smoke >/tmp/spa.html
+          cmp /tmp/index.html /tmp/spa.html
+          grep -Fq 'name="application-version" content="ci"' /tmp/index.html
+
+          asset="$(grep -Eo '/assets/[^" ]+\.js' /tmp/index.html | head -n 1)"
+          test -n "$asset"
+          curl --fail --silent --head "http://127.0.0.1:1780${asset}" | \
+            grep -qi '^cache-control: public, max-age=31536000, immutable'
+          server_id="$(docker compose --env-file .env.example ps -q poker-server)"
+          test -n "$server_id"
+          test "$(docker inspect --format='{{.State.Health.Status}}' "$server_id")" = healthy

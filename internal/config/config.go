@@ -177,6 +177,12 @@ func getEnvStr(key string, target *string) {
 	}
 }
 
+func getEnvOptionalStr(key string, target *string) {
+	if v, ok := os.LookupEnv(key); ok {
+		*target = v
+	}
+}
+
 func getEnvInt(key string, target *int) {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -187,7 +193,23 @@ func getEnvInt(key string, target *int) {
 
 func getEnvStrSlice(key string, target *[]string) {
 	if v := os.Getenv(key); v != "" {
-		*target = strings.Split(v, ",")
+		values := make([]string, 0, strings.Count(v, ",")+1)
+		for value := range strings.SplitSeq(v, ",") {
+			if value = strings.TrimSpace(value); value != "" {
+				values = append(values, value)
+			}
+		}
+		if len(values) > 0 {
+			*target = values
+		}
+	}
+}
+
+func getEnvBool(key string, target *bool) {
+	if v, ok := os.LookupEnv(key); ok {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			*target = parsed
+		}
 	}
 }
 
@@ -197,7 +219,7 @@ func loadFromEnv(cfg *Config) {
 	getEnvStr("SERVER_HOST", &cfg.Server.Host)
 	getEnvInt("SERVER_PORT", &cfg.Server.Port)
 	getEnvInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
-	getEnvStr("SERVER_MIN_CLIENT_VERSION", &cfg.Server.MinClientVersion)
+	getEnvOptionalStr("SERVER_MIN_CLIENT_VERSION", &cfg.Server.MinClientVersion)
 
 	// Redis
 	getEnvStr("REDIS_ADDR", &cfg.Redis.Addr)
@@ -211,15 +233,12 @@ func loadFromEnv(cfg *Config) {
 	getEnvInt("GAME_SHUTDOWN_TIMEOUT", &cfg.Game.ShutdownTimeout)
 	getEnvInt("GAME_SHUTDOWN_CHECK_INTERVAL", &cfg.Game.ShutdownCheckInterval)
 	getEnvInt("GAME_ROOM_CLEANUP_DELAY", &cfg.Game.RoomCleanupDelay)
+	getEnvInt("GAME_OFFLINE_WAIT_TIMEOUT", &cfg.Game.OfflineWaitTimeout)
 
 	// BOT
-	if v := os.Getenv("BOT_ENABLED"); v == "true" || v == "1" {
-		cfg.BOT.Enabled = true
-	}
+	getEnvBool("BOT_ENABLED", &cfg.BOT.Enabled)
 	getEnvInt("BOT_FILL_TIMEOUT", &cfg.BOT.BotFillTimeout)
-	if v := os.Getenv("DOUZERO_ENABLED"); v == "true" || v == "1" {
-		cfg.BOT.DouZeroEnabled = true
-	}
+	getEnvBool("DOUZERO_ENABLED", &cfg.BOT.DouZeroEnabled)
 	getEnvStr("DOUZERO_URL", &cfg.BOT.DouZeroURL)
 
 	// Security

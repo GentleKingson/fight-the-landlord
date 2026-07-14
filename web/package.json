@@ -7,12 +7,13 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
-    "lint": "eslint src tests scripts vite.config.ts vitest.config.ts playwright.config.ts --max-warnings=0",
+    "lint": "eslint src tests scripts vite.config.ts vitest.config.ts playwright.config.ts playwright.real.config.ts --max-warnings=0",
     "proto:generate": "node scripts/generate-protocol.mjs",
     "proto:check": "node scripts/generate-protocol.mjs --check",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:real": "playwright test --config playwright.real.config.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

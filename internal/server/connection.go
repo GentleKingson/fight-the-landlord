@@ -88,6 +88,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 // handleHealth 健康检查接口
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !allowReadMethod(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("OK"))
 }
@@ -96,18 +101,36 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 //
 // 客户端启动时据此判断是否需要强制升级，使升级策略由服务端集中控制。
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !allowReadMethod(w, r) {
+		return
+	}
+
 	resp := struct {
 		ServerVersion    string `json:"server_version"`
 		MinClientVersion string `json:"min_client_version"`
+		WebClientVersion string `json:"web_client_version"`
 	}{
 		ServerVersion:    Version,
-		MinClientVersion: s.config.Server.MinClientVersion,
+		WebClientVersion: Version,
+	}
+	if s.config != nil {
+		resp.MinClientVersion = s.config.Server.MinClientVersion
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("⚠️  写入版本响应失败: %v", err)
 	}
+}
+
+func allowReadMethod(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return true
+	}
+	w.Header().Set("Allow", "GET, HEAD")
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	return false
 }
 
 // registerClient 注册客户端

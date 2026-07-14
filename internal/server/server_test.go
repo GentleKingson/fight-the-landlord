@@ -41,7 +41,8 @@ func TestServer_RegisterUnregister_Concurrency(t *testing.T) {
 	for i := 0; i < count; i++ {
 		go func(i int) {
 			defer wg.Done()
-			s.UnregisterClient(strconv.Itoa(i))
+			id := strconv.Itoa(i)
+			s.UnregisterClient(id, s.GetClientByID(id))
 		}(i)
 	}
 	wg.Wait()
@@ -61,6 +62,8 @@ func TestServer_HandleHealth(t *testing.T) {
 	defer func() { _ = res.Body.Close() }()
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "no-store", res.Header.Get("Cache-Control"))
+	assert.Equal(t, "text/plain; charset=utf-8", res.Header.Get("Content-Type"))
 }
 
 func TestServer_HandleVersion(t *testing.T) {
@@ -79,14 +82,39 @@ func TestServer_HandleVersion(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, "application/json", res.Header.Get("Content-Type"))
+	assert.Equal(t, "no-store", res.Header.Get("Cache-Control"))
 
 	var body struct {
 		ServerVersion    string `json:"server_version"`
 		MinClientVersion string `json:"min_client_version"`
+		WebClientVersion string `json:"web_client_version"`
 	}
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 	assert.Equal(t, "v1.1.0", body.MinClientVersion)
 	assert.Equal(t, Version, body.ServerVersion)
+	assert.Equal(t, Version, body.WebClientVersion)
+}
+
+func TestServer_ReadOnlyEndpointsRejectWrites(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: &config.Config{}}
+	for _, endpoint := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{name: "health", handler: s.handleHealth},
+		{name: "version", handler: s.handleVersion},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			endpoint.handler(w, httptest.NewRequest(http.MethodPost, "/"+endpoint.name, http.NoBody))
+
+			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+			assert.Equal(t, "GET, HEAD", w.Header().Get("Allow"))
+			assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		})
+	}
 }
 
 func TestServer_MaintenanceMode(t *testing.T) {

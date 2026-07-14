@@ -1,29 +1,50 @@
 services:
   # 游戏服务器
   poker-server:
-    image: palemoky/fight-the-landlord:latest
-    container_name: poker-server
+    image: ${GAME_IMAGE:-palemoky/fight-the-landlord}:${IMAGE_TAG:-latest}
     restart: unless-stopped
     stop_grace_period: ${GAME_SHUTDOWN_TIMEOUT:-30}m
     stop_signal: SIGTERM
-    env_file: .env
     environment:
-      - TZ=Asia/Shanghai
-      - DOUZERO_URL=http://douzero:2021
+      TZ: Asia/Shanghai
+      SERVER_HOST: 0.0.0.0
+      # SERVER_PORT in .env is the published host port. The container always
+      # listens on 1780 so changing the host port cannot break the mapping.
+      SERVER_PORT: 1780
+      SERVER_MIN_CLIENT_VERSION: ${SERVER_MIN_CLIENT_VERSION:-}
+      SECURITY_ALLOWED_ORIGINS: ${SECURITY_ALLOWED_ORIGINS:-http://localhost:1780,http://127.0.0.1:1780}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      BOT_ENABLED: ${BOT_ENABLED:-true}
+      BOT_FILL_TIMEOUT: ${BOT_FILL_TIMEOUT:-15}
+      DOUZERO_ENABLED: ${DOUZERO_ENABLED:-false}
+      DOUZERO_URL: ${DOUZERO_URL:-http://douzero:2021}
+      GAME_TURN_TIMEOUT: ${GAME_TURN_TIMEOUT:-30}
+      GAME_BID_TIMEOUT: ${GAME_BID_TIMEOUT:-15}
+      GAME_ROOM_TIMEOUT: ${GAME_ROOM_TIMEOUT:-10}
+      GAME_SHUTDOWN_TIMEOUT: ${GAME_SHUTDOWN_TIMEOUT:-30}
+      GAME_SHUTDOWN_CHECK_INTERVAL: ${GAME_SHUTDOWN_CHECK_INTERVAL:-15}
+      GAME_ROOM_CLEANUP_DELAY: ${GAME_ROOM_CLEANUP_DELAY:-30}
+      GAME_OFFLINE_WAIT_TIMEOUT: ${GAME_OFFLINE_WAIT_TIMEOUT:-30}
     ports:
       - "${SERVER_PORT:-1780}:1780"
     depends_on:
       redis:
         condition: service_healthy
-      douzero:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/server", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - poker-network
 
   # DouZero 推理服务
   douzero:
-    image: palemoky/fight-the-landlord-douzero:latest
-    container_name: poker-douzero
+    image: ${DOUZERO_IMAGE:-palemoky/fight-the-landlord-douzero}:${IMAGE_TAG:-latest}
+    profiles: ["douzero"]
     restart: unless-stopped
     networks:
       - poker-network
@@ -37,7 +58,6 @@ services:
   # Redis 数据库
   redis:
     image: redis:8-alpine
-    container_name: poker-redis
     restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"

@@ -148,6 +148,14 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	// 设置房间游戏开始回调
 	s.roomManager.SetOnGameStart(func(r *room.Room) {
 		gs := session.NewGameSession(r, s.leaderboard, s.config.Game)
+		for _, player := range r.Players {
+			if player == nil || player.Client == nil {
+				continue
+			}
+			if botClient, ok := player.Client.(*bot.BotClient); ok {
+				botClient.SetSession(gs)
+			}
+		}
 		s.handler.SetGameSession(r.Code, gs)
 		gs.Start()
 	})
@@ -161,10 +169,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 // Start 启动服务器
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
-
-	http.HandleFunc("/ws", s.handleWebSocket)
-	http.HandleFunc("/health", s.handleHealth)
-	http.HandleFunc("/version", s.handleVersion)
+	handler := s.httpHandler(loadWebAssets())
 
 	// 启动监控 goroutine
 	go s.monitorStats()
@@ -172,7 +177,7 @@ func (s *Server) Start() error {
 	log.Printf("🚀 服务器启动在 ws://%s/ws (CPU核心数: %d)", addr, runtime.NumCPU())
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           nil,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second, // 防止 Slowloris 攻击
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
