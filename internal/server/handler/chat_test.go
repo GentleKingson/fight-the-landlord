@@ -12,6 +12,48 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
 
+func TestHandler_HandleChat_InvalidPayloadIsCorrelated(t *testing.T) {
+	client := testutil.NewSimpleClient("p1", "Player1")
+	h := NewHandler(HandlerDeps{})
+
+	h.handleChat(client, &protocol.Message{Type: protocol.MsgChat, Payload: []byte{0xff}})
+
+	if len(client.Messages) != 1 {
+		t.Fatalf("expected one error response, got %d", len(client.Messages))
+	}
+	payload, err := codec.ParsePayload[protocol.ErrorPayload](client.Messages[0])
+	if err != nil {
+		t.Fatalf("parse error response: %v", err)
+	}
+	if payload.Code != protocol.ErrCodeInvalidMsg || payload.CommandType != protocol.MsgChat {
+		t.Fatalf("unexpected error payload: %+v", payload)
+	}
+}
+
+func TestHandler_HandleChat_MissingRoomManagerIsCorrelated(t *testing.T) {
+	client := testutil.NewSimpleClient("p1", "Player1")
+	client.SetRoom("123")
+	h := NewHandler(HandlerDeps{})
+	msg := codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{
+		Content:   "Hello",
+		Scope:     "room",
+		MessageID: "m1",
+	})
+
+	h.handleChat(client, msg)
+
+	if len(client.Messages) != 1 {
+		t.Fatalf("expected one error response, got %d", len(client.Messages))
+	}
+	payload, err := codec.ParsePayload[protocol.ErrorPayload](client.Messages[0])
+	if err != nil {
+		t.Fatalf("parse error response: %v", err)
+	}
+	if payload.CommandType != protocol.MsgChat {
+		t.Fatalf("expected chat correlation, got %+v", payload)
+	}
+}
+
 func TestHandler_HandleChat_Lobby(t *testing.T) {
 	// 1. Setup
 	mockServer := new(testutil.MockServer)

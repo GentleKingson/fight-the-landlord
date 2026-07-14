@@ -1,7 +1,7 @@
-import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore } from '../../stores/appStore';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
+import { dispatchCommand } from '../../transport/commandDispatcher';
 
 export function GameResult({ socket }: { socket: GameSocket }) {
   const winnerName = useAppStore((state) => state.winnerName);
@@ -9,6 +9,8 @@ export function GameResult({ socket }: { socket: GameSocket }) {
   const finalMultiplier = useAppStore((state) => state.finalMultiplier);
   const scores = useAppStore((state) => state.scores);
   const playerHands = useAppStore((state) => state.playerHands);
+  const readyPending = useAppStore((state) => Boolean(state.pendingCommands.ready));
+  const leavePending = useAppStore((state) => Boolean(state.pendingCommands['leave-room']));
 
   return (
     <main className="result-screen">
@@ -30,8 +32,12 @@ export function GameResult({ socket }: { socket: GameSocket }) {
           ))}
         </div>
         <div className="room-actions">
-          <button className="primary-action" onClick={() => socket.send(MsgType.Ready)}>再来一局</button>
-          <button className="secondary-action" onClick={() => { socket.send(MsgType.LeaveRoom); useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>
+          <button className="primary-action" disabled={readyPending || leavePending} onClick={() => dispatchCommand(socket, { kind: 'ready' })}>
+            {readyPending ? '等待确认...' : '再来一局'}
+          </button>
+          <button className="secondary-action" disabled={leavePending || readyPending} onClick={() => dispatchCommand(socket, { kind: 'leave-room' })}>
+            {leavePending ? '返回中...' : '返回大厅'}
+          </button>
         </div>
       </section>
     </main>

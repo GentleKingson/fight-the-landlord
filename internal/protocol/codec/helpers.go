@@ -48,6 +48,16 @@ func Encode(m *protocol.Message) ([]byte, error) {
 		return nil, fmt.Errorf("unknown message type %q", m.Type)
 	}
 	pbMsg.Payload = m.Payload // Protobuf payload
+	if m.Event != nil {
+		pbMsg.Event = &pb.EventMeta{
+			StreamId:       m.Event.StreamID,
+			EventVersion:   m.Event.EventVersion,
+			GameId:         m.Event.GameID,
+			TurnId:         m.Event.TurnID,
+			ServerTimeMs:   m.Event.ServerTimeMS,
+			TurnDeadlineMs: m.Event.TurnDeadlineMS,
+		}
+	}
 
 	return proto.Marshal(pbMsg)
 }
@@ -72,6 +82,16 @@ func Decode(data []byte) (*protocol.Message, error) {
 	}
 	msg.Type = protocol.MessageType(typeName)
 	msg.Payload = append([]byte(nil), pbMsg.Payload...) // 复制 payload 避免引用
+	if pbMsg.Event != nil {
+		msg.Event = &protocol.EventMeta{
+			StreamID:       pbMsg.Event.StreamId,
+			EventVersion:   pbMsg.Event.EventVersion,
+			GameID:         pbMsg.Event.GameId,
+			TurnID:         pbMsg.Event.TurnId,
+			ServerTimeMS:   pbMsg.Event.ServerTimeMs,
+			TurnDeadlineMS: pbMsg.Event.TurnDeadlineMs,
+		}
+	}
 
 	return msg, nil
 }
@@ -99,6 +119,26 @@ func NewErrorMessageWithText(code int, text string) *protocol.Message {
 	msg, _ := NewMessage(protocol.MsgError, protocol.ErrorPayload{
 		Code:    code,
 		Message: text,
+	})
+	return msg
+}
+
+// NewCommandErrorMessage 创建可关联到具体命令的错误消息。
+func NewCommandErrorMessage(code int, command protocol.MessageType) *protocol.Message {
+	msg, _ := NewMessage(protocol.MsgError, protocol.ErrorPayload{
+		Code:        code,
+		Message:     protocol.ErrorMessages[code],
+		CommandType: command,
+	})
+	return msg
+}
+
+// NewCommandErrorMessageWithText 创建带自定义文本且可关联到具体命令的错误消息。
+func NewCommandErrorMessageWithText(code int, text string, command protocol.MessageType) *protocol.Message {
+	msg, _ := NewMessage(protocol.MsgError, protocol.ErrorPayload{
+		Code:        code,
+		Message:     text,
+		CommandType: command,
 	})
 	return msg
 }

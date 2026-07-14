@@ -7,6 +7,7 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/convert/msgtype"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/pb"
 )
 
@@ -179,9 +180,14 @@ func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target 
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
 			return true, err
 		}
+		var commandType protocol.MessageType
+		if pbMsg.CommandType != pb.MessageType_MSG_UNKNOWN {
+			commandType = protocol.MessageType(msgtype.ProtoMessageTypeToString(pbMsg.CommandType))
+		}
 		*target.(*protocol.ErrorPayload) = protocol.ErrorPayload{
-			Code:    int(pbMsg.Code),
-			Message: pbMsg.Message,
+			Code:        int(pbMsg.Code),
+			Message:     pbMsg.Message,
+			CommandType: commandType,
 		}
 		return true, nil
 	}
@@ -351,6 +357,30 @@ func decodeRoomStateMessages(msgType protocol.MessageType, data []byte, target a
 		*target.(*protocol.RoomListResultPayload) = protocol.RoomListResultPayload{
 			Rooms: convert.ProtoToRoomListItems(pbMsg.Rooms),
 		}
+		return true, nil
+	case protocol.MsgMatchQueued:
+		var pbMsg pb.MatchQueuedPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.MatchQueuedPayload) = protocol.MatchQueuedPayload{
+			DeadlineMS: pbMsg.DeadlineMs,
+			Practice:   pbMsg.Practice,
+		}
+		return true, nil
+	case protocol.MsgMatchCancelled:
+		var pbMsg pb.MatchCancelledPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.MatchCancelledPayload) = protocol.MatchCancelledPayload{Reason: pbMsg.Reason}
+		return true, nil
+	case protocol.MsgRoomLeft:
+		var pbMsg pb.RoomLeftPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.RoomLeftPayload) = protocol.RoomLeftPayload{RoomCode: pbMsg.RoomCode}
 		return true, nil
 	}
 	return false, nil

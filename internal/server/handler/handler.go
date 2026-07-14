@@ -85,6 +85,7 @@ func (h *Handler) initHandlers() {
 		protocol.MsgLeaveRoom:     func(c types.ClientInterface, _ *protocol.Message) { h.handleLeaveRoom(c) },
 		protocol.MsgQuickMatch:    func(c types.ClientInterface, _ *protocol.Message) { h.handleQuickMatch(c) },
 		protocol.MsgPracticeMatch: func(c types.ClientInterface, _ *protocol.Message) { h.handlePracticeMatch(c) },
+		protocol.MsgCancelMatch:   func(c types.ClientInterface, _ *protocol.Message) { h.handleCancelMatch(c) },
 		protocol.MsgReady:         func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, true) },
 		protocol.MsgCancelReady:   func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, false) },
 

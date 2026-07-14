@@ -68,6 +68,10 @@
     "frame": "08111200"
   },
   {
+    "type": "cancel_match",
+    "frame": "08121200"
+  },
+  {
     "type": "connected",
     "frame": "0864121f0a0674656d702d311209e696b0e78ea9e5aeb61a0a74656d702d746f6b656e"
   },
@@ -176,8 +180,20 @@
     "frame": "087e12020801"
   },
   {
+    "type": "match_queued",
+    "frame": "087f120708abbb97ffbc31"
+  },
+  {
+    "type": "match_cancelled",
+    "frame": "088001120b0a0963616e63656c6c6564"
+  },
+  {
+    "type": "room_left",
+    "frame": "08810112080a06303132333435"
+  },
+  {
     "type": "error",
-    "frame": "08c801121108e907120ce6a0bce5bc8fe99499e8afaf"
+    "frame": "08c801121308e907120ce6a0bce5bc8fe99499e8afaf180a"
   },
   {
     "type": "practice_match",

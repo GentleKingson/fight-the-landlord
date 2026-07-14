@@ -11,12 +11,15 @@ const send = vi.fn((): SendResult => ({ ok: true }));
 const socket = { send } as unknown as GameSocket;
 
 beforeEach(() => {
+  useAppStore.getState().clearPendingCommands();
   send.mockReturnValue({ ok: true });
   useAppStore.setState({
     connected: true,
     connectionStatus: 'connected',
     maintenance: false,
     error: '',
+    businessError: null,
+    pendingCommands: {},
     phase: 'playing',
     playerId: 'p1',
     roomCode: '123456',

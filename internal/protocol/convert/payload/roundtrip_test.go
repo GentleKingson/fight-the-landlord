@@ -197,8 +197,9 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 	t.Run("Error", func(t *testing.T) {
 		t.Parallel()
 		original := protocol.ErrorPayload{
-			Code:    404,
-			Message: "Not found",
+			Code:        404,
+			Message:     "Not found",
+			CommandType: protocol.MsgJoinRoom,
 		}
 
 		data, err := EncodePayload(protocol.MsgError, original)
@@ -210,6 +211,43 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 
 		assert.Equal(t, original.Code, result.Code)
 		assert.Equal(t, original.Message, result.Message)
+		assert.Equal(t, original.CommandType, result.CommandType)
+	})
+
+	t.Run("MatchQueued", func(t *testing.T) {
+		t.Parallel()
+		original := protocol.MatchQueuedPayload{DeadlineMS: 1_700_000_030_123, Practice: true}
+
+		data, err := EncodePayload(protocol.MsgMatchQueued, original)
+		require.NoError(t, err)
+
+		var result protocol.MatchQueuedPayload
+		require.NoError(t, DecodePayload(protocol.MsgMatchQueued, data, &result))
+		assert.Equal(t, original, result)
+	})
+
+	t.Run("MatchCancelled", func(t *testing.T) {
+		t.Parallel()
+		original := protocol.MatchCancelledPayload{Reason: "cancelled"}
+
+		data, err := EncodePayload(protocol.MsgMatchCancelled, original)
+		require.NoError(t, err)
+
+		var result protocol.MatchCancelledPayload
+		require.NoError(t, DecodePayload(protocol.MsgMatchCancelled, data, &result))
+		assert.Equal(t, original, result)
+	})
+
+	t.Run("RoomLeft", func(t *testing.T) {
+		t.Parallel()
+		original := protocol.RoomLeftPayload{RoomCode: "123456"}
+
+		data, err := EncodePayload(protocol.MsgRoomLeft, original)
+		require.NoError(t, err)
+
+		var result protocol.RoomLeftPayload
+		require.NoError(t, DecodePayload(protocol.MsgRoomLeft, data, &result))
+		assert.Equal(t, original, result)
 	})
 }
 

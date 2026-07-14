@@ -127,6 +127,36 @@ func TestEncodeDecode(t *testing.T) {
 	}
 }
 
+func TestEncodeDecodeEventMeta(t *testing.T) {
+	t.Parallel()
+
+	original := MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+		PlayerID: "player-1",
+		Timeout:  30,
+		MustPlay: true,
+		CanBeat:  true,
+	})
+	original.Event = &protocol.EventMeta{
+		StreamID:       "game:game-1",
+		EventVersion:   42,
+		GameID:         "game-1",
+		TurnID:         7,
+		ServerTimeMS:   1_700_000_000_000,
+		TurnDeadlineMS: 1_700_000_030_000,
+	}
+	t.Cleanup(func() { PutMessage(original) })
+
+	encoded, err := Encode(original)
+	require.NoError(t, err)
+
+	decoded, err := Decode(encoded)
+	require.NoError(t, err)
+	t.Cleanup(func() { PutMessage(decoded) })
+
+	assert.Equal(t, original.Type, decoded.Type)
+	assert.Equal(t, original.Event, decoded.Event)
+}
+
 func TestParsePayload(t *testing.T) {
 	t.Parallel()
 
@@ -171,4 +201,16 @@ func TestNewErrorMessageWithText(t *testing.T) {
 	assert.Equal(t, customText, payload.Message)
 
 	PutMessage(msg)
+}
+
+func TestNewCommandErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	msg := NewCommandErrorMessage(protocol.ErrCodeInvalidCards, protocol.MsgPlayCards)
+	t.Cleanup(func() { PutMessage(msg) })
+
+	payload, err := ParsePayload[protocol.ErrorPayload](msg)
+	require.NoError(t, err)
+	assert.Equal(t, protocol.ErrCodeInvalidCards, payload.Code)
+	assert.Equal(t, protocol.MsgPlayCards, payload.CommandType)
 }

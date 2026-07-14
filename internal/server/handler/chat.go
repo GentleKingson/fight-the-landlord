@@ -12,6 +12,7 @@ import (
 func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.ChatPayload](msg)
 	if err != nil {
+		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgChat))
 		return
 	}
 
@@ -19,8 +20,8 @@ func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message
 	if h.chatLimiter != nil {
 		allowed, reason := h.chatLimiter.AllowChat(client.GetID())
 		if !allowed {
-			client.SendMessage(codec.NewErrorMessageWithText(
-				protocol.ErrCodeRateLimit, reason))
+			client.SendMessage(codec.NewCommandErrorMessageWithText(
+				protocol.ErrCodeRateLimit, reason, protocol.MsgChat))
 			return
 		}
 	}
@@ -41,16 +42,20 @@ func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message
 	// 房间聊天：检查房间状态
 	roomID := client.GetRoom()
 	if roomID == "" {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeNotInRoom, "不在房间中，无法发送房间消息"))
+		client.SendMessage(codec.NewCommandErrorMessageWithText(
+			protocol.ErrCodeNotInRoom, "不在房间中，无法发送房间消息", protocol.MsgChat))
 		return
 	}
 
 	if h.roomManager == nil {
+		client.SendMessage(codec.NewCommandErrorMessageWithText(
+			protocol.ErrCodeUnknown, "房间服务暂不可用", protocol.MsgChat))
 		return
 	}
 
 	room := h.roomManager.GetRoom(roomID)
 	if room == nil {
+		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeRoomNotFound, protocol.MsgChat))
 		return
 	}
 

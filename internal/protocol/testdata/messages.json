@@ -16,6 +16,7 @@
   { "type": "get_online_count", "payload": null },
   { "type": "chat", "payload": { "sender_id": "玩家-1", "sender_name": "青竹", "content": "你好，世界", "scope": "room", "time": 0, "is_system": false, "message_id": "消息-1", "room_code": "012345", "game_id": "game-一", "server_time": 1700000000123 } },
   { "type": "get_maintenance_status", "payload": null },
+  { "type": "cancel_match", "payload": null },
   { "type": "connected", "payload": { "player_id": "temp-1", "player_name": "新玩家", "reconnect_token": "temp-token" } },
   { "type": "reconnected", "payload": { "player_id": "玩家-1", "player_name": "青竹", "room_code": "012345", "game_state": { "phase": "playing", "players": [{ "id": "玩家-1", "name": "青竹", "seat": 0, "ready": true, "is_landlord": true, "cards_count": 0, "online": false, "is_bot": false }], "hand": [], "bottom_cards": [], "current_turn": "玩家-1", "last_played": [], "last_player_id": "", "must_play": true, "can_beat": false, "snapshot_version": 7, "game_id": "game-一", "bottom_cards_revealed": true, "turn_id": 0, "turn_deadline_ms": 1700000009999, "server_time_ms": 1700000000123, "last_player_name": "", "last_hand_type": "", "is_grab": false, "multiplier": 2, "base_score": 1, "played_cards": [] }, "reconnect_token": "rotated-token" } },
   { "type": "pong", "payload": { "client_timestamp": 0, "server_timestamp": 1700000000123 } },
@@ -43,6 +44,9 @@
   { "type": "room_list_result", "payload": { "rooms": [] } },
   { "type": "maintenance_status", "payload": { "maintenance": false } },
   { "type": "maintenance", "payload": { "maintenance": true } },
-  { "type": "error", "payload": { "code": 1001, "message": "格式错误" } },
+  { "type": "match_queued", "payload": { "deadline_ms": 1700000030123, "practice": false } },
+  { "type": "match_cancelled", "payload": { "reason": "cancelled" } },
+  { "type": "room_left", "payload": { "room_code": "012345" } },
+  { "type": "error", "payload": { "code": 1001, "message": "格式错误", "command_type": 10 } },
   { "type": "practice_match", "payload": null }
 ]

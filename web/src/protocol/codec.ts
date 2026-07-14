@@ -5,6 +5,7 @@ import {
   PAYLOAD_TYPE_BY_NAME,
   protocolRoot,
   type EmptyPayload,
+  type EventMeta,
   type MessageName,
   type PayloadByName,
   type ProtocolMessage
@@ -58,6 +59,9 @@ const requiredFields: Partial<Record<MessageName, readonly string[]>> = {
   player_joined: ['player'],
   player_left: ['player_id', 'player_name'],
   player_ready: ['player_id', 'ready'],
+  match_queued: ['deadline_ms', 'practice'],
+  match_cancelled: ['reason'],
+  room_left: ['room_code'],
   game_start: ['players'],
   deal_cards: ['cards', 'bottom_cards'],
   bid_turn: ['player_id', 'timeout', 'is_grab', 'multiplier'],
@@ -114,11 +118,36 @@ export function decodeMessage(data: ArrayBuffer | Uint8Array): ProtocolMessage {
   const payloadBytes = envelopeRecord.payload instanceof Uint8Array ? envelopeRecord.payload : new Uint8Array();
   try {
     const payload = decodePayload(type, payloadBytes);
-    return { type, payload } as ProtocolMessage;
+    const event = decodeEvent(envelopeRecord.event, type);
+    return (event ? { type, payload, event } : { type, payload }) as ProtocolMessage;
   } catch (error) {
     if (error instanceof ProtocolDecodeError) throw error;
     throw new ProtocolDecodeError(`Failed to decode ${type}: ${errorMessage(error)}`, numericType, { cause: error });
   }
+}
+
+function decodeEvent(value: unknown, messageType: MessageName): EventMeta | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    throw new ProtocolDecodeError('Invalid event metadata', MESSAGE_TYPE_BY_NAME[messageType]);
+  }
+
+  const EventType = protocolRoot.lookupType('protocol.EventMeta');
+  assertSafeInt64Fields(EventType, value, messageType, 'event');
+  const event = EventType.toObject(value as unknown as protobuf.Message<UnknownRecord>, {
+    longs: Number,
+    defaults: true,
+    arrays: true,
+    objects: true
+  }) as unknown as EventMeta;
+  const validationError = EventType.verify(event);
+  if (validationError) {
+    throw new ProtocolDecodeError(
+      `Invalid event metadata: ${validationError}`,
+      MESSAGE_TYPE_BY_NAME[messageType]
+    );
+  }
+  return event;
 }
 
 function encodePayload<Name extends MessageName>(type: Name, payload?: EncodablePayload<Name>): Uint8Array {

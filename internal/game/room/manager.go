@@ -96,34 +96,29 @@ func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Roo
 	return room, nil
 }
 
-// LeaveRoom 离开房间
-func (rm *RoomManager) LeaveRoom(client types.ClientInterface) {
+// LeaveRoom 离开房间。返回值表示客户端的房间身份是否已被权威清除。
+func (rm *RoomManager) LeaveRoom(client types.ClientInterface) bool {
 	roomCode := client.GetRoom()
 	if roomCode == "" {
-		return
+		return false
 	}
 
 	rm.mu.Lock()
 	room, exists := rm.rooms[roomCode]
 	if !exists {
 		rm.mu.Unlock()
-		return
+		client.SetRoom("")
+		return true
 	}
-	rm.mu.Unlock()
-
 	room.mu.Lock()
-	defer room.mu.Unlock()
 
 	player, exists := room.Players[client.GetID()]
 	if !exists {
-		return
+		room.mu.Unlock()
+		rm.mu.Unlock()
+		client.SetRoom("")
+		return true
 	}
-
-	// 通知其他玩家
-	room.BroadcastExcept(client.GetID(), codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
-		PlayerID:   client.GetID(),
-		PlayerName: client.GetName(),
-	}))
 
 	// 移除玩家
 	delete(room.Players, client.GetID())
@@ -135,20 +130,33 @@ func (rm *RoomManager) LeaveRoom(client types.ClientInterface) {
 		}
 	}
 	client.SetRoom("")
+	empty := len(room.Players) == 0
+	if empty {
+		delete(rm.rooms, roomCode)
+	}
+
+	// 权威状态已经清除后再通知其他玩家。
+	room.BroadcastExcept(client.GetID(), codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
+		PlayerID:   client.GetID(),
+		PlayerName: client.GetName(),
+	}))
+	room.mu.Unlock()
+	rm.mu.Unlock()
 
 	log.Printf("👋 玩家 %s 离开房间 %s (座位 %d)", client.GetName(), roomCode, player.Seat)
 
 	// 如果房间空了，删除房间
-	if len(room.Players) == 0 {
-		rm.mu.Lock()
-		delete(rm.rooms, roomCode)
-		rm.mu.Unlock()
+	if empty {
 		// 从 Redis 删除
-		go func() { _ = rm.redisStore.DeleteRoom(context.Background(), roomCode) }()
+		if rm.redisStore != nil && rm.redisStore.IsReady() {
+			go func() { _ = rm.redisStore.DeleteRoom(context.Background(), roomCode) }()
+		}
 		log.Printf("🏠 房间 %s 已解散", roomCode)
 	} else if rm.redisStore != nil && rm.redisStore.IsReady() {
 		go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
 	}
+
+	return true
 }
 
 // SetPlayerReady 设置玩家准备状态

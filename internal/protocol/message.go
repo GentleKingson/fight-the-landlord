@@ -6,6 +6,18 @@ import "encoding/json"
 type Message struct {
 	Type    MessageType     `json:"type"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	Event   *EventMeta      `json:"event,omitempty"`
+}
+
+// EventMeta carries the authoritative ordering and clock context for a
+// server-side event. Client requests leave it nil.
+type EventMeta struct {
+	StreamID       string `json:"stream_id"`
+	EventVersion   int64  `json:"event_version"`
+	GameID         string `json:"game_id,omitempty"`
+	TurnID         int64  `json:"turn_id,omitempty"`
+	ServerTimeMS   int64  `json:"server_time_ms"`
+	TurnDeadlineMS int64  `json:"turn_deadline_ms,omitempty"`
 }
 
 // MessageType 消息类型
@@ -23,6 +35,7 @@ const (
 	MsgLeaveRoom     MessageType = "leave_room"     // 离开房间
 	MsgQuickMatch    MessageType = "quick_match"    // 快速匹配
 	MsgPracticeMatch MessageType = "practice_match" // 人机练习
+	MsgCancelMatch   MessageType = "cancel_match"   // 取消匹配
 	MsgReady         MessageType = "ready"          // 准备就绪
 	MsgCancelReady   MessageType = "cancel_ready"   // 取消准备
 
@@ -51,12 +64,15 @@ const (
 	MsgOnlineCount   MessageType = "online_count"   // 在线人数更新
 
 	// 房间相关
-	MsgRoomCreated  MessageType = "room_created"  // 房间创建成功
-	MsgRoomJoined   MessageType = "room_joined"   // 加入房间成功
-	MsgPlayerJoined MessageType = "player_joined" // 其他玩家加入
-	MsgPlayerLeft   MessageType = "player_left"   // 玩家离开
-	MsgPlayerReady  MessageType = "player_ready"  // 玩家准备
-	MsgMatchFound   MessageType = "match_found"   // 匹配成功
+	MsgRoomCreated    MessageType = "room_created"    // 房间创建成功
+	MsgRoomJoined     MessageType = "room_joined"     // 加入房间成功
+	MsgPlayerJoined   MessageType = "player_joined"   // 其他玩家加入
+	MsgPlayerLeft     MessageType = "player_left"     // 玩家离开
+	MsgPlayerReady    MessageType = "player_ready"    // 玩家准备
+	MsgMatchFound     MessageType = "match_found"     // 匹配成功
+	MsgMatchQueued    MessageType = "match_queued"    // 匹配请求已接受
+	MsgMatchCancelled MessageType = "match_cancelled" // 匹配已取消
+	MsgRoomLeft       MessageType = "room_left"       // 已离开房间
 
 	// 游戏流程
 	MsgGameStart   MessageType = "game_start"   // 游戏开始

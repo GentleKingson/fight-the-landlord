@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
-import { MsgType } from '../../protocol/types';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { canBeat as canBeatHand, findSmallestLegalResponse, handTypeLabels, parseHand } from '../../game/rules';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
@@ -9,11 +8,15 @@ import { CardBack } from '../../shared/cards/CardBack';
 import { Hand } from '../../shared/cards/Hand';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
 import { Icon } from '../../shared/ui/Icon';
+import { createChatCommand, dispatchCommand } from '../../transport/commandDispatcher';
 import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
 
 interface GameTableProps {
   socket: GameSocket;
 }
+
+const UTILITY_DRAWER_ID = 'table-utility-drawer';
+const UTILITY_DRAWER_TITLE_ID = 'table-utility-drawer-title';
 
 export function GameTable({ socket }: GameTableProps) {
   const playerId = useAppStore((state) => state.playerId);
@@ -38,6 +41,12 @@ export function GameTable({ socket }: GameTableProps) {
   const clearSelection = useAppStore((state) => state.clearSelection);
   const isMyTurn = currentTurn === playerId;
   const seats = useMemo(() => arrangeSeats(players, playerId), [players, playerId]);
+  const drawerTriggerRef = useRef<HTMLButtonElement>(null);
+  const openDrawer = useCallback((nextDrawer: UtilityDrawer, trigger: HTMLButtonElement) => {
+    drawerTriggerRef.current = trigger;
+    setDrawer(drawer === nextDrawer ? 'none' : nextDrawer);
+  }, [drawer, setDrawer]);
+  const closeDrawer = useCallback(() => setDrawer('none'), [setDrawer]);
 
   return (
     <main className="table-screen">
@@ -55,9 +64,9 @@ export function GameTable({ socket }: GameTableProps) {
           <span>{latency ? `${latency}ms` : '在线'}</span>
         </div>
         <div className="table-tools">
-          <ToolButton drawer="counter" label="记牌器" icon="counter" />
-          <ToolButton drawer="chat" label="聊天" icon="chat" />
-          <ToolButton drawer="history" label="历史" icon="history" />
+          <ToolButton drawer="counter" label="记牌器" icon="counter" active={drawer === 'counter'} onOpen={openDrawer} />
+          <ToolButton drawer="chat" label="聊天" icon="chat" active={drawer === 'chat'} onOpen={openDrawer} />
+          <ToolButton drawer="history" label="历史" icon="history" active={drawer === 'history'} onOpen={openDrawer} />
         </div>
       </header>
 
@@ -94,7 +103,7 @@ export function GameTable({ socket }: GameTableProps) {
         ) : null}
       </section>
 
-      <UtilityDrawer socket={socket} drawer={drawer} onClose={() => setDrawer('none')} />
+      <UtilityDrawer socket={socket} drawer={drawer} onClose={closeDrawer} returnFocusRef={drawerTriggerRef} />
     </main>
   );
 }
@@ -118,10 +127,23 @@ function BottomCards({ cards, revealed }: { cards: CardInfo[]; revealed: boolean
   );
 }
 
-function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: string; icon: 'chat' | 'counter' | 'history' | 'rules' }) {
-  const setDrawer = useAppStore((state) => state.setDrawer);
+function ToolButton({ drawer, label, icon, active, onOpen }: {
+  drawer: UtilityDrawer;
+  label: string;
+  icon: 'chat' | 'counter' | 'history' | 'rules';
+  active: boolean;
+  onOpen: (drawer: UtilityDrawer, trigger: HTMLButtonElement) => void;
+}) {
   return (
-    <button className="tool-button" onClick={() => setDrawer(drawer)} title={label} aria-label={label}>
+    <button
+      className="tool-button"
+      onClick={(event) => onOpen(drawer, event.currentTarget)}
+      title={label}
+      aria-label={label}
+      aria-haspopup="dialog"
+      aria-controls={UTILITY_DRAWER_ID}
+      aria-expanded={active}
+    >
       <Icon name={icon} />
       <span>{label}</span>
     </button>
@@ -223,6 +245,9 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   const isGrabTurn = useAppStore((state) => state.isGrabTurn);
   const connectionStatus = useAppStore((state) => state.connectionStatus);
   const maintenance = useAppStore((state) => state.maintenance);
+  const pendingPlay = useAppStore((state) => Boolean(state.pendingCommands.play));
+  const pendingPass = useAppStore((state) => Boolean(state.pendingCommands.pass));
+  const pendingBid = useAppStore((state) => Boolean(state.pendingCommands.bid));
   const setSelection = useAppStore((state) => state.setSelection);
   const clearSelection = useAppStore((state) => state.clearSelection);
   const selected = hand.filter((card) => selectedCards.has(cardKey(card)));
@@ -235,6 +260,8 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
     && parsedSelection !== null
     && selectionBeatsPrevious
     && socketReady
+    && !pendingPlay
+    && !pendingPass
     && !maintenance;
 
   function play() {
@@ -242,9 +269,9 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       useAppStore.setState({ tableMessage: selected.length ? '当前牌型不可出' : '请选择要出的牌' });
       return;
     }
-    const result = socket.send(MsgType.PlayCards, { cards: selected });
+    const result = dispatchCommand(socket, { kind: 'play', cards: selected });
     if (!result.ok) {
-      useAppStore.setState({ tableMessage: '出牌发送失败，请检查连接后重试' });
+      if (result.reason !== 'duplicate') useAppStore.setState({ tableMessage: '出牌发送失败，请检查连接后重试' });
     }
   }
 
@@ -253,9 +280,9 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       useAppStore.setState({ tableMessage: '本轮必须出牌' });
       return;
     }
-    const result = socket.send(MsgType.Pass);
+    const result = dispatchCommand(socket, { kind: 'pass' });
     if (!result.ok) {
-      useAppStore.setState({ tableMessage: '不出操作发送失败，请检查连接后重试' });
+      if (result.reason !== 'duplicate') useAppStore.setState({ tableMessage: '不出操作发送失败，请检查连接后重试' });
     }
   }
 
@@ -275,8 +302,8 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       <section className="action-bar action-bar--bidding" aria-label="叫地主操作">
         {isMyTurn ? (
           <>
-            <button className="primary-action" disabled={!socketReady || maintenance} onClick={() => socket.send(MsgType.Bid, { bid: true })}>{isGrabTurn ? '抢地主' : '叫地主'}</button>
-            <button className="secondary-action secondary-action--muted" disabled={!socketReady || maintenance} onClick={() => socket.send(MsgType.Bid, { bid: false })}>{isGrabTurn ? '不抢' : '不叫'}</button>
+            <button className="primary-action" disabled={!socketReady || maintenance || pendingBid} onClick={() => dispatchCommand(socket, { kind: 'bid', bid: true })}>{pendingBid ? '等待确认...' : (isGrabTurn ? '抢地主' : '叫地主')}</button>
+            <button className="secondary-action secondary-action--muted" disabled={!socketReady || maintenance || pendingBid} onClick={() => dispatchCommand(socket, { kind: 'bid', bid: false })}>{pendingBid ? '等待确认...' : (isGrabTurn ? '不抢' : '不叫')}</button>
           </>
         ) : <span>等待其他玩家{isGrabTurn ? '抢地主' : '叫地主'}...</span>}
       </section>
@@ -285,10 +312,10 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
 
   return (
     <section className="action-bar" aria-label="出牌操作">
-      <button className="secondary-action secondary-action--blue" disabled={!isMyTurn || mustPlay || !socketReady || maintenance} onClick={pass}>不出</button>
+      <button className="secondary-action secondary-action--blue" disabled={!isMyTurn || mustPlay || !socketReady || maintenance || pendingPlay || pendingPass} onClick={pass}>{pendingPass ? '等待确认...' : '不出'}</button>
       <button className="secondary-action secondary-action--green" disabled={!isMyTurn || !socketReady || maintenance} onClick={hint}>提示</button>
       <button className="secondary-action secondary-action--muted" disabled={!selectedCards.size} onClick={clearSelection}>重选</button>
-      <button className="primary-action" disabled={!canPlay} onClick={play}>出牌</button>
+      <button className="primary-action" disabled={!canPlay} onClick={play}>{pendingPlay ? '等待确认...' : '出牌'}</button>
       <ActionSummary selectedCount={selected.length} summary={summary} />
     </section>
   );
@@ -303,26 +330,61 @@ function ActionSummary({ selectedCount, summary }: { selectedCount: number; summ
   );
 }
 
-function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: UtilityDrawer; onClose: () => void }) {
+function UtilityDrawer({ socket, drawer, onClose, returnFocusRef }: GameTableProps & {
+  drawer: UtilityDrawer;
+  onClose: () => void;
+  returnFocusRef: RefObject<HTMLButtonElement | null>;
+}) {
   const messages = useChatStore((state) => state.messages);
   const chatInput = useAppStore((state) => state.chatInput);
   const setChatInput = useAppStore((state) => state.setChatInput);
   const counter = useAppStore((state) => state.cardCounter);
   const actions = useAppStore((state) => state.recentActions);
+  const chatPending = useAppStore((state) => Boolean(state.pendingCommands.chat));
   const open = drawer !== 'none';
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onClose();
+    }
+
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      const trigger = returnFocusRef.current;
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [onClose, open, returnFocusRef]);
+
+  useEffect(() => {
+    if (open) closeButtonRef.current?.focus();
+  }, [drawer, open]);
 
   function sendChat() {
     const content = chatInput.trim();
     if (!content) return;
-    socket.send(MsgType.Chat, { content, scope: 'room' });
-    setChatInput('');
+    const result = dispatchCommand(socket, createChatCommand(content, 'room'));
+    if (result.ok) setChatInput('');
   }
 
   return (
-    <aside className={`utility-drawer ${open ? 'is-open' : ''}`} aria-hidden={!open}>
+    <aside
+      id={UTILITY_DRAWER_ID}
+      className={`utility-drawer ${open ? 'is-open' : ''}`}
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={UTILITY_DRAWER_TITLE_ID}
+      aria-hidden={!open}
+      inert={!open}
+    >
       <header>
-        <strong>{drawerTitle(drawer)}</strong>
-        <button onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
+        <strong id={UTILITY_DRAWER_TITLE_ID}>{drawerTitle(drawer)}</strong>
+        <button ref={closeButtonRef} onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
       </header>
       {drawer === 'chat' ? (
         <>
@@ -332,8 +394,15 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
             ))}
           </div>
           <div className="chat-input-row">
-            <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="房间聊天" onKeyDown={(event) => { if (event.key === 'Enter') sendChat(); }} />
-            <button onClick={sendChat}>发送</button>
+            <input
+              aria-label="房间聊天消息"
+              value={chatInput}
+              maxLength={240}
+              onChange={(event) => setChatInput(event.target.value)}
+              placeholder="房间聊天"
+              onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) sendChat(); }}
+            />
+            <button disabled={chatPending} onClick={sendChat}>{chatPending ? '发送中...' : '发送'}</button>
           </div>
         </>
       ) : null}

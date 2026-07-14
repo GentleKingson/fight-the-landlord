@@ -7,6 +7,7 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/convert/msgtype"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/pb"
 )
 
@@ -178,8 +179,9 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 	case protocol.MsgError:
 		p := payload.(protocol.ErrorPayload)
 		return &pb.ErrorPayload{
-			Code:    int64(p.Code),
-			Message: p.Message,
+			Code:        int64(p.Code),
+			Message:     p.Message,
+			CommandType: msgtype.StringToProtoMessageType(string(p.CommandType)),
 		}, true
 	}
 	return nil, false
@@ -231,6 +233,18 @@ func encodeServerRoomMessages(msgType protocol.MessageType, payload any) (proto.
 			PlayerId: p.PlayerID,
 			Ready:    p.Ready,
 		}, true
+	case protocol.MsgMatchQueued:
+		p := payload.(protocol.MatchQueuedPayload)
+		return &pb.MatchQueuedPayload{
+			DeadlineMs: p.DeadlineMS,
+			Practice:   p.Practice,
+		}, true
+	case protocol.MsgMatchCancelled:
+		p := payload.(protocol.MatchCancelledPayload)
+		return &pb.MatchCancelledPayload{Reason: p.Reason}, true
+	case protocol.MsgRoomLeft:
+		p := payload.(protocol.RoomLeftPayload)
+		return &pb.RoomLeftPayload{RoomCode: p.RoomCode}, true
 	case protocol.MsgRoomListResult:
 		p := payload.(protocol.RoomListResultPayload)
 		return &pb.RoomListResultPayload{

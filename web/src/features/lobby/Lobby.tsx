@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore } from '../../stores/appStore';
 import { Icon } from '../../shared/ui/Icon';
+import { createChatCommand, dispatchCommand } from '../../transport/commandDispatcher';
 
 interface LobbyProps {
   socket: GameSocket;
@@ -15,6 +17,9 @@ export function Lobby({ socket }: LobbyProps) {
   const onlineCount = useAppStore((state) => state.onlineCount);
   const playerName = useAppStore((state) => state.playerName);
   const setLobbyPanel = useAppStore((state) => state.setLobbyPanel);
+  const pendingQuickMatch = useAppStore((state) => state.pendingCommands['quick-match']);
+  const pendingPracticeMatch = useAppStore((state) => state.pendingCommands['practice-match']);
+  const showingMatch = phase === 'matching' || Boolean(pendingQuickMatch || pendingPracticeMatch);
 
   return (
     <main className="lobby-screen">
@@ -32,9 +37,9 @@ export function Lobby({ socket }: LobbyProps) {
         </div>
       </header>
 
-      {phase === 'matching' ? <MatchingPanel /> : null}
+      {showingMatch ? <MatchingPanel socket={socket} acknowledged={phase === 'matching'} /> : null}
       {phase === 'waiting' ? <RoomWaiting socket={socket} roomCode={roomCode} players={players} /> : null}
-      {phase !== 'matching' && phase !== 'waiting' ? (
+      {!showingMatch && phase !== 'waiting' ? (
         panel === 'home' ? <LobbyHome socket={socket} /> : <LobbySubPanel socket={socket} panel={panel} />
       ) : null}
 
@@ -56,15 +61,17 @@ function LobbyHome({ socket }: LobbyProps) {
   const roomCodeInput = useAppStore((state) => state.roomCodeInput);
   const roomList = useAppStore((state) => state.roomList);
   const setRoomCodeInput = useAppStore((state) => state.setRoomCodeInput);
-  const setError = useAppStore((state) => state.setError);
+  const pending = useAppStore((state) => state.pendingCommands);
+  const roomTransitionPending = Boolean(
+    pending['create-room']
+    || pending['join-room']
+    || pending['quick-match']
+    || pending['practice-match']
+  );
 
   function joinRoom() {
     const roomCode = roomCodeInput.trim();
-    if (!roomCode) {
-      setError('请输入房间号');
-      return;
-    }
-    socket.send(MsgType.JoinRoom, { room_code: roomCode });
+    dispatchCommand(socket, { kind: 'join-room', roomCode });
   }
 
   function refreshRooms() {
@@ -73,7 +80,7 @@ function LobbyHome({ socket }: LobbyProps) {
 
   function joinListedRoom(roomCode: string) {
     setRoomCodeInput(roomCode);
-    socket.send(MsgType.JoinRoom, { room_code: roomCode });
+    dispatchCommand(socket, { kind: 'join-room', roomCode });
   }
 
   return (
@@ -83,18 +90,22 @@ function LobbyHome({ socket }: LobbyProps) {
           <h2>快速开局</h2>
           <p>匹配在线玩家，进入标准三人牌桌。</p>
         </div>
-        <button className="primary-action" onClick={() => { useAppStore.setState({ phase: 'matching' }); socket.send(MsgType.QuickMatch); }}>
-          <Icon name="play" /> 快速开局
+        <button
+          className="primary-action"
+          disabled={roomTransitionPending}
+          onClick={() => dispatchCommand(socket, { kind: 'quick-match' })}
+        >
+          <Icon name="play" /> {pending['quick-match'] ? '请求中...' : '快速开局'}
         </button>
       </div>
 
       <div className="entry-grid">
-        <button className="entry-tile" onClick={() => socket.send(MsgType.CreateRoom)}>
+        <button className="entry-tile" disabled={roomTransitionPending} onClick={() => dispatchCommand(socket, { kind: 'create-room' })}>
           <Icon name="room" />
           <strong>创建房间</strong>
           <span>好友同玩</span>
         </button>
-        <button className="entry-tile" onClick={() => socket.send(MsgType.PracticeMatch)}>
+        <button className="entry-tile" disabled={roomTransitionPending} onClick={() => dispatchCommand(socket, { kind: 'practice-match' })}>
           <Icon name="bot" />
           <strong>人机练习</strong>
           <span>随时练手</span>
@@ -104,7 +115,7 @@ function LobbyHome({ socket }: LobbyProps) {
       <div className="join-strip">
         <label htmlFor="room-code">加入房间</label>
         <input id="room-code" value={roomCodeInput} onChange={(event) => setRoomCodeInput(event.target.value)} maxLength={8} placeholder="输入房间号" />
-        <button onClick={joinRoom}>加入</button>
+        <button disabled={roomTransitionPending} onClick={joinRoom}>{pending['join-room'] ? '加入中...' : '加入'}</button>
       </div>
 
       <section className="room-browser" aria-label="可加入房间">
@@ -114,7 +125,7 @@ function LobbyHome({ socket }: LobbyProps) {
         </div>
         <div className="room-browser__list">
           {roomList.length ? roomList.map((room) => (
-            <button className="room-browser__row" key={room.room_code} onClick={() => joinListedRoom(room.room_code)}>
+            <button className="room-browser__row" disabled={roomTransitionPending} key={room.room_code} onClick={() => joinListedRoom(room.room_code)}>
               <span>{room.room_code}</span>
               <em>{room.player_count}/{room.max_players || 3}</em>
             </button>
@@ -125,12 +136,50 @@ function LobbyHome({ socket }: LobbyProps) {
   );
 }
 
-function MatchingPanel() {
+function MatchingPanel({ socket, acknowledged }: LobbyProps & { acknowledged: boolean }) {
+  const deadlineMs = useAppStore((state) => state.matchDeadlineMs);
+  const practice = useAppStore((state) => state.matchPractice);
+  const cancelPending = useAppStore((state) => Boolean(state.pendingCommands['cancel-match']));
+  const setBusinessError = useAppStore((state) => state.setBusinessError);
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!acknowledged || !deadlineMs) return;
+    const interval = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(interval);
+  }, [acknowledged, deadlineMs]);
+
+  useEffect(() => {
+    if (!acknowledged || !deadlineMs) return;
+    const delay = Math.max(0, deadlineMs - Date.now() + 250);
+    const timer = window.setTimeout(() => {
+      const result = dispatchCommand(socket, { kind: 'cancel-match' });
+      if (result.ok) {
+        setBusinessError(
+          'timeout',
+          '匹配等待超时，正在退出队列',
+          practice ? undefined : { kind: 'quick-match' },
+          practice ? 'practice-match' : 'quick-match'
+        );
+      }
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [acknowledged, deadlineMs, practice, setBusinessError, socket]);
+
+  const secondsLeft = acknowledged && deadlineMs ? Math.max(0, Math.ceil((deadlineMs - now) / 1000)) : 0;
+
   return (
     <section className="state-panel">
       <span className="spinner spinner--large" />
-      <h2>正在寻找牌友</h2>
-      <p>系统正在为你安排一张三人牌桌。</p>
+      <h2>{acknowledged ? (practice ? '正在创建练习牌桌' : '正在寻找牌友') : '正在提交匹配请求'}</h2>
+      <p>{acknowledged ? `系统正在为你安排一张三人牌桌${secondsLeft ? `，剩余 ${secondsLeft} 秒` : ''}。` : '等待服务器确认匹配请求。'}</p>
+      <button
+        className="secondary-action"
+        disabled={!acknowledged || cancelPending}
+        onClick={() => dispatchCommand(socket, { kind: 'cancel-match' })}
+      >
+        {cancelPending ? '取消中...' : '取消匹配'}
+      </button>
     </section>
   );
 }
@@ -138,6 +187,10 @@ function MatchingPanel() {
 function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: string; players: ReturnType<typeof useAppStore.getState>['players'] }) {
   const playerId = useAppStore((state) => state.playerId);
   const me = players.find((player) => player.id === playerId);
+  const pending = useAppStore((state) => state.pendingCommands);
+  const readyKind = me?.ready ? 'cancel-ready' : 'ready';
+  const readyPending = Boolean(pending[readyKind]);
+  const leavePending = Boolean(pending['leave-room']);
 
   return (
     <section className="room-waiting">
@@ -159,11 +212,15 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
         })}
       </div>
       <div className="room-actions">
-        <button className="primary-action" onClick={() => socket.send(me?.ready ? MsgType.CancelReady : MsgType.Ready)}>
-          {me?.ready ? '取消准备' : '准备开始'}
+        <button
+          className="primary-action"
+          disabled={readyPending || leavePending}
+          onClick={() => dispatchCommand(socket, { kind: readyKind })}
+        >
+          {readyPending ? '等待确认...' : (me?.ready ? '取消准备' : '准备开始')}
         </button>
-        <button className="secondary-action" onClick={() => { socket.send(MsgType.LeaveRoom); useAppStore.getState().leaveLocalRoom(); }}>
-          离开房间
+        <button className="secondary-action" disabled={leavePending || readyPending} onClick={() => dispatchCommand(socket, { kind: 'leave-room' })}>
+          {leavePending ? '离开中...' : '离开房间'}
         </button>
       </div>
     </section>
@@ -218,12 +275,13 @@ function LobbyChat({ socket }: LobbyProps) {
   const messages = useChatStore((state) => state.messages);
   const chatInput = useAppStore((state) => state.chatInput);
   const setChatInput = useAppStore((state) => state.setChatInput);
+  const chatPending = useAppStore((state) => Boolean(state.pendingCommands.chat));
 
   function send() {
     const content = chatInput.trim();
     if (!content) return;
-    socket.send(MsgType.Chat, { content, scope: 'lobby' });
-    setChatInput('');
+    const result = dispatchCommand(socket, createChatCommand(content, 'lobby'));
+    if (result.ok) setChatInput('');
   }
 
   return (
@@ -235,8 +293,14 @@ function LobbyChat({ socket }: LobbyProps) {
         ))}
       </div>
       <div className="chat-input-row">
-        <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="和大厅里的玩家聊聊" onKeyDown={(event) => { if (event.key === 'Enter') send(); }} />
-        <button onClick={send}>发送</button>
+        <input
+          value={chatInput}
+          maxLength={240}
+          onChange={(event) => setChatInput(event.target.value)}
+          placeholder="和大厅里的玩家聊聊"
+          onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) send(); }}
+        />
+        <button disabled={chatPending} onClick={send}>{chatPending ? '发送中...' : '发送'}</button>
       </div>
     </section>
   );

@@ -1,8 +1,54 @@
 import { create } from 'zustand';
-import { MsgType, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
+import { MsgType, WireMessageType, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'fresh-connected' | 'reconnecting' | 'reconnected' | 'connected' | 'closing' | 'offline';
+
+export type CommandKind =
+  | 'create-room'
+  | 'join-room'
+  | 'quick-match'
+  | 'practice-match'
+  | 'cancel-match'
+  | 'ready'
+  | 'cancel-ready'
+  | 'bid'
+  | 'play'
+  | 'pass'
+  | 'leave-room'
+  | 'chat';
+
+export type CommandRequest =
+  | { kind: 'create-room' }
+  | { kind: 'join-room'; roomCode: string }
+  | { kind: 'quick-match' }
+  | { kind: 'practice-match' }
+  | { kind: 'cancel-match' }
+  | { kind: 'ready' }
+  | { kind: 'cancel-ready' }
+  | { kind: 'bid'; bid: boolean }
+  | { kind: 'play'; cards: CardInfo[] }
+  | { kind: 'pass' }
+  | { kind: 'leave-room' }
+  | { kind: 'chat'; content: string; scope: string; messageId: string };
+
+export type BusinessErrorCategory = 'validation' | 'rate-limit' | 'maintenance' | 'not-in-room' | 'timeout' | 'network';
+
+export interface PendingCommand {
+  kind: CommandKind;
+  request: CommandRequest;
+  startedAt: number;
+  timeoutAt: number;
+  retryable: boolean;
+}
+
+export interface BusinessError {
+  id: number;
+  category: BusinessErrorCategory;
+  message: string;
+  command?: CommandKind;
+  retry?: CommandRequest;
+}
 
 export interface StoredIdentity {
   id: string;
@@ -38,6 +84,8 @@ interface LobbySlice {
   leaderboard: LeaderboardEntry[];
   leaderboardType: string;
   roomList: RoomListItem[];
+  matchDeadlineMs: number;
+  matchPractice: boolean;
 }
 
 interface TableSlice {
@@ -71,6 +119,8 @@ interface UiSlice {
   drawer: UtilityDrawer;
   chatInput: string;
   tableMessage: string;
+  pendingCommands: Partial<Record<CommandKind, PendingCommand>>;
+  businessError: BusinessError | null;
 }
 
 export interface TableAction {
@@ -97,6 +147,12 @@ interface AppActions {
   setConnectionStatus: (status: ConnectionStatus) => void;
   clearIdentity: () => void;
   setError: (error: string) => void;
+  setBusinessError: (category: BusinessErrorCategory, message: string, retry?: CommandRequest, command?: CommandKind) => void;
+  clearBusinessError: () => void;
+  beginCommand: (request: CommandRequest, timeoutMs: number, retryable: boolean) => void;
+  finishCommand: (kind: CommandKind) => void;
+  finishCommands: (kinds: CommandKind[]) => void;
+  clearPendingCommands: () => void;
   setLobbyPanel: (panel: LobbyPanel) => void;
   setRoomCodeInput: (value: string) => void;
   setChatInput: (value: string) => void;
@@ -136,6 +192,9 @@ const initialTable: TableSlice = {
   seatActions: {}
 };
 
+const commandTimers = new Map<CommandKind, number>();
+let nextBusinessErrorID = 1;
+
 export const useAppStore = create<AppState>((set, get) => ({
   connected: false,
   connectionStatus: 'idle',
@@ -158,22 +217,45 @@ export const useAppStore = create<AppState>((set, get) => ({
   leaderboard: [],
   leaderboardType: 'total',
   roomList: [],
+  matchDeadlineMs: 0,
+  matchPractice: false,
   ...initialTable,
   selectedCards: new Set<string>(),
   drawer: 'none',
   chatInput: '',
   tableMessage: '',
+  pendingCommands: {},
+  businessError: null,
 
-  setConnected: (connected) => set({ connected }),
-  prepareConnection: (reconnectCandidate) => set({
-    connected: false,
-    connectionStatus: 'connecting',
-    reconnectCandidate,
-    provisionalIdentity: null,
-    reconnectNotice: '',
-    error: ''
-  }),
-  setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
+  setConnected: (connected) => {
+    if (!connected) {
+      cancelAllCommandTimers();
+      set({ connected, pendingCommands: {} });
+      return;
+    }
+    set({ connected });
+  },
+  prepareConnection: (reconnectCandidate) => {
+    cancelAllCommandTimers();
+    set({
+      connected: false,
+      connectionStatus: 'connecting',
+      reconnectCandidate,
+      provisionalIdentity: null,
+      reconnectNotice: '',
+      error: '',
+      pendingCommands: {},
+      businessError: null
+    });
+  },
+  setConnectionStatus: (connectionStatus) => {
+    if (connectionStatus === 'offline' || connectionStatus === 'closing' || connectionStatus === 'idle') {
+      cancelAllCommandTimers();
+      set({ connectionStatus, pendingCommands: {} });
+      return;
+    }
+    set({ connectionStatus });
+  },
   clearIdentity: () => set({
     playerId: '',
     playerName: '',
@@ -182,7 +264,64 @@ export const useAppStore = create<AppState>((set, get) => ({
     provisionalIdentity: null,
     reconnectNotice: ''
   }),
-  setError: (error) => set({ error }),
+  setError: (error) => set({
+    error,
+    businessError: error ? createBusinessError('network', error) : null
+  }),
+  setBusinessError: (category, message, retry, command) => set({
+    error: message,
+    businessError: createBusinessError(category, message, retry, command)
+  }),
+  clearBusinessError: () => set({ error: '', businessError: null }),
+  beginCommand: (request, timeoutMs, retryable) => {
+    const kind = request.kind;
+    const startedAt = Date.now();
+    const pending: PendingCommand = {
+      kind,
+      request,
+      startedAt,
+      timeoutAt: startedAt + timeoutMs,
+      retryable
+    };
+    cancelCommandTimer(kind);
+    set({ pendingCommands: { ...get().pendingCommands, [kind]: pending } });
+    const timer = window.setTimeout(() => {
+      commandTimers.delete(kind);
+      const current = get().pendingCommands[kind];
+      if (!current || current.startedAt !== startedAt) return;
+      const pendingCommands = { ...get().pendingCommands };
+      delete pendingCommands[kind];
+      set({
+        pendingCommands,
+        error: `${commandLabel(kind)}等待服务器响应超时`,
+        businessError: createBusinessError(
+          'timeout',
+          `${commandLabel(kind)}等待服务器响应超时`,
+          current.retryable ? current.request : undefined,
+          kind
+        )
+      });
+    }, timeoutMs);
+    commandTimers.set(kind, timer);
+  },
+  finishCommand: (kind) => {
+    cancelCommandTimer(kind);
+    const pendingCommands = { ...get().pendingCommands };
+    delete pendingCommands[kind];
+    set({ pendingCommands });
+  },
+  finishCommands: (kinds) => {
+    const pendingCommands = { ...get().pendingCommands };
+    for (const kind of kinds) {
+      cancelCommandTimer(kind);
+      delete pendingCommands[kind];
+    }
+    set({ pendingCommands });
+  },
+  clearPendingCommands: () => {
+    cancelAllCommandTimers();
+    set({ pendingCommands: {} });
+  },
   setLobbyPanel: (lobbyPanel) => set({ lobbyPanel }),
   setRoomCodeInput: (roomCodeInput) => set({ roomCodeInput }),
   setChatInput: (chatInput) => set({ chatInput }),
@@ -195,7 +334,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setSelection: (keys) => set({ selectedCards: new Set(keys) }),
   clearSelection: () => set({ selectedCards: new Set(), tableMessage: '' }),
-  leaveLocalRoom: () => set({ roomCode: '', players: [], phase: 'lobby', ...initialTable, selectedCards: new Set() }),
+  leaveLocalRoom: () => set({
+    roomCode: '',
+    players: [],
+    phase: 'lobby',
+    matchDeadlineMs: 0,
+    matchPractice: false,
+    ...initialTable,
+    selectedCards: new Set()
+  }),
   handleMessage: (message) => {
     const state = get();
     switch (message.type) {
@@ -211,7 +358,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             connected: true,
             connectionStatus: 'fresh-connected',
             provisionalIdentity,
-            error: ''
+            error: '',
+            businessError: null
           });
           break;
         }
@@ -219,6 +367,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({
           connected: true,
           error: '',
+          businessError: null,
           connectionStatus: 'fresh-connected',
           phase: 'lobby',
           playerId: payload.player_id,
@@ -240,6 +389,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           connected: true,
           connectionStatus: 'reconnected' as const,
           error: '',
+          businessError: null,
           reconnectNotice: '',
           reconnectToken: payload.reconnect_token,
           reconnectCandidate: null,
@@ -258,15 +408,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.Error: {
-        const payload = message.payload as { code?: number; message?: string };
+        const payload = message.payload as { code?: number; message?: string; command_type?: WireMessageType };
         if (state.connectionStatus === 'reconnecting' && isReconnectFailure(payload.code, payload.message)) {
           acceptProvisionalAfterReconnectFailure(set, state, payload.message || '旧会话已失效');
           break;
         }
+        const command = commandKindForMessageType(payload.command_type);
+        const pending = command ? state.pendingCommands[command] : undefined;
+        if (command) get().finishCommand(command);
+        else get().clearPendingCommands();
+        const errorMessage = payload.message || '未知错误';
         set({
-          error: payload.message || '未知错误',
-          tableMessage: state.phase === 'playing' ? payload.message || '操作被服务器拒绝' : state.tableMessage,
-          phase: state.phase === 'matching' ? 'lobby' : state.phase
+          error: errorMessage,
+          businessError: createBusinessError(
+            classifyServerError(payload.code),
+            errorMessage,
+            pending?.retryable ? pending.request : undefined,
+            command
+          ),
+          tableMessage: state.phase === 'playing' ? errorMessage || '操作被服务器拒绝' : state.tableMessage
         });
         break;
       }
@@ -275,12 +435,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.RoomCreated: {
         const payload = message.payload as { room_code: string; player: PlayerInfo };
+        get().finishCommand('create-room');
         set({ roomCode: payload.room_code, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.RoomJoined: {
         const payload = message.payload as { room_code: string; players: PlayerInfo[] };
-        set({ roomCode: payload.room_code, players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
+        get().finishCommands(['join-room', 'quick-match', 'practice-match']);
+        set({
+          roomCode: payload.room_code,
+          players: normalizeLobbyPlayers(payload.players ?? []),
+          phase: 'waiting',
+          lobbyPanel: 'home',
+          matchDeadlineMs: 0,
+          matchPractice: false
+        });
         break;
       }
       case MsgType.PlayerJoined: {
@@ -290,21 +459,66 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayerLeft: {
         const payload = message.payload as { player_id: string };
-        if (payload.player_id === state.playerId) get().leaveLocalRoom();
-        else set({ players: state.players.filter((player) => player.id !== payload.player_id) });
+        if (payload.player_id !== state.playerId) {
+          set({ players: state.players.filter((player) => player.id !== payload.player_id) });
+        }
         break;
       }
       case MsgType.PlayerReady: {
         const payload = message.payload as { player_id: string; ready: boolean };
+        if (payload.player_id === state.playerId) get().finishCommand(payload.ready ? 'ready' : 'cancel-ready');
         set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
         break;
       }
       case MsgType.MatchFound:
+        get().finishCommands(['quick-match', 'practice-match']);
         set({ phase: 'waiting' });
+        break;
+      case MsgType.MatchQueued: {
+        const payload = message.payload as { deadline_ms: number; practice: boolean };
+        get().finishCommand(payload.practice ? 'practice-match' : 'quick-match');
+        set({
+          phase: 'matching',
+          matchDeadlineMs: payload.deadline_ms,
+          matchPractice: payload.practice
+        });
+        break;
+      }
+      case MsgType.MatchCancelled: {
+        const payload = message.payload as { reason: string };
+        get().finishCommands(['quick-match', 'practice-match', 'cancel-match']);
+        const timedOut = payload.reason.toLowerCase().includes('timeout');
+        set({
+          phase: 'lobby',
+          matchDeadlineMs: 0,
+          matchPractice: false,
+          error: timedOut ? '匹配等待超时，请重试' : state.error,
+          businessError: timedOut
+            ? createBusinessError(
+                'timeout',
+                '匹配等待超时，请重试',
+                state.matchPractice ? undefined : { kind: 'quick-match' },
+                state.matchPractice ? 'practice-match' : 'quick-match'
+              )
+            : state.businessError
+        });
+        break;
+      }
+      case MsgType.RoomLeft:
+        get().finishCommand('leave-room');
+        get().leaveLocalRoom();
         break;
       case MsgType.GameStart: {
         const payload = message.payload as { players: PlayerInfo[] };
-        set({ ...initialTable, players: normalizeGamePlayers(payload.players ?? [], state.playerId), phase: 'bidding', selectedCards: new Set() });
+        get().finishCommands(['quick-match', 'practice-match', 'ready', 'cancel-ready']);
+        set({
+          ...initialTable,
+          players: normalizeGamePlayers(payload.players ?? [], state.playerId),
+          phase: 'bidding',
+          matchDeadlineMs: 0,
+          matchPractice: false,
+          selectedCards: new Set()
+        });
         break;
       }
       case MsgType.DealCards: {
@@ -327,6 +541,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.BidResult: {
         const payload = message.payload as { player_id: string; player_name: string; bid: boolean; is_grab: boolean; multiplier: number };
+        if (payload.player_id === state.playerId) get().finishCommand('bid');
         const seatAction = {
           type: 'bid' as const,
           player_id: payload.player_id,
@@ -361,6 +576,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const payload = message.payload as { player_id: string; player_name: string; cards: CardInfo[]; cards_left: number; hand_type: string };
         const playedKeys = new Set((payload.cards ?? []).map(cardKey));
         const isMe = payload.player_id === state.playerId;
+        if (isMe) get().finishCommand('play');
         const action = {
           type: 'play' as const,
           player_id: payload.player_id,
@@ -384,6 +600,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayerPass: {
         const payload = message.payload as { player_id: string; player_name: string };
+        if (payload.player_id === state.playerId) get().finishCommand('pass');
         const action = { type: 'pass' as const, player_id: payload.player_id, player_name: payload.player_name, label: '不出' };
         set({
           lastPlayedBy: payload.player_id,
@@ -395,6 +612,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.GameOver: {
         const payload = message.payload as { winner_id: string; winner_name: string; is_landlord: boolean; multiplier: number; scores: PlayerScore[]; player_hands: PlayerHand[] };
+        get().finishCommands(['bid', 'play', 'pass']);
         set({ phase: 'game_over', winnerId: payload.winner_id, winnerName: payload.winner_name, winnerIsLandlord: payload.is_landlord, finalMultiplier: payload.multiplier, scores: payload.scores ?? [], playerHands: payload.player_hands ?? [], drawer: 'none' });
         break;
       }
@@ -409,9 +627,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       case MsgType.RoomListResult:
         set({ roomList: (message.payload as { rooms: RoomListItem[] }).rooms ?? [] });
         break;
-      case MsgType.Chat:
-        useChatStore.getState().push(message.payload as ChatPayload);
+      case MsgType.Chat: {
+        const payload = message.payload as ChatPayload;
+        const pendingChat = state.pendingCommands.chat;
+        if (pendingChat?.request.kind === 'chat' && payload.message_id === pendingChat.request.messageId) {
+          get().finishCommand('chat');
+        }
+        useChatStore.getState().push(payload);
         break;
+      }
       case MsgType.PlayerOffline: {
         const payload = message.payload as { player_id: string };
         set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, online: false } : player) });
@@ -500,11 +724,87 @@ function acceptProvisionalAfterReconnectFailure(
     provisionalIdentity: null,
     reconnectNotice: `无法恢复旧牌局，已作为新玩家连接：${reason}`,
     error: `无法恢复旧牌局，已作为新玩家连接：${reason}`,
+    businessError: createBusinessError('validation', `无法恢复旧牌局，已作为新玩家连接：${reason}`),
+    pendingCommands: {},
     phase: 'lobby',
     roomCode: '',
     players: [],
     selectedCards: new Set()
   });
+}
+
+function cancelCommandTimer(kind: CommandKind): void {
+  const timer = commandTimers.get(kind);
+  if (timer !== undefined) window.clearTimeout(timer);
+  commandTimers.delete(kind);
+}
+
+function cancelAllCommandTimers(): void {
+  for (const timer of commandTimers.values()) window.clearTimeout(timer);
+  commandTimers.clear();
+}
+
+function createBusinessError(
+  category: BusinessErrorCategory,
+  message: string,
+  retry?: CommandRequest,
+  command?: CommandKind
+): BusinessError {
+  return { id: nextBusinessErrorID++, category, message, retry, command };
+}
+
+function classifyServerError(code?: number): BusinessErrorCategory {
+  if (code === 1002) return 'rate-limit';
+  if (code === 2003) return 'not-in-room';
+  if (code === 5003) return 'maintenance';
+  return 'validation';
+}
+
+function commandKindForMessageType(messageType?: WireMessageType | string): CommandKind | undefined {
+  switch (messageType) {
+    case WireMessageType.MSG_CREATE_ROOM:
+    case 'create_room': return 'create-room';
+    case WireMessageType.MSG_JOIN_ROOM:
+    case 'join_room': return 'join-room';
+    case WireMessageType.MSG_QUICK_MATCH:
+    case 'quick_match': return 'quick-match';
+    case WireMessageType.MSG_PRACTICE_MATCH:
+    case 'practice_match': return 'practice-match';
+    case WireMessageType.MSG_CANCEL_MATCH:
+    case 'cancel_match': return 'cancel-match';
+    case WireMessageType.MSG_READY:
+    case 'ready': return 'ready';
+    case WireMessageType.MSG_CANCEL_READY:
+    case 'cancel_ready': return 'cancel-ready';
+    case WireMessageType.MSG_BID:
+    case 'bid': return 'bid';
+    case WireMessageType.MSG_PLAY_CARDS:
+    case 'play_cards': return 'play';
+    case WireMessageType.MSG_PASS:
+    case 'pass': return 'pass';
+    case WireMessageType.MSG_LEAVE_ROOM:
+    case 'leave_room': return 'leave-room';
+    case WireMessageType.MSG_CHAT:
+    case 'chat': return 'chat';
+    default: return undefined;
+  }
+}
+
+function commandLabel(kind: CommandKind): string {
+  switch (kind) {
+    case 'create-room': return '创建房间';
+    case 'join-room': return '加入房间';
+    case 'quick-match': return '快速匹配';
+    case 'practice-match': return '人机练习';
+    case 'cancel-match': return '取消匹配';
+    case 'ready': return '准备';
+    case 'cancel-ready': return '取消准备';
+    case 'bid': return '叫地主';
+    case 'play': return '出牌';
+    case 'pass': return '不出';
+    case 'leave-room': return '离开房间';
+    case 'chat': return '发送聊天';
+  }
 }
 
 function mergePlayer(players: PlayerInfo[], next: PlayerInfo): PlayerInfo[] {

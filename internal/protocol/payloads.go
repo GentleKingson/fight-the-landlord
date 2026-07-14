@@ -138,6 +138,22 @@ type PlayerReadyPayload struct {
 	Ready    bool   `json:"ready"`
 }
 
+// MatchQueuedPayload 匹配请求已由服务端接受。
+type MatchQueuedPayload struct {
+	DeadlineMS int64 `json:"deadline_ms"`
+	Practice   bool  `json:"practice"`
+}
+
+// MatchCancelledPayload 匹配请求已由服务端取消。
+type MatchCancelledPayload struct {
+	Reason string `json:"reason"`
+}
+
+// RoomLeftPayload 玩家已从服务端房间状态中移除。
+type RoomLeftPayload struct {
+	RoomCode string `json:"room_code"`
+}
+
 // GameStartPayload 游戏开始通知
 type GameStartPayload struct {
 	Players []PlayerInfo `json:"players"` // 按座位顺序排列
@@ -234,8 +250,9 @@ type MaintenanceStatusPayload struct {
 
 // ErrorPayload 错误响应
 type ErrorPayload struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code        int         `json:"code"`
+	Message     string      `json:"message"`
+	CommandType MessageType `json:"command_type,omitempty"`
 }
 
 // StatsResultPayload 个人统计结果

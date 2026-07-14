@@ -11,6 +11,7 @@ const (
 	ErrCodeRoomFull          = 2002
 	ErrCodeNotInRoom         = 2003
 	ErrCodeGameStarted       = 2004 // 游戏已开始
+	ErrCodeMatchNotQueued    = 2005 // 匹配已完成或未在队列中
 	ErrCodeGameNotStart      = 3001
 	ErrCodeNotYourTurn       = 3002
 	ErrCodeInvalidCards      = 3003
@@ -30,6 +31,7 @@ var ErrorMessages = map[int]string{
 	ErrCodeRoomFull:          "房间已满",
 	ErrCodeNotInRoom:         "您不在房间中",
 	ErrCodeGameStarted:       "游戏已开始",
+	ErrCodeMatchNotQueued:    "匹配已完成或未在队列中",
 	ErrCodeGameNotStart:      "游戏尚未开始",
 	ErrCodeNotYourTurn:       "还没轮到您",
 	ErrCodeInvalidCards:      "无效的牌型",

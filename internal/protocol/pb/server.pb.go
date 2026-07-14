@@ -466,6 +466,7 @@ type ErrorPayload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	CommandType   MessageType            `protobuf:"varint,3,opt,name=command_type,json=commandType,proto3,enum=protocol.MessageType" json:"command_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -514,6 +515,156 @@ func (x *ErrorPayload) GetMessage() string {
 	return ""
 }
 
+func (x *ErrorPayload) GetCommandType() MessageType {
+	if x != nil {
+		return x.CommandType
+	}
+	return MessageType_MSG_UNKNOWN
+}
+
+// MatchQueuedPayload 匹配请求已由服务端接受。
+type MatchQueuedPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeadlineMs    int64                  `protobuf:"varint,1,opt,name=deadline_ms,json=deadlineMs,proto3" json:"deadline_ms,omitempty"`
+	Practice      bool                   `protobuf:"varint,2,opt,name=practice,proto3" json:"practice,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MatchQueuedPayload) Reset() {
+	*x = MatchQueuedPayload{}
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MatchQueuedPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MatchQueuedPayload) ProtoMessage() {}
+
+func (x *MatchQueuedPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MatchQueuedPayload.ProtoReflect.Descriptor instead.
+func (*MatchQueuedPayload) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *MatchQueuedPayload) GetDeadlineMs() int64 {
+	if x != nil {
+		return x.DeadlineMs
+	}
+	return 0
+}
+
+func (x *MatchQueuedPayload) GetPractice() bool {
+	if x != nil {
+		return x.Practice
+	}
+	return false
+}
+
+// MatchCancelledPayload 匹配请求已由服务端取消。
+type MatchCancelledPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MatchCancelledPayload) Reset() {
+	*x = MatchCancelledPayload{}
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MatchCancelledPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MatchCancelledPayload) ProtoMessage() {}
+
+func (x *MatchCancelledPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MatchCancelledPayload.ProtoReflect.Descriptor instead.
+func (*MatchCancelledPayload) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MatchCancelledPayload) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+// RoomLeftPayload 玩家已从服务端房间状态中移除。
+type RoomLeftPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RoomCode      string                 `protobuf:"bytes,1,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RoomLeftPayload) Reset() {
+	*x = RoomLeftPayload{}
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoomLeftPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoomLeftPayload) ProtoMessage() {}
+
+func (x *RoomLeftPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoomLeftPayload.ProtoReflect.Descriptor instead.
+func (*RoomLeftPayload) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RoomLeftPayload) GetRoomCode() string {
+	if x != nil {
+		return x.RoomCode
+	}
+	return ""
+}
+
 // StatsResultPayload 个人统计结果
 type StatsResultPayload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -537,7 +688,7 @@ type StatsResultPayload struct {
 
 func (x *StatsResultPayload) Reset() {
 	*x = StatsResultPayload{}
-	mi := &file_internal_protocol_proto_server_proto_msgTypes[9]
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -549,7 +700,7 @@ func (x *StatsResultPayload) String() string {
 func (*StatsResultPayload) ProtoMessage() {}
 
 func (x *StatsResultPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_proto_server_proto_msgTypes[9]
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -562,7 +713,7 @@ func (x *StatsResultPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsResultPayload.ProtoReflect.Descriptor instead.
 func (*StatsResultPayload) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{9}
+	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *StatsResultPayload) GetPlayerId() string {
@@ -674,7 +825,7 @@ type LeaderboardResultPayload struct {
 
 func (x *LeaderboardResultPayload) Reset() {
 	*x = LeaderboardResultPayload{}
-	mi := &file_internal_protocol_proto_server_proto_msgTypes[10]
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -686,7 +837,7 @@ func (x *LeaderboardResultPayload) String() string {
 func (*LeaderboardResultPayload) ProtoMessage() {}
 
 func (x *LeaderboardResultPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_proto_server_proto_msgTypes[10]
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -699,7 +850,7 @@ func (x *LeaderboardResultPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaderboardResultPayload.ProtoReflect.Descriptor instead.
 func (*LeaderboardResultPayload) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{10}
+	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *LeaderboardResultPayload) GetType() string {
@@ -726,7 +877,7 @@ type RoomListResultPayload struct {
 
 func (x *RoomListResultPayload) Reset() {
 	*x = RoomListResultPayload{}
-	mi := &file_internal_protocol_proto_server_proto_msgTypes[11]
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -738,7 +889,7 @@ func (x *RoomListResultPayload) String() string {
 func (*RoomListResultPayload) ProtoMessage() {}
 
 func (x *RoomListResultPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_proto_server_proto_msgTypes[11]
+	mi := &file_internal_protocol_proto_server_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -751,7 +902,7 @@ func (x *RoomListResultPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomListResultPayload.ProtoReflect.Descriptor instead.
 func (*RoomListResultPayload) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{11}
+	return file_internal_protocol_proto_server_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RoomListResultPayload) GetRooms() []*RoomListItem {
@@ -765,7 +916,7 @@ var File_internal_protocol_proto_server_proto protoreflect.FileDescriptor
 
 const file_internal_protocol_proto_server_proto_rawDesc = "" +
 	"\n" +
-	"$internal/protocol/proto/server.proto\x12\bprotocol\x1a$internal/protocol/proto/common.proto\"y\n" +
+	"$internal/protocol/proto/server.proto\x12\bprotocol\x1a$internal/protocol/proto/common.proto\x1a%internal/protocol/proto/message.proto\"y\n" +
 	"\x10ConnectedPayload\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1f\n" +
 	"\vplayer_name\x18\x02 \x01(\tR\n" +
@@ -796,10 +947,19 @@ const file_internal_protocol_proto_server_proto_rawDesc = "" +
 	"\x18MaintenanceStatusPayload\x12 \n" +
 	"\vmaintenance\x18\x01 \x01(\bR\vmaintenance\"6\n" +
 	"\x12MaintenancePayload\x12 \n" +
-	"\vmaintenance\x18\x01 \x01(\bR\vmaintenance\"<\n" +
+	"\vmaintenance\x18\x01 \x01(\bR\vmaintenance\"v\n" +
 	"\fErrorPayload\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xc1\x03\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x128\n" +
+	"\fcommand_type\x18\x03 \x01(\x0e2\x15.protocol.MessageTypeR\vcommandType\"Q\n" +
+	"\x12MatchQueuedPayload\x12\x1f\n" +
+	"\vdeadline_ms\x18\x01 \x01(\x03R\n" +
+	"deadlineMs\x12\x1a\n" +
+	"\bpractice\x18\x02 \x01(\bR\bpractice\"/\n" +
+	"\x15MatchCancelledPayload\x12\x16\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\".\n" +
+	"\x0fRoomLeftPayload\x12\x1b\n" +
+	"\troom_code\x18\x01 \x01(\tR\broomCode\"\xc1\x03\n" +
 	"\x12StatsResultPayload\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1f\n" +
 	"\vplayer_name\x18\x02 \x01(\tR\n" +
@@ -837,7 +997,7 @@ func file_internal_protocol_proto_server_proto_rawDescGZIP() []byte {
 	return file_internal_protocol_proto_server_proto_rawDescData
 }
 
-var file_internal_protocol_proto_server_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_internal_protocol_proto_server_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_internal_protocol_proto_server_proto_goTypes = []any{
 	(*ConnectedPayload)(nil),         // 0: protocol.ConnectedPayload
 	(*ReconnectedPayload)(nil),       // 1: protocol.ReconnectedPayload
@@ -848,22 +1008,27 @@ var file_internal_protocol_proto_server_proto_goTypes = []any{
 	(*MaintenanceStatusPayload)(nil), // 6: protocol.MaintenanceStatusPayload
 	(*MaintenancePayload)(nil),       // 7: protocol.MaintenancePayload
 	(*ErrorPayload)(nil),             // 8: protocol.ErrorPayload
-	(*StatsResultPayload)(nil),       // 9: protocol.StatsResultPayload
-	(*LeaderboardResultPayload)(nil), // 10: protocol.LeaderboardResultPayload
-	(*RoomListResultPayload)(nil),    // 11: protocol.RoomListResultPayload
-	(*GameStateDTO)(nil),             // 12: protocol.GameStateDTO
-	(*LeaderboardEntry)(nil),         // 13: protocol.LeaderboardEntry
-	(*RoomListItem)(nil),             // 14: protocol.RoomListItem
+	(*MatchQueuedPayload)(nil),       // 9: protocol.MatchQueuedPayload
+	(*MatchCancelledPayload)(nil),    // 10: protocol.MatchCancelledPayload
+	(*RoomLeftPayload)(nil),          // 11: protocol.RoomLeftPayload
+	(*StatsResultPayload)(nil),       // 12: protocol.StatsResultPayload
+	(*LeaderboardResultPayload)(nil), // 13: protocol.LeaderboardResultPayload
+	(*RoomListResultPayload)(nil),    // 14: protocol.RoomListResultPayload
+	(*GameStateDTO)(nil),             // 15: protocol.GameStateDTO
+	(MessageType)(0),                 // 16: protocol.MessageType
+	(*LeaderboardEntry)(nil),         // 17: protocol.LeaderboardEntry
+	(*RoomListItem)(nil),             // 18: protocol.RoomListItem
 }
 var file_internal_protocol_proto_server_proto_depIdxs = []int32{
-	12, // 0: protocol.ReconnectedPayload.game_state:type_name -> protocol.GameStateDTO
-	13, // 1: protocol.LeaderboardResultPayload.entries:type_name -> protocol.LeaderboardEntry
-	14, // 2: protocol.RoomListResultPayload.rooms:type_name -> protocol.RoomListItem
-	3,  // [3:3] is the sub-list for method output_type
-	3,  // [3:3] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	15, // 0: protocol.ReconnectedPayload.game_state:type_name -> protocol.GameStateDTO
+	16, // 1: protocol.ErrorPayload.command_type:type_name -> protocol.MessageType
+	17, // 2: protocol.LeaderboardResultPayload.entries:type_name -> protocol.LeaderboardEntry
+	18, // 3: protocol.RoomListResultPayload.rooms:type_name -> protocol.RoomListItem
+	4,  // [4:4] is the sub-list for method output_type
+	4,  // [4:4] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_internal_protocol_proto_server_proto_init() }
@@ -872,13 +1037,14 @@ func file_internal_protocol_proto_server_proto_init() {
 		return
 	}
 	file_internal_protocol_proto_common_proto_init()
+	file_internal_protocol_proto_message_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_protocol_proto_server_proto_rawDesc), len(file_internal_protocol_proto_server_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -20,6 +20,7 @@ func TestMessagePool_GetPut(t *testing.T) {
 	// Use the message
 	msg.Type = "test"
 	msg.Payload = []byte("data")
+	msg.Event = &protocol.EventMeta{StreamID: "game:test", EventVersion: 1}
 
 	// Put back to pool
 	PutMessage(msg)
@@ -29,6 +30,7 @@ func TestMessagePool_GetPut(t *testing.T) {
 	assert.NotNil(t, msg2)
 	assert.Empty(t, msg2.Type)
 	assert.Nil(t, msg2.Payload)
+	assert.Nil(t, msg2.Event)
 }
 
 func TestMessagePool_PutNil(t *testing.T) {

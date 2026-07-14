@@ -13,24 +13,67 @@ export type SendResult =
   | { ok: true }
   | { ok: false; reason: 'not-connected' | 'encode-failed' | 'send-failed'; error?: Error };
 
+export interface GameSocketOptions {
+  heartbeatIntervalMs?: number;
+  pongTimeoutMs?: number;
+  reconnectBaseDelayMs?: number;
+  reconnectMaxDelayMs?: number;
+  reconnectJitterRatio?: number;
+  random?: () => number;
+}
+
+interface ResolvedGameSocketOptions {
+  heartbeatIntervalMs: number;
+  pongTimeoutMs: number;
+  reconnectBaseDelayMs: number;
+  reconnectMaxDelayMs: number;
+  reconnectJitterRatio: number;
+  random: () => number;
+}
+
+const DEFAULT_OPTIONS: ResolvedGameSocketOptions = {
+  heartbeatIntervalMs: 5000,
+  pongTimeoutMs: 10_000,
+  reconnectBaseDelayMs: 1000,
+  reconnectMaxDelayMs: 30_000,
+  reconnectJitterRatio: 0.2,
+  random: Math.random
+};
+
 export class GameSocket {
   private socket: WebSocket | null = null;
   private heartbeat: number | null = null;
+  private pongWatchdog: number | null = null;
   private reconnectTimer: number | null = null;
+  private reconnectAttempt = 0;
   private reconnectIdentity: StoredIdentity | null = null;
   private intentionalClose = false;
+  private networkOffline = false;
+  private reconnectWhenClosed = false;
+  private closeError: string | null = null;
+  private browserListenersInstalled = false;
   private readonly listeners = new Set<Listener>();
+  private readonly options: ResolvedGameSocketOptions;
 
-  constructor(private readonly url: string) {}
+  constructor(private readonly url: string, options: GameSocketOptions = {}) {
+    this.options = resolveOptions(options);
+  }
 
   connect(): void {
+    this.installBrowserListeners();
     if (this.socket) return;
-    if (this.reconnectTimer !== null) {
-      window.clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
 
     this.intentionalClose = false;
+    this.networkOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (this.networkOffline) {
+      const store = useAppStore.getState();
+      store.setConnected(false);
+      store.setConnectionStatus('offline');
+      store.setError('网络已离线，恢复后将自动重连');
+      return;
+    }
+
     this.reconnectIdentity = loadReconnect();
     const store = useAppStore.getState();
     store.prepareConnection(this.reconnectIdentity);
@@ -41,15 +84,17 @@ export class GameSocket {
     } catch (error) {
       store.setConnectionStatus('offline');
       store.setError(`无法建立连接：${errorMessage(error)}`);
+      this.scheduleReconnect();
       return;
     }
 
     this.socket = socket;
+    this.closeError = null;
     socket.binaryType = 'arraybuffer';
 
     socket.onopen = () => {
       if (this.socket !== socket) return;
-      this.startHeartbeat();
+      if (!document.hidden) this.startHeartbeat();
     };
 
     socket.onmessage = (event) => {
@@ -63,6 +108,7 @@ export class GameSocket {
         return;
       }
 
+      if (message.type === MsgType.Pong) this.clearPongWatchdog();
       useAppStore.getState().handleMessage(message);
       this.advanceIdentityState(message, socket);
       for (const listener of this.listeners) listener(message);
@@ -77,12 +123,17 @@ export class GameSocket {
       if (this.socket !== socket) return;
       this.stopHeartbeat();
       this.socket = null;
+      const reconnectImmediately = this.reconnectWhenClosed;
+      const closeError = this.closeError;
+      this.reconnectWhenClosed = false;
+      this.closeError = null;
       const currentStore = useAppStore.getState();
       currentStore.setConnected(false);
       currentStore.setConnectionStatus(this.intentionalClose ? 'idle' : 'offline');
-      if (!this.intentionalClose) {
-        currentStore.setError('与服务器断开，正在重连');
-        this.reconnectTimer = window.setTimeout(() => this.connect(), 2500);
+      if (!this.intentionalClose && !this.networkOffline) {
+        currentStore.setError(closeError ?? '与服务器断开，正在重连');
+        if (reconnectImmediately) this.connect();
+        else this.scheduleReconnect();
       }
     };
   }
@@ -96,9 +147,12 @@ export class GameSocket {
     const store = useAppStore.getState();
     store.setConnectionStatus('closing');
     this.stopHeartbeat();
-    if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
     this.reconnectIdentity = null;
+    this.reconnectWhenClosed = false;
+    this.closeError = null;
+    this.removeBrowserListeners();
     const socket = this.socket;
     this.socket = null;
     socket?.close();
@@ -147,6 +201,7 @@ export class GameSocket {
 
   private advanceIdentityState(message: IncomingMessage, socket: WebSocket): void {
     if (message.type === MsgType.Connected) {
+      this.reconnectAttempt = 0;
       const currentStore = useAppStore.getState();
       if (this.reconnectIdentity) {
         currentStore.setConnectionStatus('reconnecting');
@@ -178,22 +233,150 @@ export class GameSocket {
     }
   }
 
-  private startHeartbeat(): void {
+  private startHeartbeat(sendImmediately = false): void {
     this.stopHeartbeat();
-    this.heartbeat = window.setInterval(() => {
-      this.send(MsgType.Ping, { timestamp: Date.now() });
-    }, 5000);
+    if (sendImmediately) this.sendHeartbeat();
+    this.heartbeat = window.setInterval(() => this.sendHeartbeat(), this.options.heartbeatIntervalMs);
+  }
+
+  private sendHeartbeat(): void {
+    if (this.pongWatchdog !== null) return;
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const result = this.send(MsgType.Ping, { timestamp: Date.now() });
+    if (!result.ok) {
+      if (result.reason === 'send-failed') this.closeUnhealthySocket(socket, '心跳发送失败');
+      return;
+    }
+    this.pongWatchdog = window.setTimeout(() => {
+      this.pongWatchdog = null;
+      this.closeUnhealthySocket(socket, '服务器心跳超时，正在重连');
+    }, this.options.pongTimeoutMs);
+  }
+
+  private closeUnhealthySocket(socket: WebSocket, message: string): void {
+    if (this.socket !== socket) return;
+    this.closeError = message;
+    useAppStore.getState().setError(message);
+    socket.close(4000, 'heartbeat timeout');
   }
 
   private stopHeartbeat(): void {
     if (this.heartbeat !== null) window.clearInterval(this.heartbeat);
     this.heartbeat = null;
+    this.clearPongWatchdog();
   }
+
+  private clearPongWatchdog(): void {
+    if (this.pongWatchdog !== null) window.clearTimeout(this.pongWatchdog);
+    this.pongWatchdog = null;
+  }
+
+  private scheduleReconnect(): void {
+    if (this.intentionalClose || this.networkOffline || this.reconnectTimer !== null || this.socket) return;
+    const exponent = Math.min(this.reconnectAttempt, 30);
+    const exponentialDelay = this.options.reconnectBaseDelayMs * 2 ** exponent;
+    const jitterMultiplier = 1 + (unitRandom(this.options.random) * 2 - 1) * this.options.reconnectJitterRatio;
+    const delay = Math.min(this.options.reconnectMaxDelayMs, Math.max(0, Math.round(exponentialDelay * jitterMultiplier)));
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
+  private installBrowserListeners(): void {
+    if (this.browserListenersInstalled) return;
+    window.addEventListener('online', this.handleOnline);
+    window.addEventListener('offline', this.handleOffline);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    this.browserListenersInstalled = true;
+  }
+
+  private removeBrowserListeners(): void {
+    if (!this.browserListenersInstalled) return;
+    window.removeEventListener('online', this.handleOnline);
+    window.removeEventListener('offline', this.handleOffline);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    this.browserListenersInstalled = false;
+  }
+
+  private readonly handleOnline = (): void => {
+    if (this.intentionalClose) return;
+    this.networkOffline = false;
+    this.reconnectAttempt = 0;
+    this.clearReconnectTimer();
+    if (!this.socket) {
+      this.connect();
+    } else if (this.socket.readyState === WebSocket.CLOSING || this.socket.readyState === WebSocket.CLOSED) {
+      this.reconnectWhenClosed = true;
+    }
+  };
+
+  private readonly handleOffline = (): void => {
+    if (this.intentionalClose) return;
+    this.networkOffline = true;
+    this.reconnectWhenClosed = false;
+    this.closeError = null;
+    this.clearReconnectTimer();
+    this.stopHeartbeat();
+    const store = useAppStore.getState();
+    store.setConnected(false);
+    store.setConnectionStatus('offline');
+    store.setError('网络已离线，恢复后将自动重连');
+    this.socket?.close(4001, 'browser offline');
+  };
+
+  private readonly handleVisibilityChange = (): void => {
+    if (this.intentionalClose) return;
+    if (document.hidden) {
+      this.stopHeartbeat();
+      return;
+    }
+    if (this.networkOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.startHeartbeat(true);
+    } else if (!this.socket) {
+      this.clearReconnectTimer();
+      this.connect();
+    }
+  };
 }
 
 export function createGameSocket(): GameSocket {
   const url = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
   return new GameSocket(url);
+}
+
+function resolveOptions(options: GameSocketOptions): ResolvedGameSocketOptions {
+  const heartbeatIntervalMs = positiveDuration(options.heartbeatIntervalMs, DEFAULT_OPTIONS.heartbeatIntervalMs);
+  const pongTimeoutMs = positiveDuration(options.pongTimeoutMs, DEFAULT_OPTIONS.pongTimeoutMs);
+  const reconnectBaseDelayMs = positiveDuration(options.reconnectBaseDelayMs, DEFAULT_OPTIONS.reconnectBaseDelayMs);
+  const reconnectMaxDelayMs = positiveDuration(options.reconnectMaxDelayMs, DEFAULT_OPTIONS.reconnectMaxDelayMs);
+  const reconnectJitterRatio = Math.min(1, Math.max(0, options.reconnectJitterRatio ?? DEFAULT_OPTIONS.reconnectJitterRatio));
+  return {
+    heartbeatIntervalMs,
+    pongTimeoutMs,
+    reconnectBaseDelayMs,
+    reconnectMaxDelayMs,
+    reconnectJitterRatio,
+    random: options.random ?? DEFAULT_OPTIONS.random
+  };
+}
+
+function unitRandom(random: () => number): number {
+  const value = random();
+  if (!Number.isFinite(value)) return 0.5;
+  return Math.min(1, Math.max(0, value));
+}
+
+function positiveDuration(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function errorMessage(error: unknown): string {
