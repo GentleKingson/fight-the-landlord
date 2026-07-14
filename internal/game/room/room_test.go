@@ -85,6 +85,23 @@ func TestRoom_GetPlayerInfo(t *testing.T) {
 	assert.Equal(t, "TestPlayer", info.Name)
 	assert.Equal(t, 1, info.Seat)
 	assert.True(t, info.Ready)
+	assert.True(t, info.Online)
+}
+
+func TestRoom_GetPlayerInfoMarksDisconnectedPlayerOffline(t *testing.T) {
+	t.Parallel()
+
+	gameRoom := &Room{
+		Players: map[string]*RoomPlayer{
+			"p1": {Client: nil, Seat: 2, Ready: false},
+		},
+	}
+
+	info := gameRoom.GetPlayerInfo("p1")
+
+	assert.Equal(t, "p1", info.ID)
+	assert.Equal(t, 2, info.Seat)
+	assert.False(t, info.Online)
 }
 
 func TestRoom_BroadcastSkipsOfflinePlayers(t *testing.T) {

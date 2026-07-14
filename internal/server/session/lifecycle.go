@@ -8,8 +8,8 @@ import (
 	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
+	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
-	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 )
 
@@ -41,6 +41,13 @@ func (gs *GameSession) startBiddingRound() {
 
 // dealNewRound 重置本局状态并发牌（不进入叫地主流程；调用方需持有 gs.mu）
 func (gs *GameSession) dealNewRound() {
+	gs.gameID = nextGameID()
+	gs.playedCards = make([][]card.Card, len(gs.players))
+	gs.lastPlayedHand = rule.ParsedHand{}
+	gs.lastPlayerIdx = -1
+	gs.consecutivePasses = 0
+	gs.settledMultiplier = 0
+
 	// 重置叫抢与倍数状态
 	gs.landlordCaller = -1
 	gs.landlordCandidate = -1
@@ -50,6 +57,7 @@ func (gs *GameSession) dealNewRound() {
 	gs.bombCount = 0
 	gs.landlordPlays = 0
 	gs.farmerPlays = 0
+	gs.bottomCards = nil
 	for _, p := range gs.players {
 		p.Hand = nil
 		p.IsLandlord = false
@@ -102,24 +110,34 @@ func (gs *GameSession) deal() {
 		})
 	}
 
-	// 发送手牌给各玩家（先不显示底牌）
+	// GameStart belongs to the authoritative game stream. Emitting it here,
+	// after gameID exists and before private hands are sent, gives clients one
+	// ordered reset point for both initial deals and redeals.
+	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgGameStart, protocol.GameStartPayload{
+		Players: gs.room.GetAllPlayersInfo(),
+	}))
+
+	// 发牌是一次权威状态变更；三个玩家收到同一水位的私有投影。
+	event := gs.nextEventMetaLocked()
 	for _, p := range gs.players {
 		rp := gs.room.Players[p.ID]
 		client := rp.Client
-		client.SendMessage(codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
+		client.SendMessage(newGameEventMessageWithMeta(protocol.MsgDealCards, protocol.DealCardsPayload{
 			Cards:       convert.CardsToInfos(p.Hand),
 			BottomCards: make([]protocol.CardInfo, 3), // 暂时不显示
-		}))
+		}, event))
 	}
 }
 
 // endGame 结束游戏
 func (gs *GameSession) endGame(winner *GamePlayer) {
+	gs.stopTimer()
 	gs.state = GameStateEnded
 	gs.room.State = RoomStateEnded
 
 	// 计算最终倍数与各玩家得分
 	multiplier := gs.finalMultiplier(winner)
+	gs.settledMultiplier = multiplier
 	scores := gs.computeScores(winner, multiplier)
 
 	// 收集所有玩家剩余手牌
@@ -132,8 +150,10 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 		}
 	}
 
-	// 广播游戏结束
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgGameOver, protocol.GameOverPayload{
+	// Keep the room ended until every client has observed GameOver. A Ready
+	// command delivered synchronously by a client callback must not be able to
+	// replace this session before the terminal event is broadcast.
+	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgGameOver, protocol.GameOverPayload{
 		WinnerID:    winner.ID,
 		WinnerName:  winner.Name,
 		IsLandlord:  winner.IsLandlord,
@@ -142,20 +162,21 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 		Scores:      scores,
 	}))
 
+	// Preserve membership and the completed GameSession for reconnect, then
+	// reopen the room for a fresh ready-up cycle. This post-event mutation gets
+	// its own snapshot watermark even though it has no game-stream wire event.
+	for _, p := range gs.players {
+		p.Ready = p.IsBot
+	}
+	gs.room.ResetAfterGame()
+	gs.markStateChangedLocked()
+
 	role := "农民"
 	if winner.IsLandlord {
 		role = "地主"
 	}
 	log.Printf("🎮 游戏结束！房间 %s，获胜者: %s (%s)，倍数: %d",
 		gs.room.Code, winner.Name, role, multiplier)
-
-	// 游戏结束，解散房间
-	for _, p := range gs.players {
-		rp := gs.room.Players[p.ID]
-		if rp != nil {
-			rp.Client.SetRoom("")
-		}
-	}
 
 	// 记录游戏结果到排行榜
 	gs.recordGameResults(winner)
@@ -221,7 +242,7 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 
 	for _, p := range gs.players {
 		rp := gs.room.Players[p.ID]
-		if rp != nil && rp.Client.IsBot() {
+		if p.IsBot {
 			continue // Bot 不计入排行榜
 		}
 
@@ -234,7 +255,7 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 
 		// 获取玩家名称
 		playerName := p.Name
-		if rp != nil {
+		if rp != nil && rp.Client != nil {
 			playerName = rp.Client.GetName()
 		}
 

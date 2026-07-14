@@ -10,6 +10,7 @@ import { PlayedCards } from '../../shared/cards/PlayedCards';
 import { Icon } from '../../shared/ui/Icon';
 import { createChatCommand, dispatchCommand } from '../../transport/commandDispatcher';
 import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
+import { remainingSeconds } from '../../stores/slices/clock';
 
 interface GameTableProps {
   socket: GameSocket;
@@ -32,6 +33,7 @@ export function GameTable({ socket }: GameTableProps) {
   const lastHandType = useAppStore((state) => state.lastHandType);
   const seatActions = useAppStore((state) => state.seatActions);
   const multiplier = useAppStore((state) => state.multiplier);
+  const baseScore = useAppStore((state) => state.baseScore);
   const roomCode = useAppStore((state) => state.roomCode);
   const latency = useAppStore((state) => state.latency);
   const drawer = useAppStore((state) => state.drawer);
@@ -56,8 +58,8 @@ export function GameTable({ socket }: GameTableProps) {
           <span>房间号 {roomCode || '练习桌'}</span>
         </div>
         <div className="table-score-strip">
-          <span>底分 3</span>
-          <strong>倍数 x{multiplier || 1}</strong>
+          <span>底分 {baseScore}</span>
+          <strong>倍数 x{multiplier ?? 1}</strong>
         </div>
         <div className="table-network">
           <span className="network-dot" />
@@ -158,7 +160,7 @@ function SeatPanel({ player, side, active, action }: { player?: PlayerInfo; side
     <aside className={`seat-panel seat-panel--${side} ${active ? 'is-active' : ''}`}>
       <PlayerBadge player={player} active={active} />
       <PlayedActionBubble action={action} side={side} />
-      <CardBack count={player.cards_count || 0} />
+      <CardBack count={player.cards_count ?? 0} />
     </aside>
   );
 }
@@ -193,7 +195,7 @@ function PlayerBadge({ player, active, me = false }: { player: PlayerInfo; activ
       <span className="player-avatar" aria-hidden="true">{player.name.slice(0, 1)}</span>
       <div>
         <strong>{player.name}{me ? ' 我' : ''}</strong>
-        <span>{player.is_landlord ? '地主' : '农民'} · 剩余 {player.cards_count || 0}</span>
+        <span>{player.is_landlord ? '地主' : '农民'} · 剩余 {player.cards_count ?? 0}</span>
       </div>
       {player.is_landlord ? <em>地主</em> : null}
       {!player.online ? <em>离线</em> : null}
@@ -205,8 +207,8 @@ function TurnBanner() {
   const playerId = useAppStore((state) => state.playerId);
   const players = useAppStore((state) => state.players);
   const currentTurn = useAppStore((state) => state.currentTurn);
-  const timeout = useAppStore((state) => state.timeout);
-  const timerStart = useAppStore((state) => state.timerStart);
+  const turnDeadlineMs = useAppStore((state) => state.turnDeadlineMs);
+  const serverClockOffsetMs = useAppStore((state) => state.serverClockOffsetMs);
   const phase = useAppStore((state) => state.phase);
   const isGrabTurn = useAppStore((state) => state.isGrabTurn);
   const recentActions = useAppStore((state) => state.recentActions);
@@ -214,10 +216,15 @@ function TurnBanner() {
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 400);
-    return () => window.clearInterval(id);
+    const resumeFromVisibility = () => setNow(Date.now());
+    document.addEventListener('visibilitychange', resumeFromVisibility);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', resumeFromVisibility);
+    };
   }, []);
 
-  const remaining = timeout ? Math.max(0, Math.ceil(timeout - (now - timerStart) / 1000)) : 0;
+  const remaining = remainingSeconds(turnDeadlineMs, serverClockOffsetMs, now);
   const actor = players.find((player) => player.id === currentTurn);
   const isMe = currentTurn === playerId;
   const lastBid = [...recentActions].reverse().find((action) => action.type === 'bid');
@@ -232,7 +239,7 @@ function TurnBanner() {
         <strong>{title}</strong>
         <span>{lastBid?.label ? `${lastBid.player_name || '玩家'}：${lastBid.label}` : subtitle}</span>
       </div>
-      <time>{remaining || 0}</time>
+      <time>{remaining}</time>
     </div>
   );
 }
@@ -343,6 +350,11 @@ function UtilityDrawer({ socket, drawer, onClose, returnFocusRef }: GameTablePro
   const chatPending = useAppStore((state) => Boolean(state.pendingCommands.chat));
   const open = drawer !== 'none';
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const closeAndRestoreFocus = useCallback(() => {
+    onClose();
+    const trigger = returnFocusRef.current;
+    if (trigger?.isConnected) trigger.focus();
+  }, [onClose, returnFocusRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -350,16 +362,12 @@ function UtilityDrawer({ socket, drawer, onClose, returnFocusRef }: GameTablePro
     function handleEscape(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
       event.preventDefault();
-      onClose();
+      closeAndRestoreFocus();
     }
 
     document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('keydown', handleEscape);
-      const trigger = returnFocusRef.current;
-      if (trigger?.isConnected) trigger.focus();
-    };
-  }, [onClose, open, returnFocusRef]);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [closeAndRestoreFocus, open]);
 
   useEffect(() => {
     if (open) closeButtonRef.current?.focus();
@@ -384,7 +392,7 @@ function UtilityDrawer({ socket, drawer, onClose, returnFocusRef }: GameTablePro
     >
       <header>
         <strong id={UTILITY_DRAWER_TITLE_ID}>{drawerTitle(drawer)}</strong>
-        <button ref={closeButtonRef} onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
+        <button ref={closeButtonRef} onClick={closeAndRestoreFocus} aria-label="关闭"><Icon name="close" /></button>
       </header>
       {drawer === 'chat' ? (
         <>

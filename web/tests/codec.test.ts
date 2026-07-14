@@ -29,6 +29,41 @@ describe('protocol codec', () => {
     expect(decoded).toEqual({ type: MsgType.Maintenance, payload: { maintenance: true } });
   });
 
+  it('decodes authoritative event metadata from the message envelope', () => {
+    const Envelope = protocolRoot.lookupType('protocol.Message');
+    const PlayTurn = protocolRoot.lookupType('protocol.PlayTurnPayload');
+    const frame = Envelope.encode(Envelope.create({
+      type: MessageType.MSG_PLAY_TURN,
+      payload: PlayTurn.encode(PlayTurn.create({
+        player_id: 'p1',
+        timeout: 30,
+        must_play: true,
+        can_beat: true
+      })).finish(),
+      event: {
+        stream_id: 'game:game-1',
+        event_version: 42,
+        game_id: 'game-1',
+        turn_id: 7,
+        server_time_ms: 1_700_000_000_000,
+        turn_deadline_ms: 1_700_000_030_000
+      }
+    })).finish();
+
+    expect(decodeMessage(frame)).toEqual({
+      type: MsgType.PlayTurn,
+      payload: { player_id: 'p1', timeout: 30, must_play: true, can_beat: true },
+      event: {
+        stream_id: 'game:game-1',
+        event_version: 42,
+        game_id: 'game-1',
+        turn_id: 7,
+        server_time_ms: 1_700_000_000_000,
+        turn_deadline_ms: 1_700_000_030_000
+      }
+    });
+  });
+
   it('round trips Unicode chat as protobuf without a JSON fallback', () => {
     const payload = {
       sender_id: 'p1',

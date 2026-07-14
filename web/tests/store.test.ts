@@ -53,7 +53,7 @@ describe('app store message flow', () => {
     expect(useAppStore.getState().bottomCardsRevealed).toBe(false);
   });
 
-  it('normalizes missing game player counts and online flags from protobuf defaults', () => {
+  it('preserves explicit zero counts and offline flags while syncing the local hand', () => {
     useAppStore.setState({ playerId: 'p1' });
     useAppStore.getState().handleMessage({
       type: MsgType.GameStart,
@@ -75,8 +75,8 @@ describe('app store message flow', () => {
         bottom_cards: []
       }
     });
-    expect(useAppStore.getState().players.map((player) => player.cards_count)).toEqual([2, 17, 17]);
-    expect(useAppStore.getState().players.every((player) => player.online)).toBe(true);
+    expect(useAppStore.getState().players.map((player) => player.cards_count)).toEqual([2, 0, 0]);
+    expect(useAppStore.getState().players.every((player) => player.online === false)).toBe(true);
   });
 
   it('reveals bottom cards and appends them after landlord is confirmed', () => {

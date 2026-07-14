@@ -1,6 +1,7 @@
 import { useAppStore, useChatStore } from './appStore';
 import type { CardInfo, PlayerInfo } from '../protocol/types';
-import { initialCounter, sortCards } from '../shared/cards/cardModel';
+import { sortCards } from '../shared/cards/cardModel';
+import { buildCardCounter, type PlayedCardLedger } from './slices/cardCounter';
 
 const players: PlayerInfo[] = [
   { id: 'p1', name: '青竹', seat: 0, ready: true, is_landlord: false, cards_count: 16, online: true, is_bot: false },
@@ -17,6 +18,9 @@ export function seedDemoState(mode: string): void {
   const sortedHand = sortCards(hand);
   const isBidding = mode === 'bidding';
   const demoPlayers = isBidding ? players.map((player) => ({ ...player, is_landlord: false })) : players;
+  const bottomCards = [c(1, 5), c(2, 11), c(3, 15)];
+  const playedCardsLedger: PlayedCardLedger = isBidding ? {} : { p3: [c(2, 8), c(3, 8)] };
+  const turnDeadlineMs = Date.now() + 25_000;
   useChatStore.setState({
     messages: [
       demoChat('demo-chat-1', 'p2', '山月', '这局节奏很快。'),
@@ -37,7 +41,7 @@ export function seedDemoState(mode: string): void {
     players: demoPlayers,
     onlineCount: 128,
     hand: sortedHand,
-    bottomCards: [c(1, 5), c(2, 11), c(3, 15)],
+    bottomCards,
     bottomCardsRevealed: !isBidding,
     currentTurn: isBidding ? 'p1' : 'p1',
     lastPlayed: isBidding ? [] : [c(2, 8), c(3, 8)],
@@ -47,9 +51,20 @@ export function seedDemoState(mode: string): void {
     mustPlay: false,
     canBeat: true,
     multiplier: 3,
+    baseScore: 1,
     timeout: 25,
     timerStart: Date.now(),
-    cardCounter: initialCounter(sortedHand),
+    turnDeadlineMs,
+    serverTimeMs: Date.now(),
+    serverClockOffsetMs: 0,
+    clockBestRttMs: Number.POSITIVE_INFINITY,
+    gameId: 'demo-game',
+    streamId: 'game:demo-game',
+    eventVersion: 1,
+    turnId: 1,
+    seenGameStreams: { 'game:demo-game': 1 },
+    playedCardsLedger,
+    cardCounter: buildCardCounter(sortedHand, bottomCards, !isBidding, playedCardsLedger),
     seatActions: isBidding ? {
       p2: { type: 'bid', player_id: 'p2', player_name: '山月', label: '不叫' }
     } : {

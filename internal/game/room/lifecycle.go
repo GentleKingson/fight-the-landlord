@@ -20,6 +20,24 @@ func (r *Room) SetAllPlayersReady() {
 	}
 }
 
+// ResetAfterGame keeps the room membership intact while returning it to the
+// ready-up state. The completed GameSession remains owned by the server until
+// all players ready up and the room's start callback replaces it.
+func (r *Room) ResetAfterGame() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.State = RoomStateWaiting
+	r.CreatedAt = time.Now()
+	for _, player := range r.Players {
+		if player == nil {
+			continue
+		}
+		player.Ready = player.Client != nil && player.Client.IsBot()
+		player.IsLandlord = false
+	}
+}
+
 // NotifyPlayerOffline 通知房间内其他玩家某个玩家掉线
 func (rm *RoomManager) NotifyPlayerOffline(client types.ClientInterface) {
 	roomCode := client.GetRoom()

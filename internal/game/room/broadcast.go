@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
-	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 )
 
 // --- Room 方法 ---
@@ -43,17 +42,23 @@ func (r *Room) checkAllReady() bool {
 // GetPlayerInfo 获取玩家信息
 func (r *Room) GetPlayerInfo(playerID string) protocol.PlayerInfo {
 	player := r.Players[playerID]
+	client := player.Client
 	cardsCount := 0
 	// 游戏会话由外部调用方管理，此处暂不传入
-	return protocol.PlayerInfo{
-		ID:         player.Client.GetID(),
-		Name:       player.Client.GetName(),
+	info := protocol.PlayerInfo{
+		ID:         playerID,
 		Seat:       player.Seat,
 		Ready:      player.Ready,
 		IsLandlord: player.IsLandlord,
 		CardsCount: cardsCount,
-		IsBot:      player.Client.IsBot(),
+		Online:     client != nil,
 	}
+	if client != nil {
+		info.ID = client.GetID()
+		info.Name = client.GetName()
+		info.IsBot = client.IsBot()
+	}
+	return info
 }
 
 // GetAllPlayersInfo 获取所有玩家信息
@@ -80,11 +85,5 @@ func (r *Room) startGameLocked() error {
 	}
 
 	r.State = RoomStateReady
-
-	// 广播游戏开始
-	r.Broadcast(codec.MustNewMessage(protocol.MsgGameStart, protocol.GameStartPayload{
-		Players: r.GetAllPlayersInfo(),
-	}))
-
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
@@ -92,6 +93,10 @@ func TestEndGame_WinnerAnnounced(t *testing.T) {
 	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
 	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
 	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	for _, player := range r.Players {
+		player.Client.SetRoom(r.Code)
+		player.Ready = true
+	}
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -105,7 +110,55 @@ func TestEndGame_WinnerAnnounced(t *testing.T) {
 
 	// Verify state
 	assert.Equal(t, GameStateEnded, gs.state)
-	assert.Equal(t, room.RoomStateEnded, r.State)
+	assert.Equal(t, room.RoomStateWaiting, r.State)
+	for _, player := range r.Players {
+		assert.False(t, player.Ready)
+		assert.False(t, player.IsLandlord)
+		if player.Client != nil {
+			assert.Equal(t, r.Code, player.Client.GetRoom())
+		}
+	}
+}
+
+func TestEndedRoomCanReadyUpIntoFreshSession(t *testing.T) {
+	clients := []*testutil.SimpleClient{
+		testutil.NewSimpleClient("p1", "Player1"),
+		testutil.NewSimpleClient("p2", "Player2"),
+		testutil.NewSimpleClient("p3", "Player3"),
+	}
+	r := room.NewMockRoom("REPLAY", clients[0])
+	r.Players["p2"] = &room.RoomPlayer{Client: clients[1], Seat: 1, Ready: true}
+	r.Players["p3"] = &room.RoomPlayer{Client: clients[2], Seat: 2, Ready: true}
+	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	for _, client := range clients {
+		client.SetRoom(r.Code)
+	}
+
+	gameConfig := config.GameConfig{TurnTimeout: 30, BidTimeout: 15}
+	oldSession := NewGameSession(r, storage.NewLeaderboardManager(nil), gameConfig)
+	oldSession.Start()
+	oldSession.endGame(oldSession.players[0])
+	t.Cleanup(oldSession.StopAllTimers)
+
+	manager := room.NewRoomManager(nil, gameConfig)
+	manager.AddRoomForTest(r)
+	var replacement *GameSession
+	manager.SetOnGameStart(func(gameRoom *room.Room) {
+		replacement = NewGameSession(gameRoom, storage.NewLeaderboardManager(nil), gameConfig)
+		replacement.Start()
+	})
+
+	for _, client := range clients {
+		require.NoError(t, manager.SetPlayerReady(client, true))
+	}
+	require.NotNil(t, replacement)
+	t.Cleanup(replacement.StopAllTimers)
+	assert.NotSame(t, oldSession, replacement)
+	assert.Equal(t, GameStateBidding, replacement.state)
+	assert.Equal(t, room.RoomStateBidding, r.State)
+	for _, client := range clients {
+		assert.Equal(t, r.Code, client.GetRoom())
+	}
 }
 
 func TestNewGameSession_Initialization(t *testing.T) {

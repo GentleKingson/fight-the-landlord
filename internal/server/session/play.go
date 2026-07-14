@@ -8,17 +8,23 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
-	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 )
 
 // HandlePlayCards 处理出牌
 func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.CardInfo) error {
+	return gs.handlePlayCards(playerID, cardInfos, 0)
+}
+
+func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.CardInfo, expectedTurnID int64) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
 
 	if gs.state != GameStatePlaying {
 		return apperrors.ErrGameNotStart
+	}
+	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
+		return apperrors.ErrNotYourTurn
 	}
 
 	currentPlayer := gs.players[gs.currentPlayer]
@@ -73,9 +79,14 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 	slices.SortFunc(sortedCards, func(a, b card.Card) int {
 		return cmp.Compare(b.Rank, a.Rank)
 	})
+	gs.lastPlayedHand.Cards = append([]card.Card(nil), sortedCards...)
+	if len(gs.playedCards) != len(gs.players) {
+		gs.playedCards = make([][]card.Card, len(gs.players))
+	}
+	gs.playedCards[gs.currentPlayer] = append(gs.playedCards[gs.currentPlayer], sortedCards...)
 
 	// 广播出牌信息
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
+	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
 		PlayerID:   playerID,
 		PlayerName: currentPlayer.Name,
 		Cards:      convert.CardsToInfos(sortedCards), // 使用排序后的牌
@@ -98,11 +109,18 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 
 // HandlePass 处理不出
 func (gs *GameSession) HandlePass(playerID string) error {
+	return gs.handlePass(playerID, 0)
+}
+
+func (gs *GameSession) handlePass(playerID string, expectedTurnID int64) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
 
 	if gs.state != GameStatePlaying {
 		return apperrors.ErrGameNotStart
+	}
+	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
+		return apperrors.ErrNotYourTurn
 	}
 
 	currentPlayer := gs.players[gs.currentPlayer]
@@ -122,7 +140,7 @@ func (gs *GameSession) HandlePass(playerID string) error {
 	gs.consecutivePasses++
 
 	// 广播不出
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
+	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
 		PlayerID:   playerID,
 		PlayerName: currentPlayer.Name,
 	}))
@@ -188,11 +206,12 @@ func (gs *GameSession) notifyPlayTurn() {
 		canBeat = beatingCards != nil
 	}
 
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+	gs.turnID++
+	gs.startPlayTimer()
+	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
 		PlayerID: player.ID,
 		Timeout:  gs.gameConfig.TurnTimeout,
 		MustPlay: mustPlay,
 		CanBeat:  canBeat,
 	}))
-	gs.startPlayTimer()
 }

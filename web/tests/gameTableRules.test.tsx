@@ -38,6 +38,16 @@ beforeEach(() => {
     lastHandType: '',
     mustPlay: false,
     canBeat: true,
+    baseScore: 1,
+    turnDeadlineMs: 0,
+    serverClockOffsetMs: 0,
+    clockBestRttMs: Number.POSITIVE_INFINITY,
+    gameId: '',
+    streamId: '',
+    eventVersion: 0,
+    turnId: 0,
+    seenGameStreams: {},
+    playedCardsLedger: {},
     seatActions: {},
     recentActions: [],
     cardCounter: {},
@@ -49,6 +59,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe('GameTable rule-gated actions', () => {
@@ -150,6 +161,24 @@ describe('GameTable rule-gated actions', () => {
     act(() => useAppStore.setState({ connectionStatus: 'connected', maintenance: true }));
     expect(screen.getByRole('button', { name: '出牌' })).toBeDisabled();
     view.unmount();
+  });
+
+  it('renders the authoritative base score and resumes an absolute server deadline', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    useAppStore.setState({
+      baseScore: 7,
+      turnDeadlineMs: 15_000,
+      serverClockOffsetMs: 1_000
+    });
+    render(<GameTable socket={socket} />);
+
+    expect(screen.getByText('底分 7')).toBeInTheDocument();
+    expect(document.querySelector('.turn-banner time')).toHaveTextContent('4');
+
+    vi.setSystemTime(13_000);
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(document.querySelector('.turn-banner time')).toHaveTextContent('1');
   });
 });
 

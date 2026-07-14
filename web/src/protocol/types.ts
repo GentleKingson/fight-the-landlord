@@ -4,12 +4,14 @@ export { MessageType as WireMessageType, MsgType } from './generated';
 export type {
   CardInfo,
   ChatPayload,
+  EventMeta,
   GameStateDTO,
   LeaderboardEntry,
   PlayerHand,
   PlayerInfo,
   PlayerPlayedCards,
   PlayerScore,
+  PongPayload,
   ReconnectedPayload,
   RoomListItem,
   StatsResultPayload

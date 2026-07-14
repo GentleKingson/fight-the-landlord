@@ -47,6 +47,7 @@ proto:  ## Regenerate Protocol Buffer and message type mapping code
 	@echo "$(GREEN)✓ Protocol Buffer code regenerated$(NC)"
 	@echo "$(BLUE)Generating MessageType mapping code...$(NC)"
 	@cd internal/protocol/convert/msgtype && go run gen.go
+	gofmt -w internal/protocol/convert/msgtype/mapping.go
 	@echo "$(GREEN)✓ MessageType mapping code generated$(NC)"
 	npm --prefix web run proto:generate
 	@echo "$(GREEN)✓ Web protocol codec generated from canonical schema$(NC)"

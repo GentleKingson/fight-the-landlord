@@ -80,15 +80,11 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		previous.Close()
 	}
 
-	// 发送重连成功消息
-	client.SendMessage(codec.MustNewMessage(protocol.MsgReconnected, reconnectPayload))
-
-	// 快照恢复后，若正轮到该玩家，补发当前回合通知，恢复其操作提示与倒计时（快照本身不含 IsGrab / 剩余时间等回合信息）。须在 MsgReconnected 之后发送，确保客户端先应用快照、再设置回合提示。
-	if reconnectPayload.GameState != nil && reconnectPayload.GameState.CurrentTurn == restored.PlayerID {
-		if gameSession := h.GetGameSession(restored.RoomCode); gameSession != nil {
-			gameSession.ResendTurnTo(client)
-		}
-	}
+	// 完整快照已包含回合、截止时间和叫抢状态；再补发相对
+	// timeout 会把精确的绝对截止时间重置为“从收包时开始”。
+	reconnectedMessage := codec.MustNewMessage(protocol.MsgReconnected, reconnectPayload)
+	reconnectedMessage.Event = session.EventMetaFromGameStateDTO(reconnectPayload.GameState)
+	client.SendMessage(reconnectedMessage)
 
 	log.Printf("🔄 玩家 %s (%s) 重连成功", restored.PlayerName, restored.PlayerID)
 }
