@@ -3,6 +3,7 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"sync"
 	"time"
 )
@@ -12,6 +13,11 @@ const (
 	reconnectTimeout = 2 * time.Minute
 	// 会话过期时间
 	sessionExpireTime = 10 * time.Minute
+)
+
+var (
+	ErrInvalidReconnect = errors.New("invalid reconnect credentials")
+	ErrReconnectExpired = errors.New("reconnect window expired")
 )
 
 // PlayerSession 玩家会话（用于断线重连）
@@ -25,6 +31,18 @@ type PlayerSession struct {
 	IsOnline       bool      // 是否在线
 
 	mu sync.RWMutex
+}
+
+// RestoredSession is an immutable snapshot returned after a reconnect token is
+// consumed and rotated.
+type RestoredSession struct {
+	PlayerID       string
+	PlayerName     string
+	ReconnectToken string
+	RoomCode       string
+	previousToken  string
+	wasOnline      bool
+	disconnectedAt time.Time
 }
 
 // SessionManager 会话管理器
@@ -52,7 +70,7 @@ func (sm *SessionManager) CreateSession(playerID, playerName string) *PlayerSess
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	token := generateToken()
+	token := sm.generateUniqueTokenLocked()
 
 	session := &PlayerSession{
 		PlayerID:       playerID,
@@ -139,6 +157,92 @@ func (sm *SessionManager) DeleteSession(playerID string) {
 	}
 }
 
+// RestoreSession atomically consumes a reconnect token, rotates it, marks the
+// restored session online, and removes the provisional session created for the
+// new physical connection. Only one concurrent caller can consume a token.
+func (sm *SessionManager) RestoreSession(token, playerID, temporaryPlayerID string) (*RestoredSession, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	storedPlayerID, ok := sm.tokens[token]
+	if !ok || storedPlayerID != playerID {
+		return nil, ErrInvalidReconnect
+	}
+
+	playerSession, ok := sm.sessions[playerID]
+	if !ok {
+		return nil, ErrInvalidReconnect
+	}
+
+	playerSession.mu.Lock()
+	defer playerSession.mu.Unlock()
+
+	if playerSession.ReconnectToken != token {
+		return nil, ErrInvalidReconnect
+	}
+	if !playerSession.IsOnline && time.Since(playerSession.DisconnectedAt) > reconnectTimeout {
+		return nil, ErrReconnectExpired
+	}
+	wasOnline := playerSession.IsOnline
+	disconnectedAt := playerSession.DisconnectedAt
+
+	delete(sm.tokens, token)
+	newToken := sm.generateUniqueTokenLocked()
+	playerSession.ReconnectToken = newToken
+	playerSession.IsOnline = true
+	playerSession.DisconnectedAt = time.Time{}
+	sm.tokens[newToken] = playerID
+
+	if temporaryPlayerID != "" && temporaryPlayerID != playerID {
+		if temporarySession, exists := sm.sessions[temporaryPlayerID]; exists {
+			temporarySession.mu.RLock()
+			temporaryToken := temporarySession.ReconnectToken
+			temporarySession.mu.RUnlock()
+			delete(sm.tokens, temporaryToken)
+			delete(sm.sessions, temporaryPlayerID)
+		}
+	}
+
+	return &RestoredSession{
+		PlayerID:       playerSession.PlayerID,
+		PlayerName:     playerSession.PlayerName,
+		ReconnectToken: playerSession.ReconnectToken,
+		RoomCode:       playerSession.RoomCode,
+		previousToken:  token,
+		wasOnline:      wasOnline,
+		disconnectedAt: disconnectedAt,
+	}, nil
+}
+
+// RollbackRestore restores the consumed credential when the server cannot
+// finish rebinding the physical connection. It only succeeds while the rotated
+// token still belongs to this restore, so it cannot undo a later reconnect.
+func (sm *SessionManager) RollbackRestore(restored *RestoredSession) bool {
+	if restored == nil {
+		return false
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	playerSession, ok := sm.sessions[restored.PlayerID]
+	if !ok || sm.tokens[restored.ReconnectToken] != restored.PlayerID {
+		return false
+	}
+
+	playerSession.mu.Lock()
+	defer playerSession.mu.Unlock()
+	if playerSession.ReconnectToken != restored.ReconnectToken {
+		return false
+	}
+
+	delete(sm.tokens, restored.ReconnectToken)
+	playerSession.ReconnectToken = restored.previousToken
+	playerSession.IsOnline = restored.wasOnline
+	playerSession.DisconnectedAt = restored.disconnectedAt
+	sm.tokens[restored.previousToken] = restored.PlayerID
+	return true
+}
+
 // CanReconnect 检查玩家是否可以重连
 func (sm *SessionManager) CanReconnect(token, playerID string) bool {
 	sm.mu.RLock()
@@ -163,6 +267,15 @@ func (sm *SessionManager) CanReconnect(token, playerID string) bool {
 	}
 
 	return true
+}
+
+func (sm *SessionManager) generateUniqueTokenLocked() string {
+	for {
+		token := generateToken()
+		if _, exists := sm.tokens[token]; !exists {
+			return token
+		}
+	}
 }
 
 // IsOnline 检查玩家是否在线

@@ -5,6 +5,8 @@ const (
 	ErrCodeUnknown           = 1000
 	ErrCodeInvalidMsg        = 1001
 	ErrCodeRateLimit         = 1002 // 速率限制
+	ErrCodeReconnectInvalid  = 1003
+	ErrCodeReconnectExpired  = 1004
 	ErrCodeRoomNotFound      = 2001
 	ErrCodeRoomFull          = 2002
 	ErrCodeNotInRoom         = 2003
@@ -22,6 +24,8 @@ var ErrorMessages = map[int]string{
 	ErrCodeUnknown:           "未知错误",
 	ErrCodeInvalidMsg:        "无效的消息格式",
 	ErrCodeRateLimit:         "请求过于频繁",
+	ErrCodeReconnectInvalid:  "重连凭证无效",
+	ErrCodeReconnectExpired:  "重连凭证已过期",
 	ErrCodeRoomNotFound:      "房间不存在",
 	ErrCodeRoomFull:          "房间已满",
 	ErrCodeNotInRoom:         "您不在房间中",

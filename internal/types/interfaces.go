@@ -11,7 +11,8 @@ type ServerInterface interface {
 	BroadcastToLobby(msg *protocol.Message)
 	GetClientByID(id string) ClientInterface
 	RegisterClient(id string, client ClientInterface)
-	UnregisterClient(id string)
+	UnregisterClient(id string, client ClientInterface) bool
+	RebindClient(temporaryID, playerID, playerName, roomCode string, client ClientInterface) (ClientInterface, error)
 }
 
 // ClientInterface 定义客户端接口

@@ -94,13 +94,15 @@ func (c *Client) ReadPump() {
 		}
 
 		// 消息速率限制检查
-		allowed, warning := c.server.messageLimiter.AllowMessage(c.ID)
+		clientID := c.GetID()
+		clientName := c.GetName()
+		allowed, warning := c.server.messageLimiter.AllowMessage(clientID)
 		if !allowed {
-			log.Printf("⚠️ 客户端 %s (IP: %s) 消息过于频繁", c.Name, c.IP)
+			log.Printf("⚠️ 客户端 %s (IP: %s) 消息过于频繁", clientName, c.IP)
 			c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeRateLimit, "消息发送过于频繁"))
 			// 如果警告次数过多，断开连接
-			if c.server.messageLimiter.GetWarningCount(c.ID) > 5 {
-				log.Printf("🚫 客户端 %s 因多次超速被断开连接", c.Name)
+			if c.server.messageLimiter.GetWarningCount(clientID) > 5 {
+				log.Printf("🚫 客户端 %s 因多次超速被断开连接", clientName)
 				break
 			}
 			continue
@@ -179,26 +181,38 @@ func (c *Client) SendMessage(msg *protocol.Message) {
 	case c.send <- data:
 	default:
 		// 发送缓冲区已满，关闭连接
-		log.Printf("客户端 %s 发送缓冲区已满", c.ID)
+		log.Printf("客户端 %s 发送缓冲区已满", c.GetID())
 		c.Close()
 	}
 }
 
 // handleDisconnect 处理断开连接
 func (c *Client) handleDisconnect() {
+	if c.server == nil || !c.server.unregisterClient(c) {
+		return
+	}
+
+	playerID, _, roomID := c.identitySnapshot()
+
 	// 标记会话为离线状态
-	c.server.sessionManager.SetOffline(c.ID)
+	if c.server.sessionManager != nil {
+		c.server.sessionManager.SetOffline(playerID)
+	}
 
 	// 如果在房间中，通知房间玩家掉线（但不移除）
-	if c.RoomID != "" {
+	if roomID != "" && c.server.roomManager != nil {
 		c.server.roomManager.NotifyPlayerOffline(c)
+		if c.server.handler != nil {
+			if gameSession := c.server.handler.GetGameSession(roomID); gameSession != nil {
+				gameSession.PlayerOffline(playerID)
+			}
+		}
 	}
 
 	// 如果在匹配队列中，移除
-	c.server.matcher.RemoveFromQueue(c)
-
-	// 从服务器注销连接（但保留会话）
-	c.server.unregisterClient(c)
+	if c.server.matcher != nil {
+		c.server.matcher.RemoveFromQueue(c)
+	}
 }
 
 // Close 关闭客户端连接
@@ -215,8 +229,13 @@ func (c *Client) Close() {
 // SetRoom 设置客户端所在房间
 func (c *Client) SetRoom(roomID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.RoomID = roomID
+	playerID := c.ID
+	c.mu.Unlock()
+
+	if c.server != nil && c.server.sessionManager != nil {
+		c.server.sessionManager.SetRoom(playerID, roomID)
+	}
 }
 
 // GetRoom 获取客户端所在房间
@@ -227,6 +246,30 @@ func (c *Client) GetRoom() string {
 }
 
 // Interface implementations for types.ClientInterface
-func (c *Client) GetID() string   { return c.ID }
-func (c *Client) GetName() string { return c.Name }
-func (c *Client) IsBot() bool     { return false }
+func (c *Client) GetID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ID
+}
+
+func (c *Client) GetName() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Name
+}
+
+func (c *Client) identitySnapshot() (playerID, playerName, roomID string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ID, c.Name, c.RoomID
+}
+
+func (c *Client) rebindIdentity(playerID, playerName, roomID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ID = playerID
+	c.Name = playerName
+	c.RoomID = roomID
+}
+
+func (c *Client) IsBot() bool { return false }

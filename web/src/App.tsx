@@ -11,6 +11,7 @@ export function App() {
   const phase = useAppStore((state) => state.phase);
   const connected = useAppStore((state) => state.connected);
   const error = useAppStore((state) => state.error);
+  const reconnectNotice = useAppStore((state) => state.reconnectNotice);
   const maintenance = useAppStore((state) => state.maintenance);
 
   useEffect(() => {
@@ -20,7 +21,7 @@ export function App() {
       return;
     }
     socket.connect();
-    return () => socket.close();
+    return () => socket.shutdown();
   }, [socket]);
 
   return (
@@ -28,6 +29,9 @@ export function App() {
       {maintenance ? <div className="maintenance-banner">服务器维护中，暂时无法开始新对局</div> : null}
       {!connected && !new URLSearchParams(window.location.search).get('demo') ? (
         <ConnectionState error={error} />
+      ) : null}
+      {connected && reconnectNotice ? (
+        <div className="connection-toast" role="status">{reconnectNotice}</div>
       ) : null}
       {phase === 'game_over' ? (
         <GameResult socket={socket} />

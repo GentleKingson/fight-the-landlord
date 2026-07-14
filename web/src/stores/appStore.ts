@@ -2,11 +2,26 @@ import { create } from 'zustand';
 import { MsgType, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
 
+export type ConnectionStatus = 'idle' | 'connecting' | 'fresh-connected' | 'reconnecting' | 'reconnected' | 'connected' | 'closing' | 'offline';
+
+export interface StoredIdentity {
+  id: string;
+  token: string;
+}
+
+interface ProvisionalIdentity extends StoredIdentity {
+  name: string;
+}
+
 interface ConnectionSlice {
   connected: boolean;
+  connectionStatus: ConnectionStatus;
   playerId: string;
   playerName: string;
   reconnectToken: string;
+  reconnectCandidate: StoredIdentity | null;
+  provisionalIdentity: ProvisionalIdentity | null;
+  reconnectNotice: string;
   latency: number;
   error: string;
   maintenance: boolean;
@@ -78,6 +93,9 @@ export interface SeatAction {
 
 interface AppActions {
   setConnected: (connected: boolean) => void;
+  prepareConnection: (identity: StoredIdentity | null) => void;
+  setConnectionStatus: (status: ConnectionStatus) => void;
+  clearIdentity: () => void;
   setError: (error: string) => void;
   setLobbyPanel: (panel: LobbyPanel) => void;
   setRoomCodeInput: (value: string) => void;
@@ -120,9 +138,13 @@ const initialTable: TableSlice = {
 
 export const useAppStore = create<AppState>((set, get) => ({
   connected: false,
+  connectionStatus: 'idle',
   playerId: '',
   playerName: '',
   reconnectToken: '',
+  reconnectCandidate: null,
+  provisionalIdentity: null,
+  reconnectNotice: '',
   latency: 0,
   error: '',
   maintenance: false,
@@ -143,6 +165,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   tableMessage: '',
 
   setConnected: (connected) => set({ connected }),
+  prepareConnection: (reconnectCandidate) => set({
+    connected: false,
+    connectionStatus: 'connecting',
+    reconnectCandidate,
+    provisionalIdentity: null,
+    reconnectNotice: '',
+    error: ''
+  }),
+  setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
+  clearIdentity: () => set({
+    playerId: '',
+    playerName: '',
+    reconnectToken: '',
+    reconnectCandidate: null,
+    provisionalIdentity: null,
+    reconnectNotice: ''
+  }),
   setError: (error) => set({ error }),
   setLobbyPanel: (lobbyPanel) => set({ lobbyPanel }),
   setRoomCodeInput: (roomCodeInput) => set({ roomCodeInput }),
@@ -162,24 +201,54 @@ export const useAppStore = create<AppState>((set, get) => ({
     switch (message.type) {
       case MsgType.Connected: {
         const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
+        const provisionalIdentity = {
+          id: payload.player_id,
+          name: payload.player_name,
+          token: payload.reconnect_token
+        };
+        if (state.reconnectCandidate) {
+          set({
+            connected: true,
+            connectionStatus: 'fresh-connected',
+            provisionalIdentity,
+            error: ''
+          });
+          break;
+        }
         persistReconnect(payload.player_id, payload.reconnect_token);
         set({
           connected: true,
           error: '',
+          connectionStatus: 'fresh-connected',
           phase: 'lobby',
           playerId: payload.player_id,
           playerName: payload.player_name,
-          reconnectToken: payload.reconnect_token
+          reconnectToken: payload.reconnect_token,
+          reconnectCandidate: null,
+          provisionalIdentity: null
         });
         break;
       }
       case MsgType.Reconnected: {
-        const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO };
-        persistReconnect(payload.player_id, state.reconnectToken);
+        const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO; reconnect_token?: string };
+        if (!payload.reconnect_token) {
+          acceptProvisionalAfterReconnectFailure(set, state, '服务器未确认新的重连凭证');
+          break;
+        }
+        persistReconnect(payload.player_id, payload.reconnect_token);
+        const connectionState = {
+          connected: true,
+          connectionStatus: 'reconnected' as const,
+          error: '',
+          reconnectNotice: '',
+          reconnectToken: payload.reconnect_token,
+          reconnectCandidate: null,
+          provisionalIdentity: null
+        };
         if (payload.game_state) {
-          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state, payload.player_id) });
+          set({ ...connectionState, playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state, payload.player_id) });
         } else {
-          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
+          set({ ...connectionState, playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
         }
         break;
       }
@@ -189,7 +258,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.Error: {
-        const payload = message.payload as { message?: string };
+        const payload = message.payload as { code?: number; message?: string };
+        if (state.connectionStatus === 'reconnecting' && isReconnectFailure(payload.code, payload.message)) {
+          acceptProvisionalAfterReconnectFailure(set, state, payload.message || '旧会话已失效');
+          break;
+        }
         set({ error: payload.message || '未知错误', phase: state.phase === 'matching' ? 'lobby' : state.phase });
         break;
       }
@@ -364,7 +437,11 @@ export const useChatStore = create<{ messages: ChatPayload[]; push: (message: Ch
 export function loadReconnect(): { id: string; token: string } | null {
   try {
     const raw = localStorage.getItem('ddz_next_reconnect');
-    return raw ? JSON.parse(raw) as { id: string; token: string } : null;
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || !('id' in parsed) || !('token' in parsed)) return null;
+    const { id, token } = parsed as { id?: unknown; token?: unknown };
+    return typeof id === 'string' && id && typeof token === 'string' && token ? { id, token } : null;
   } catch {
     return null;
   }
@@ -373,6 +450,57 @@ export function loadReconnect(): { id: string; token: string } | null {
 function persistReconnect(id: string, token: string): void {
   if (!id || !token) return;
   localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token }));
+}
+
+export function forgetReconnect(): void {
+  localStorage.removeItem('ddz_next_reconnect');
+}
+
+function isReconnectFailure(code?: number, message?: string): boolean {
+  return code === 1003 || code === 1004 || Boolean(message?.includes('重连令牌'));
+}
+
+function acceptProvisionalAfterReconnectFailure(
+  set: (partial: Partial<AppState>) => void,
+  state: AppState,
+  reason: string
+): void {
+  const provisional = state.provisionalIdentity;
+  if (!provisional) {
+    set({
+      connected: false,
+      connectionStatus: 'offline',
+      reconnectCandidate: null,
+      error: reason
+    });
+    return;
+  }
+
+  const stored = loadReconnect();
+  const attempted = state.reconnectCandidate;
+  const ownsStoredAttempt = attempted !== null
+    && stored?.id === attempted.id
+    && stored.token === attempted.token;
+  if (!stored || ownsStoredAttempt) {
+    forgetReconnect();
+    persistReconnect(provisional.id, provisional.token);
+  }
+  set({
+    ...initialTable,
+    connected: true,
+    connectionStatus: 'connected',
+    playerId: provisional.id,
+    playerName: provisional.name,
+    reconnectToken: provisional.token,
+    reconnectCandidate: null,
+    provisionalIdentity: null,
+    reconnectNotice: `无法恢复旧牌局，已作为新玩家连接：${reason}`,
+    error: `无法恢复旧牌局，已作为新玩家连接：${reason}`,
+    phase: 'lobby',
+    roomCode: '',
+    players: [],
+    selectedCards: new Set()
+  });
 }
 
 function mergePlayer(players: PlayerInfo[], next: PlayerInfo): PlayerInfo[] {

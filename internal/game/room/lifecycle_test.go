@@ -9,6 +9,8 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
@@ -87,13 +89,17 @@ func TestReconnectPlayer_Success(t *testing.T) {
 	rm := NewRoomManager(storage.NewRedisStore(nil), config.GameConfig{RoomTimeout: 10})
 	oldClient := testutil.NewSimpleClient("p1", "Player1")
 	newClient := testutil.NewSimpleClient("p1", "Player1") // Same ID, new connection
+	observer := testutil.NewSimpleClient("p2", "Player2")
 
 	// Create room
 	room, err := rm.CreateRoom(oldClient)
 	require.NoError(t, err)
+	_, err = rm.JoinRoom(observer, room.Code)
+	require.NoError(t, err)
+	rm.NotifyPlayerOffline(oldClient)
 
 	// Reconnect
-	err = rm.ReconnectPlayer(oldClient, newClient)
+	err = rm.ReconnectPlayer(oldClient.GetID(), room.Code, newClient)
 	require.NoError(t, err)
 
 	// Verify new client is in room
@@ -109,6 +115,19 @@ func TestReconnectPlayer_Success(t *testing.T) {
 	r.mu.RUnlock()
 
 	assert.Equal(t, newClient, player.Client)
+
+	foundOnline := false
+	for _, msg := range observer.SentMessages() {
+		if msg.Type != protocol.MsgPlayerOnline {
+			continue
+		}
+		payload, parseErr := codec.ParsePayload[protocol.PlayerOnlinePayload](msg)
+		require.NoError(t, parseErr)
+		assert.Equal(t, "p1", payload.PlayerID)
+		assert.Equal(t, "Player1", payload.PlayerName)
+		foundOnline = true
+	}
+	assert.True(t, foundOnline)
 }
 
 func TestReconnectPlayer_RoomNotFound(t *testing.T) {
@@ -121,7 +140,7 @@ func TestReconnectPlayer_RoomNotFound(t *testing.T) {
 	// Set room code but room doesn't exist
 	oldClient.SetRoom("NONEXISTENT")
 
-	err := rm.ReconnectPlayer(oldClient, newClient)
+	err := rm.ReconnectPlayer(oldClient.GetID(), oldClient.GetRoom(), newClient)
 	assert.ErrorIs(t, err, apperrors.ErrRoomNotFound)
 }
 
@@ -139,8 +158,22 @@ func TestReconnectPlayer_PlayerNotInRoom(t *testing.T) {
 
 	// Try to reconnect client2 who was never in the room
 	oldClient.SetRoom(room.Code)
-	err = rm.ReconnectPlayer(oldClient, newClient)
+	err = rm.ReconnectPlayer(oldClient.GetID(), oldClient.GetRoom(), newClient)
 	assert.ErrorIs(t, err, apperrors.ErrNotInRoom)
+}
+
+func TestReconnectPlayer_RejectsProvisionalIdentity(t *testing.T) {
+	t.Parallel()
+
+	rm := NewRoomManager(storage.NewRedisStore(nil), config.GameConfig{RoomTimeout: 10})
+	oldClient := testutil.NewSimpleClient("p1", "Player1")
+	provisionalClient := testutil.NewSimpleClient("temporary", "Temporary")
+	gameRoom, err := rm.CreateRoom(oldClient)
+	require.NoError(t, err)
+
+	err = rm.ReconnectPlayer(oldClient.GetID(), gameRoom.Code, provisionalClient)
+	assert.ErrorIs(t, err, apperrors.ErrNotInRoom)
+	assert.Same(t, oldClient, gameRoom.Players[oldClient.GetID()].Client)
 }
 
 func TestReconnectPlayer_NotInAnyRoom(t *testing.T) {
@@ -151,7 +184,7 @@ func TestReconnectPlayer_NotInAnyRoom(t *testing.T) {
 	newClient := testutil.NewSimpleClient("p1", "Player1")
 
 	// Client not in any room
-	err := rm.ReconnectPlayer(oldClient, newClient)
+	err := rm.ReconnectPlayer(oldClient.GetID(), oldClient.GetRoom(), newClient)
 	assert.NoError(t, err) // Should return nil, not error
 }
 

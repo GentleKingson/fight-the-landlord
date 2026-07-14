@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log"
 	"time"
 
@@ -32,77 +33,87 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		return
 	}
 
-	// 验证重连令牌
-	if !h.sessionManager.CanReconnect(payload.Token, payload.PlayerID) {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "重连令牌无效或已过期"))
+	temporaryID := client.GetID()
+	restored, err := h.sessionManager.RestoreSession(payload.Token, payload.PlayerID, temporaryID)
+	if err != nil {
+		code := protocol.ErrCodeReconnectInvalid
+		if errors.Is(err, session.ErrReconnectExpired) {
+			code = protocol.ErrCodeReconnectExpired
+		}
+		client.SendMessage(codec.NewErrorMessage(code))
 		return
 	}
 
-	// 获取旧会话
-	session := h.sessionManager.GetSession(payload.PlayerID)
-	if session == nil {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "会话不存在"))
+	previous, err := h.server.RebindClient(
+		temporaryID,
+		restored.PlayerID,
+		restored.PlayerName,
+		restored.RoomCode,
+		client,
+	)
+	if err != nil {
+		if !h.sessionManager.RollbackRestore(restored) {
+			h.sessionManager.SetOffline(restored.PlayerID)
+		}
+		log.Printf("重连身份绑定失败: %v", err)
+		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "重连身份恢复失败"))
+		client.Close()
 		return
 	}
-
-	// 注意：由于ClientInterface不允许修改ID/Name，我们需要通过Server层面处理
-	// 这里我们假设client已经是正确的类型，可以进行类型断言
-	oldID := client.GetID()
-
-	// 从旧 ID 注销，用新 ID 注册
-	h.server.UnregisterClient(oldID)
-	h.server.RegisterClient(session.PlayerID, client)
-
-	// 标记会话上线
-	h.sessionManager.SetOnline(session.PlayerID)
 
 	// 构建重连响应
 	reconnectPayload := protocol.ReconnectedPayload{
-		PlayerID:   session.PlayerID,
-		PlayerName: session.PlayerName,
+		PlayerID:       restored.PlayerID,
+		PlayerName:     restored.PlayerName,
+		ReconnectToken: restored.ReconnectToken,
 	}
 
 	// 如果在房间中，尝试恢复房间信息
-	if session.RoomCode != "" {
-		h.tryRestoreRoomState(client, session, &reconnectPayload)
+	if restored.RoomCode != "" {
+		h.tryRestoreRoomState(client, restored, &reconnectPayload)
+	}
+
+	// A replaced connection may finish its disconnect cleanup concurrently.
+	// Reassert online status after the client and room mappings are installed.
+	h.sessionManager.SetOnline(restored.PlayerID)
+	if previous != nil && previous != client {
+		previous.Close()
 	}
 
 	// 发送重连成功消息
 	client.SendMessage(codec.MustNewMessage(protocol.MsgReconnected, reconnectPayload))
 
 	// 快照恢复后，若正轮到该玩家，补发当前回合通知，恢复其操作提示与倒计时（快照本身不含 IsGrab / 剩余时间等回合信息）。须在 MsgReconnected 之后发送，确保客户端先应用快照、再设置回合提示。
-	if reconnectPayload.GameState != nil && reconnectPayload.GameState.CurrentTurn == session.PlayerID {
-		if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
+	if reconnectPayload.GameState != nil && reconnectPayload.GameState.CurrentTurn == restored.PlayerID {
+		if gameSession := h.GetGameSession(restored.RoomCode); gameSession != nil {
 			gameSession.ResendTurnTo(client)
 		}
 	}
 
-	log.Printf("🔄 玩家 %s (%s) 重连成功", session.PlayerName, session.PlayerID)
+	log.Printf("🔄 玩家 %s (%s) 重连成功", restored.PlayerName, restored.PlayerID)
 }
 
 // tryRestoreRoomState 尝试恢复房间状态
-func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *session.PlayerSession, payload *protocol.ReconnectedPayload) {
-	room := h.roomManager.GetRoom(session.RoomCode)
+func (h *Handler) tryRestoreRoomState(client types.ClientInterface, restored *session.RestoredSession, payload *protocol.ReconnectedPayload) {
+	room := h.roomManager.GetRoom(restored.RoomCode)
 	if room == nil {
-		return
-	}
-
-	oldClient := h.server.GetClientByID(session.PlayerID)
-	if oldClient == nil {
+		client.SetRoom("")
 		return
 	}
 
 	// 重连到房间
-	if err := h.roomManager.ReconnectPlayer(oldClient, client); err != nil {
+	if err := h.roomManager.ReconnectPlayer(restored.PlayerID, restored.RoomCode, client); err != nil {
 		log.Printf("重连到房间失败: %v", err)
+		client.SetRoom("")
 		return
 	}
 
-	client.SetRoom(session.RoomCode)
-	payload.RoomCode = session.RoomCode
+	payload.RoomCode = restored.RoomCode
 
 	// 如果游戏正在进行，恢复游戏状态
-	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
-		payload.GameState = gameSession.BuildGameStateDTO(session.PlayerID, h.sessionManager)
+	if gameSession := h.GetGameSession(restored.RoomCode); gameSession != nil {
+		h.sessionManager.SetOnline(restored.PlayerID)
+		gameSession.PlayerOnline(restored.PlayerID)
+		payload.GameState = gameSession.BuildGameStateDTO(restored.PlayerID, h.sessionManager)
 	}
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -67,16 +68,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.registerClient(client)
 
 	// 创建会话
-	session := s.sessionManager.CreateSession(client.ID, client.Name)
+	playerID := client.GetID()
+	playerName := client.GetName()
+	session := s.sessionManager.CreateSession(playerID, playerName)
 
 	// 发送连接成功消息（包含重连令牌）
 	client.SendMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
-		PlayerID:       client.ID,
-		PlayerName:     client.Name,
+		PlayerID:       playerID,
+		PlayerName:     playerName,
 		ReconnectToken: session.ReconnectToken,
 	}))
 
-	log.Printf("✅ 玩家 %s (%s) 已连接", client.Name, client.ID)
+	log.Printf("✅ 玩家 %s (%s) 已连接", playerName, playerID)
 
 	// 启动客户端读写协程
 	go client.ReadPump()
@@ -111,18 +114,25 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 func (s *Server) registerClient(client *Client) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
-	s.clients[client.ID] = client
+	s.clients[client.GetID()] = client
 }
 
 // unregisterClient 注销客户端
-func (s *Server) unregisterClient(client *Client) {
+func (s *Server) unregisterClient(client *Client) bool {
+	playerID := client.GetID()
+	playerName := client.GetName()
+
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 
-	if _, ok := s.clients[client.ID]; ok {
-		delete(s.clients, client.ID)
-		log.Printf("❌ 玩家 %s (%s) 已断开", client.Name, client.ID)
+	current, ok := s.clients[playerID]
+	if !ok || current != client {
+		return false
 	}
+
+	delete(s.clients, playerID)
+	log.Printf("❌ 玩家 %s (%s) 已断开", playerName, playerID)
+	return true
 }
 
 // Interface implementations for types.ServerContext
@@ -141,8 +151,52 @@ func (s *Server) RegisterClient(id string, client types.ClientInterface) {
 	}
 }
 
-func (s *Server) UnregisterClient(id string) {
+func (s *Server) UnregisterClient(id string, client types.ClientInterface) bool {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
+
+	expected, ok := client.(*Client)
+	if !ok || s.clients[id] != expected {
+		return false
+	}
 	delete(s.clients, id)
+	return true
+}
+
+// RebindClient replaces the provisional connection mapping with the restored
+// player identity. The mapping and effective identity change together while
+// the client registry is locked, so stale disconnects cannot remove the new
+// owner of the player ID.
+func (s *Server) RebindClient(temporaryID, playerID, playerName, roomCode string, client types.ClientInterface) (types.ClientInterface, error) {
+	rebound, ok := client.(*Client)
+	if !ok {
+		return nil, fmt.Errorf("client %T does not support identity rebinding", client)
+	}
+
+	s.clientsMu.Lock()
+	current, exists := s.clients[temporaryID]
+	if !exists || current != rebound {
+		s.clientsMu.Unlock()
+		return nil, fmt.Errorf("temporary client %q is no longer active", temporaryID)
+	}
+
+	previous := s.clients[playerID]
+	rebound.rebindIdentity(playerID, playerName, roomCode)
+	if temporaryID != playerID {
+		delete(s.clients, temporaryID)
+	}
+	s.clients[playerID] = rebound
+	s.clientsMu.Unlock()
+
+	if s.messageLimiter != nil && temporaryID != playerID {
+		s.messageLimiter.ClearRateLimit(temporaryID)
+	}
+	if s.chatLimiter != nil && temporaryID != playerID {
+		s.chatLimiter.ClearRateLimit(temporaryID)
+	}
+
+	if previous == nil || previous == rebound {
+		return nil, nil
+	}
+	return previous, nil
 }

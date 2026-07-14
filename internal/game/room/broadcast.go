@@ -12,14 +12,16 @@ import (
 // Broadcast 广播消息给房间内所有玩家
 func (r *Room) Broadcast(msg *protocol.Message) {
 	for _, player := range r.Players {
-		player.Client.SendMessage(msg)
+		if player != nil && player.Client != nil {
+			player.Client.SendMessage(msg)
+		}
 	}
 }
 
 // broadcastExcept 广播消息给除指定玩家外的所有玩家
 func (r *Room) BroadcastExcept(excludeID string, msg *protocol.Message) {
 	for id, player := range r.Players {
-		if id != excludeID {
+		if id != excludeID && player != nil && player.Client != nil {
 			player.Client.SendMessage(msg)
 		}
 	}

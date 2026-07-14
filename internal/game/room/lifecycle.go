@@ -75,10 +75,12 @@ func (rm *RoomManager) NotifyPlayerOffline(client types.ClientInterface) {
 }
 
 // ReconnectPlayer 玩家重连到房间
-func (rm *RoomManager) ReconnectPlayer(oldClient, newClient types.ClientInterface) error {
-	roomCode := oldClient.GetRoom()
+func (rm *RoomManager) ReconnectPlayer(oldPlayerID, roomCode string, newClient types.ClientInterface) error {
 	if roomCode == "" {
 		return nil // 不在房间中，无需重连
+	}
+	if newClient.GetID() != oldPlayerID {
+		return apperrors.ErrNotInRoom
 	}
 
 	rm.mu.RLock()
@@ -90,8 +92,8 @@ func (rm *RoomManager) ReconnectPlayer(oldClient, newClient types.ClientInterfac
 
 	room.mu.Lock()
 
-	player, exists := room.Players[oldClient.GetID()]
-	if !exists {
+	player, exists := room.Players[oldPlayerID]
+	if !exists || player == nil {
 		room.mu.Unlock()
 		return apperrors.ErrNotInRoom
 	}
@@ -102,9 +104,9 @@ func (rm *RoomManager) ReconnectPlayer(oldClient, newClient types.ClientInterfac
 
 	// 通知其他玩家该玩家已上线
 	for id, p := range room.Players {
-		if id != newClient.GetID() && p.Client != nil {
+		if id != oldPlayerID && p != nil && p.Client != nil {
 			p.Client.SendMessage(codec.MustNewMessage(protocol.MsgPlayerOnline, protocol.PlayerOnlinePayload{
-				PlayerID:   newClient.GetID(),
+				PlayerID:   oldPlayerID,
 				PlayerName: newClient.GetName(),
 			}))
 		}

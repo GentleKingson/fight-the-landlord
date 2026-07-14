@@ -53,6 +53,133 @@ func TestSessionManager_OnlineStatus(t *testing.T) {
 	assert.True(t, sm.GetSession("p1").DisconnectedAt.IsZero())
 }
 
+func TestSessionManager_RestoreSessionRotatesTokenAndDeletesTemporarySession(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	original := sm.CreateSession("p1", "Player1")
+	sm.SetRoom("p1", "123456")
+	sm.SetOffline("p1")
+	temporary := sm.CreateSession("temporary", "Temporary")
+	originalToken := original.ReconnectToken
+	temporaryToken := temporary.ReconnectToken
+
+	restored, err := sm.RestoreSession(originalToken, "p1", "temporary")
+	assert.NoError(t, err)
+	assert.Equal(t, "p1", restored.PlayerID)
+	assert.Equal(t, "Player1", restored.PlayerName)
+	assert.Equal(t, "123456", restored.RoomCode)
+	assert.NotEmpty(t, restored.ReconnectToken)
+	assert.NotEqual(t, originalToken, restored.ReconnectToken)
+	assert.True(t, sm.IsOnline("p1"))
+	assert.Nil(t, sm.GetSessionByToken(originalToken))
+	assert.Equal(t, original, sm.GetSessionByToken(restored.ReconnectToken))
+	assert.Nil(t, sm.GetSession("temporary"))
+	assert.Nil(t, sm.GetSessionByToken(temporaryToken))
+}
+
+func TestSessionManager_RestoreSessionRejectsExpiredTokenWithoutDeletingTemporarySession(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	original := sm.CreateSession("p1", "Player1")
+	sm.SetOffline("p1")
+	original.mu.Lock()
+	original.DisconnectedAt = time.Now().Add(-3 * time.Minute)
+	original.mu.Unlock()
+	temporary := sm.CreateSession("temporary", "Temporary")
+
+	restored, err := sm.RestoreSession(original.ReconnectToken, "p1", "temporary")
+	assert.Nil(t, restored)
+	assert.ErrorIs(t, err, ErrReconnectExpired)
+	assert.Equal(t, original, sm.GetSessionByToken(original.ReconnectToken))
+	assert.Equal(t, temporary, sm.GetSession("temporary"))
+}
+
+func TestSessionManager_RestoreSessionConsumesTokenOnce(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	original := sm.CreateSession("p1", "Player1")
+	sm.SetOffline("p1")
+	sm.CreateSession("temporary-1", "Temporary 1")
+	sm.CreateSession("temporary-2", "Temporary 2")
+	originalToken := original.ReconnectToken
+
+	results := make(chan error, 2)
+	go func() {
+		_, err := sm.RestoreSession(originalToken, "p1", "temporary-1")
+		results <- err
+	}()
+	go func() {
+		_, err := sm.RestoreSession(originalToken, "p1", "temporary-2")
+		results <- err
+	}()
+
+	successes := 0
+	failures := 0
+	for range 2 {
+		if err := <-results; err == nil {
+			successes++
+		} else if assert.ErrorIs(t, err, ErrInvalidReconnect) {
+			failures++
+		}
+	}
+	assert.Equal(t, 1, successes)
+	assert.Equal(t, 1, failures)
+}
+
+func TestSessionManager_RestoreSessionSupportsConsecutiveReconnects(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	original := sm.CreateSession("p1", "Player1")
+	sm.SetOffline("p1")
+	sm.CreateSession("temporary-1", "Temporary 1")
+
+	first, err := sm.RestoreSession(original.ReconnectToken, "p1", "temporary-1")
+	assert.NoError(t, err)
+	sm.SetOffline("p1")
+	sm.CreateSession("temporary-2", "Temporary 2")
+
+	second, err := sm.RestoreSession(first.ReconnectToken, "p1", "temporary-2")
+	assert.NoError(t, err)
+	assert.NotEqual(t, first.ReconnectToken, second.ReconnectToken)
+	assert.Nil(t, sm.GetSessionByToken(first.ReconnectToken))
+	assert.NotNil(t, sm.GetSessionByToken(second.ReconnectToken))
+	assert.Nil(t, sm.GetSession("temporary-2"))
+}
+
+func TestSessionManager_RollbackRestoreMakesOriginalTokenRetryable(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	original := sm.CreateSession("p1", "Player1")
+	sm.SetOffline("p1")
+	original.mu.RLock()
+	disconnectedAt := original.DisconnectedAt
+	originalToken := original.ReconnectToken
+	original.mu.RUnlock()
+	sm.CreateSession("temporary-1", "Temporary 1")
+
+	restored, err := sm.RestoreSession(originalToken, "p1", "temporary-1")
+	assert.NoError(t, err)
+	assert.True(t, sm.RollbackRestore(restored))
+	assert.False(t, sm.RollbackRestore(restored), "a restore can only be rolled back once")
+
+	rolledBack := sm.GetSession("p1")
+	assert.Equal(t, originalToken, rolledBack.ReconnectToken)
+	assert.False(t, rolledBack.IsOnline)
+	assert.Equal(t, disconnectedAt, rolledBack.DisconnectedAt)
+	assert.Nil(t, sm.GetSessionByToken(restored.ReconnectToken))
+	assert.Same(t, rolledBack, sm.GetSessionByToken(originalToken))
+
+	sm.CreateSession("temporary-2", "Temporary 2")
+	retried, err := sm.RestoreSession(originalToken, "p1", "temporary-2")
+	assert.NoError(t, err)
+	assert.NotEqual(t, originalToken, retried.ReconnectToken)
+}
+
 func TestSessionManager_CanReconnect(t *testing.T) {
 	t.Parallel()
 

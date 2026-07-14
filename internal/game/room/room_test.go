@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
 
@@ -84,4 +85,23 @@ func TestRoom_GetPlayerInfo(t *testing.T) {
 	assert.Equal(t, "TestPlayer", info.Name)
 	assert.Equal(t, 1, info.Seat)
 	assert.True(t, info.Ready)
+}
+
+func TestRoom_BroadcastSkipsOfflinePlayers(t *testing.T) {
+	t.Parallel()
+
+	online := testutil.NewSimpleClient("p2", "Player2")
+	room := &Room{
+		Players: map[string]*RoomPlayer{
+			"p1": {Client: nil},
+			"p2": {Client: online},
+		},
+	}
+	msg := &protocol.Message{Type: protocol.MsgPlayerOnline}
+
+	assert.NotPanics(t, func() {
+		room.Broadcast(msg)
+		room.BroadcastExcept("p2", msg)
+	})
+	assert.Equal(t, []*protocol.Message{msg}, online.SentMessages())
 }
