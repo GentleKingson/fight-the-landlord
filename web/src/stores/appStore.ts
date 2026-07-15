@@ -431,7 +431,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 }));
 
 const RECONNECT_STORAGE_KEY = 'ddz_next_reconnect';
-export const RECONNECT_STORAGE_TTL_MS = 10 * 60 * 1000;
 
 export function loadReconnect(): { id: string; token: string } | null {
   try {
@@ -442,11 +441,9 @@ export function loadReconnect(): { id: string; token: string } | null {
       localStorage.removeItem(RECONNECT_STORAGE_KEY);
       return null;
     }
-    const { id, token, expires_at: expiresAt } = parsed as { id?: unknown; token?: unknown; expires_at?: unknown };
+    const { id, token } = parsed as { id?: unknown; token?: unknown };
     const valid = typeof id === 'string' && id
-      && typeof token === 'string' && token
-      && typeof expiresAt === 'number' && Number.isFinite(expiresAt)
-      && expiresAt > Date.now();
+      && typeof token === 'string' && token;
     if (!valid) {
       localStorage.removeItem(RECONNECT_STORAGE_KEY);
       return null;
@@ -462,8 +459,7 @@ function persistReconnect(id: string, token: string): void {
   if (!id || !token) return;
   localStorage.setItem(RECONNECT_STORAGE_KEY, JSON.stringify({
     id,
-    token,
-    expires_at: Date.now() + RECONNECT_STORAGE_TTL_MS
+    token
   }));
 }
 

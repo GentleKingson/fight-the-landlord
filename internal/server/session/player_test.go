@@ -91,7 +91,7 @@ func TestSessionManagerRevokeRejectsStaleRotatedToken(t *testing.T) {
 	assert.False(t, sm.CanReconnect(restored.ReconnectToken, "p1"))
 }
 
-func TestSessionManagerEnforcesCredentialTTLAndResetsItOnRotation(t *testing.T) {
+func TestSessionManagerLongLivedOnlineCredentialGetsFullReconnectWindow(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
@@ -99,29 +99,60 @@ func TestSessionManagerEnforcesCredentialTTLAndResetsItOnRotation(t *testing.T) 
 	sm.now = func() time.Time { return now }
 	original := sm.MustCreateSession("p1", "Player1")
 	originalToken := original.ReconnectToken
-	assert.Equal(t, now.Add(reconnectCredentialTTL), original.ReconnectTokenExpiresAt)
+	assert.True(t, original.ReconnectTokenExpiresAt.IsZero())
 
-	// Browser-controlled localStorage metadata cannot extend the server deadline.
-	now = now.Add(reconnectCredentialTTL)
-	assert.False(t, sm.CanReconnect(originalToken, original.PlayerID))
-	assert.Nil(t, sm.GetSessionByToken(originalToken))
-	temporary := sm.MustCreateSession("temporary", "Temporary")
-	restored, err := sm.RestoreSession(originalToken, original.PlayerID, temporary.PlayerID)
-	assert.Nil(t, restored)
-	assert.ErrorIs(t, err, ErrReconnectExpired)
-	assert.Same(t, temporary, sm.GetSession(temporary.PlayerID))
+	now = now.Add(24 * time.Hour)
+	sm.cleanup()
+	assert.Same(t, original, sm.GetSessionByToken(originalToken), "online credentials must not expire by wall-clock age")
 
-	// A credential used before its deadline is single-use and receives a fresh TTL.
-	now = now.Add(time.Second)
-	fresh := sm.MustCreateSession("p2", "Player2")
-	freshToken := fresh.ReconnectToken
-	sm.SetOffline(fresh.PlayerID)
-	provisional := sm.MustCreateSession("temporary-2", "Temporary 2")
-	now = now.Add(2 * time.Minute)
-	rotated, err := sm.RestoreSession(freshToken, fresh.PlayerID, provisional.PlayerID)
-	assert.NoError(t, err)
-	assert.Equal(t, now.Add(reconnectCredentialTTL), fresh.ReconnectTokenExpiresAt)
-	assert.True(t, sm.CanReconnect(rotated.ReconnectToken, fresh.PlayerID))
+	sm.SetOffline(original.PlayerID)
+	assert.Equal(t, now.Add(reconnectTimeout), original.ReconnectTokenExpiresAt)
+	now = now.Add(reconnectTimeout - time.Second)
+	provisional := sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSession(originalToken, original.PlayerID, provisional.PlayerID)
+	require.NoError(t, err)
+	assert.NotEqual(t, originalToken, restored.ReconnectToken)
+	assert.True(t, original.ReconnectTokenExpiresAt.IsZero(), "successful reconnect returns the session to online validity")
+}
+
+func TestSessionManagerDisconnectNearFormerTTLStillGetsFullWindow(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	sm := NewSessionManager()
+	sm.now = func() time.Time { return now }
+	original := sm.MustCreateSession("p1", "Player1")
+	originalToken := original.ReconnectToken
+
+	now = now.Add(10*time.Minute - 10*time.Second)
+	sm.SetOffline(original.PlayerID)
+	disconnectedAt := now
+	now = now.Add(reconnectTimeout - time.Second)
+	assert.True(t, sm.CanReconnect(originalToken, original.PlayerID))
+	assert.Equal(t, disconnectedAt.Add(reconnectTimeout), original.ReconnectTokenExpiresAt)
+
+	provisional := sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSession(originalToken, original.PlayerID, provisional.PlayerID)
+	require.NoError(t, err)
+	assert.Equal(t, original.PlayerID, restored.PlayerID)
+}
+
+func TestSessionManagerRepeatedOfflineSignalDoesNotExtendReconnectWindow(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	sm := NewSessionManager()
+	sm.now = func() time.Time { return now }
+	original := sm.MustCreateSession("p1", "Player1")
+
+	sm.SetOffline(original.PlayerID)
+	disconnectedAt := original.DisconnectedAt
+	deadline := original.ReconnectTokenExpiresAt
+	now = now.Add(time.Minute)
+	sm.SetOffline(original.PlayerID)
+
+	assert.Equal(t, disconnectedAt, original.DisconnectedAt)
+	assert.Equal(t, deadline, original.ReconnectTokenExpiresAt)
 }
 
 func TestSessionManager_OnlineStatus(t *testing.T) {
@@ -183,7 +214,8 @@ func TestSessionManager_RestoreSessionRejectsExpiredTokenWithoutDeletingTemporar
 	restored, err := sm.RestoreSession(original.ReconnectToken, "p1", "temporary")
 	assert.Nil(t, restored)
 	assert.ErrorIs(t, err, ErrReconnectExpired)
-	assert.Equal(t, original, sm.GetSessionByToken(original.ReconnectToken))
+	assert.Equal(t, original, sm.GetSession(original.PlayerID))
+	assert.Nil(t, sm.GetSessionByToken(original.ReconnectToken))
 	assert.Equal(t, temporary, sm.GetSession("temporary"))
 }
 

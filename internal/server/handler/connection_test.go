@@ -647,15 +647,6 @@ func TestHandleReconnectReturnsDistinctCredentialErrors(t *testing.T) {
 			},
 			wantCode: protocol.ErrCodeReconnectExpired,
 		},
-		{
-			name: "credential ttl expired while online",
-			setup: func(manager *session.SessionManager) (string, string) {
-				playerSession := manager.MustCreateSession("player-1", "Player One")
-				playerSession.ReconnectTokenExpiresAt = time.Now().Add(-time.Second)
-				return playerSession.ReconnectToken, playerSession.PlayerID
-			},
-			wantCode: protocol.ErrCodeReconnectExpired,
-		},
 	}
 
 	for _, tt := range tests {

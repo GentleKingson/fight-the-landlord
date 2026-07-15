@@ -280,12 +280,14 @@ describe('app store message flow', () => {
     expect(loadReconnect()).toEqual({ id: 'shared-player', token: 'rotated-by-tab-one' });
   });
 
-  it('rejects expired and pre-TTL reconnect credentials', () => {
+  it('keeps credential expiry server-authoritative and rejects malformed records', () => {
     storeReconnect('expired-player', 'expired-token', Date.now() - 1);
-    expect(loadReconnect()).toBeNull();
-    expect(localStorage.getItem('ddz_next_reconnect')).toBeNull();
+    expect(loadReconnect()).toEqual({ id: 'expired-player', token: 'expired-token' });
 
     localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'legacy-player', token: 'legacy-token' }));
+    expect(loadReconnect()).toEqual({ id: 'legacy-player', token: 'legacy-token' });
+
+    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: '', token: 'missing-player' }));
     expect(loadReconnect()).toBeNull();
     expect(localStorage.getItem('ddz_next_reconnect')).toBeNull();
   });
@@ -358,6 +360,6 @@ describe('app store message flow', () => {
   });
 });
 
-function storeReconnect(id: string, token: string, expiresAt = Date.now() + 120_000): void {
+function storeReconnect(id: string, token: string, expiresAt?: number): void {
   localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token, expires_at: expiresAt }));
 }

@@ -16,8 +16,6 @@ const (
 	reconnectTimeout = 2 * time.Minute
 	// 会话过期时间
 	sessionExpireTime = 10 * time.Minute
-	// 浏览器可持久化凭证的最长有效期。每次成功重连都会旋转并重置。
-	reconnectCredentialTTL = 10 * time.Minute
 )
 
 var (
@@ -31,8 +29,9 @@ type PlayerSession struct {
 	PlayerID       string
 	PlayerName     string
 	ReconnectToken string
-	// ReconnectTokenExpiresAt is enforced by the server; browser metadata is
-	// only an early cleanup hint and cannot extend this deadline.
+	// ReconnectTokenExpiresAt is the offline recovery deadline. It is zero while
+	// the owning connection is online and is reset to a full reconnect window
+	// when that connection disconnects.
 	ReconnectTokenExpiresAt time.Time
 	RoomCode                string
 
@@ -130,11 +129,10 @@ func (sm *SessionManager) CreateSession(playerID, playerName string) (*PlayerSes
 	}
 
 	session := &PlayerSession{
-		PlayerID:                playerID,
-		PlayerName:              playerName,
-		ReconnectToken:          token,
-		ReconnectTokenExpiresAt: sm.now().Add(reconnectCredentialTTL),
-		IsOnline:                true,
+		PlayerID:       playerID,
+		PlayerName:     playerName,
+		ReconnectToken: token,
+		IsOnline:       true,
 	}
 
 	sm.sessions[playerID] = session
@@ -171,7 +169,7 @@ func (sm *SessionManager) GetSessionByToken(token string) *PlayerSession {
 	session := sm.sessions[playerID]
 	if session != nil {
 		session.mu.RLock()
-		valid := session.ReconnectToken == token && sm.now().Before(session.ReconnectTokenExpiresAt)
+		valid := session.ReconnectToken == token && reconnectCredentialValidLocked(session, sm.now())
 		session.mu.RUnlock()
 		if !valid {
 			session = nil
@@ -189,8 +187,12 @@ func (sm *SessionManager) SetOffline(playerID string) {
 
 	if ok {
 		session.mu.Lock()
-		session.IsOnline = false
-		session.DisconnectedAt = sm.now()
+		if session.IsOnline {
+			now := sm.now()
+			session.IsOnline = false
+			session.DisconnectedAt = now
+			session.ReconnectTokenExpiresAt = now.Add(reconnectTimeout)
+		}
 		session.mu.Unlock()
 	}
 }
@@ -205,6 +207,7 @@ func (sm *SessionManager) SetOnline(playerID string) {
 		session.mu.Lock()
 		session.IsOnline = true
 		session.DisconnectedAt = time.Time{}
+		session.ReconnectTokenExpiresAt = time.Time{}
 		session.mu.Unlock()
 	}
 }
@@ -284,10 +287,7 @@ func (sm *SessionManager) RestoreSession(token, playerID, temporaryPlayerID stri
 		return nil, ErrInvalidReconnect
 	}
 	now := sm.now()
-	if !now.Before(playerSession.ReconnectTokenExpiresAt) {
-		return nil, ErrReconnectExpired
-	}
-	if !playerSession.IsOnline && now.Sub(playerSession.DisconnectedAt) > reconnectTimeout {
+	if !reconnectCredentialValidLocked(playerSession, now) {
 		return nil, ErrReconnectExpired
 	}
 	wasOnline := playerSession.IsOnline
@@ -300,7 +300,7 @@ func (sm *SessionManager) RestoreSession(token, playerID, temporaryPlayerID stri
 	}
 	delete(sm.tokens, token)
 	playerSession.ReconnectToken = newToken
-	playerSession.ReconnectTokenExpiresAt = now.Add(reconnectCredentialTTL)
+	playerSession.ReconnectTokenExpiresAt = time.Time{}
 	playerSession.IsOnline = true
 	playerSession.DisconnectedAt = time.Time{}
 	sm.tokens[newToken] = playerID
@@ -376,11 +376,8 @@ func (sm *SessionManager) CanReconnect(token, playerID string) bool {
 	session.mu.RLock()
 	defer session.mu.RUnlock()
 
-	if session.ReconnectToken != token || !sm.now().Before(session.ReconnectTokenExpiresAt) {
-		return false
-	}
-	// 检查是否在重连时限内
-	if !session.IsOnline && sm.now().Sub(session.DisconnectedAt) > reconnectTimeout {
+	now := sm.now()
+	if session.ReconnectToken != token || !reconnectCredentialValidLocked(session, now) {
 		return false
 	}
 
@@ -438,7 +435,7 @@ func (sm *SessionManager) cleanup() {
 	now := sm.now()
 	for playerID, session := range sm.sessions {
 		session.mu.RLock()
-		if !now.Before(session.ReconnectTokenExpiresAt) {
+		if !session.IsOnline && !reconnectCredentialValidLocked(session, now) {
 			delete(sm.tokens, session.ReconnectToken)
 		}
 		// 清理离线超过会话过期时间的会话
@@ -448,6 +445,14 @@ func (sm *SessionManager) cleanup() {
 		}
 		session.mu.RUnlock()
 	}
+}
+
+func reconnectCredentialValidLocked(session *PlayerSession, now time.Time) bool {
+	if session.IsOnline {
+		return true
+	}
+	return !session.ReconnectTokenExpiresAt.IsZero() && now.Before(session.ReconnectTokenExpiresAt) &&
+		now.Sub(session.DisconnectedAt) <= reconnectTimeout
 }
 
 // generateToken generates a token only after the cryptographic reader filled

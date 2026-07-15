@@ -236,8 +236,8 @@ describe('GameSocket reconnect identity state machine', () => {
     gameSocket.shutdown();
   });
 
-  it('keeps provisional credentials out of storage until reconnect succeeds', async () => {
-    storeReconnect('old-player', 'old-token');
+  it('retries a server-authoritative credential after its former browser TTL', async () => {
+    storeReconnect('old-player', 'old-token', Date.now() - 60_000);
     useAppStore.setState({ playerId: 'old-player', reconnectToken: 'old-token' });
     const gameSocket = new GameSocket('ws://example.test/ws');
     gameSocket.connect();
@@ -741,6 +741,6 @@ function openAndNegotiate(socket: FakeWebSocket): void {
   socket.sent = [];
 }
 
-function storeReconnect(id: string, token: string, expiresAt = Date.now() + 120_000): void {
+function storeReconnect(id: string, token: string, expiresAt?: number): void {
   localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token, expires_at: expiresAt }));
 }
