@@ -86,7 +86,7 @@ func (h *Handler) handleLeaveRoom(client types.ClientInterface) {
 		return
 	}
 
-	_, _ = types.SendMessageIfIdentity(
+	_, _ = types.SendCommandResultIfIdentity(
 		client,
 		playerID,
 		"",

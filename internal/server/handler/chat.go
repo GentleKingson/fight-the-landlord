@@ -75,7 +75,14 @@ func (h *Handler) broadcastLobbyChat(client types.ClientInterface, payload *prot
 		sendChatError(client, protocol.ErrCodeUnknown, "大厅聊天服务暂不可用")
 		return
 	}
-	h.server.BroadcastToLobby(codec.MustNewMessage(protocol.MsgChat, payload))
+	message := codec.MustNewMessage(protocol.MsgChat, payload)
+	if broadcaster, ok := h.server.(interface {
+		BroadcastToLobbyFrom(types.ClientInterface, *protocol.Message)
+	}); ok {
+		broadcaster.BroadcastToLobbyFrom(client, message)
+		return
+	}
+	h.server.BroadcastToLobby(message)
 }
 
 func (h *Handler) broadcastRoomChat(client types.ClientInterface, payload *protocol.ChatPayload) {

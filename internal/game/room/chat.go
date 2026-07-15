@@ -49,6 +49,12 @@ func (r *Room) BroadcastFromMember(sender types.ClientInterface, msg *protocol.M
 	recipients := r.snapshotDeliveryRecipientsLocked("")
 	r.mu.RUnlock()
 
-	sendToRoomRecipients(r.Code, recipients, msg)
+	for _, recipient := range recipients {
+		if recipient.playerID == sender.GetID() {
+			_, _ = types.SendCommandResultIfIdentity(recipient.client, recipient.playerID, r.Code, msg)
+			continue
+		}
+		_, _ = types.SendMessageIfIdentity(recipient.client, recipient.playerID, r.Code, msg)
+	}
 	return true
 }

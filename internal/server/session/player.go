@@ -351,6 +351,7 @@ func (sm *SessionManager) RollbackRestore(restored *RestoredSession) bool {
 	delete(sm.tokens, restored.ReconnectToken)
 	playerSession.ReconnectToken = restored.previousToken
 	playerSession.ReconnectTokenExpiresAt = restored.previousTokenExpiresAt
+	playerSession.RoomCode = restored.RoomCode
 	playerSession.IsOnline = restored.wasOnline
 	playerSession.DisconnectedAt = restored.disconnectedAt
 	sm.tokens[restored.previousToken] = restored.PlayerID

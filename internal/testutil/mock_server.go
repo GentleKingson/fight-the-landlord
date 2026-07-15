@@ -53,3 +53,8 @@ func (m *MockServer) RebindClient(temporaryID, playerID, playerName, roomCode st
 	}
 	return previous, args.Error(1)
 }
+
+func (m *MockServer) RollbackRebindClient(temporaryID, temporaryName, playerID, roomCode string, client, previous types.ClientInterface) error {
+	args := m.Called(temporaryID, temporaryName, playerID, roomCode, client, previous)
+	return args.Error(0)
+}

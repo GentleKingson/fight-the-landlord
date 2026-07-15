@@ -145,6 +145,32 @@ func TestServer_RebindClientIsPointerSafe(t *testing.T) {
 	assert.Nil(t, server.GetClientByID("restored-id"))
 }
 
+func TestServer_RollbackRebindClientRestoresRegistryAndTemporaryIdentity(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{clients: make(map[string]*Client)}
+	previous := NewClient(server, nil)
+	previous.rebindIdentity("restored-id", "Restored Player", "123456")
+	server.registerClient(previous)
+
+	rebound := NewClient(server, nil)
+	temporaryID := rebound.GetID()
+	temporaryName := rebound.GetName()
+	server.registerClient(rebound)
+	replaced, err := server.RebindClient(temporaryID, "restored-id", "Restored Player", "123456", rebound)
+	require.NoError(t, err)
+	require.Same(t, previous, replaced)
+
+	require.NoError(t, server.RollbackRebindClient(
+		temporaryID, temporaryName, "restored-id", "123456", rebound, previous,
+	))
+	assert.Equal(t, temporaryID, rebound.GetID())
+	assert.Equal(t, temporaryName, rebound.GetName())
+	assert.Empty(t, rebound.GetRoom())
+	assert.Same(t, rebound, server.GetClientByID(temporaryID))
+	assert.Same(t, previous, server.GetClientByID("restored-id"))
+}
+
 func TestServer_RebindClientAndMatchCommitHaveOneAtomicWinner(t *testing.T) {
 	server := &Server{clients: make(map[string]*Client)}
 	provisional := NewClient(server, nil)

@@ -219,7 +219,7 @@ func (h *Handler) Handle(client types.ClientInterface, msg *protocol.Message) {
 }
 
 func sendMessage(client types.ClientInterface, message *protocol.Message) {
-	if err := client.SendMessage(message); err != nil {
+	if err := types.SendCommandResult(client, message); err != nil {
 		log.Printf("发送消息 %s 给玩家 %s 失败: %v", message.Type, client.GetID(), err)
 	}
 }

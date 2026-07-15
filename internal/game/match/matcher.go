@@ -1178,11 +1178,23 @@ func (m *Matcher) publishQueuedEntry(entry *QueueEntry, client types.ClientInter
 	if !current {
 		return false, false
 	}
-	delivered = m.sendIfUnbound(entry.PlayerID, client, codec.MustNewMessage(protocol.MsgMatchQueued, protocol.MatchQueuedPayload{
+	delivered = m.sendCommandResultIfUnbound(entry.PlayerID, client, codec.MustNewMessage(protocol.MsgMatchQueued, protocol.MatchQueuedPayload{
 		DeadlineMS: deadline.UnixMilli(),
 		Practice:   practice,
 	}), operation)
 	return true, delivered
+}
+
+func (m *Matcher) sendCommandResultIfUnbound(playerID string, client types.ClientInterface, message *protocol.Message, operation string) bool {
+	if client == nil {
+		return false
+	}
+	sent, err := types.SendCommandResultIfIdentity(client, playerID, "", message)
+	if err != nil {
+		log.Printf("发送 %s 给玩家 %s 失败: %v", operation, playerID, err)
+		return false
+	}
+	return sent
 }
 
 func (m *Matcher) sendIfUnbound(playerID string, client types.ClientInterface, message *protocol.Message, operation string) bool {

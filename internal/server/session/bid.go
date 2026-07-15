@@ -153,7 +153,7 @@ func (gs *GameSession) nextGrabber(from int) int {
 
 // broadcastBidResult 广播叫/抢地主结果
 func (gs *GameSession) broadcastBidResult(player *GamePlayer, bid, isGrab bool) {
-	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgBidResult, protocol.BidResultPayload{
+	gs.queueCommandBroadcastLocked(player.ID, gs.newGameEventMessage(protocol.MsgBidResult, protocol.BidResultPayload{
 		PlayerID:   player.ID,
 		PlayerName: player.Name,
 		Bid:        bid,

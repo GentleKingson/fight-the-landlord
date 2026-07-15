@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	serverhandler "github.com/palemoky/fight-the-landlord/internal/server/handler"
@@ -229,6 +231,95 @@ func TestClientRateWarningIsUncorrelatedAndCommandStillAcknowledged(t *testing.T
 	require.NotNil(t, warning)
 	assert.Nil(t, warning.Command)
 	assert.Equal(t, 3, ackCount)
+}
+
+func TestConcurrentChatBroadcastCannotEnterAnotherCommandCache(t *testing.T) {
+	server := &Server{commandCache: newCommandCache(32, time.Minute)}
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 3600})
+	actor := NewClient(server, nil)
+	actor.rebindIdentity("chat-actor", "Actor", "")
+	peer := NewClient(server, nil)
+	peer.rebindIdentity("chat-peer", "Peer", "")
+	gameRoom, err := roomManager.CreateRoom(actor)
+	require.NoError(t, err)
+	_, err = roomManager.JoinRoom(peer, gameRoom.Code)
+	require.NoError(t, err)
+	_ = drainClientMessages(t, actor)
+
+	command := codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{Content: "actor", Scope: "room", MessageID: "actor-msg"})
+	command.Command = &protocol.CommandMeta{RequestID: "chat-request-a"}
+	entry, err := server.commandCache.begin(actor.GetID(), command.Command.RequestID, commandFingerprint(command))
+	require.NoError(t, err)
+	actor.beginCommandExecution(command.Command.RequestID, command.Type)
+
+	require.True(t, gameRoom.BroadcastFromMember(actor, codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{Content: "actor"})))
+	require.True(t, gameRoom.BroadcastFromMember(peer, codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{Content: "peer"})))
+
+	responses := actor.endCommandExecution()
+	require.Len(t, responses, 1)
+	require.Equal(t, "chat-request-a", responses[0].Command.RequestID)
+	ack := codec.NewCommandAckMessage(command.Command.RequestID, command.Type)
+	responses = append(responses, ack)
+	server.commandCache.finish(entry.entry, responses, actor.GetID(), command.Command.RequestID)
+
+	delivered := drainClientMessages(t, actor)
+	require.Len(t, delivered, 2)
+	require.Equal(t, "chat-request-a", delivered[0].Command.RequestID)
+	require.Nil(t, delivered[1].Command, "the peer Chat is an event, not actor A's result")
+
+	duplicate, err := server.commandCache.begin(actor.GetID(), command.Command.RequestID, commandFingerprint(command))
+	require.NoError(t, err)
+	replayed := server.commandCache.responsesAfter(duplicate.entry)
+	require.Equal(t, []protocol.MessageType{protocol.MsgChat, protocol.MsgCommandAck}, messageTypes(replayed))
+	replayedChat, err := codec.ParsePayload[protocol.ChatPayload](replayed[0])
+	require.NoError(t, err)
+	require.Equal(t, "actor", replayedChat.Content)
+}
+
+func TestConcurrentReadyBroadcastCannotEnterAnotherCommandCache(t *testing.T) {
+	server := &Server{commandCache: newCommandCache(32, time.Minute)}
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 3600})
+	actor := NewClient(server, nil)
+	actor.rebindIdentity("ready-actor", "Actor", "")
+	peer := NewClient(server, nil)
+	peer.rebindIdentity("ready-peer", "Peer", "")
+	gameRoom, err := roomManager.CreateRoom(actor)
+	require.NoError(t, err)
+	_, err = roomManager.JoinRoom(peer, gameRoom.Code)
+	require.NoError(t, err)
+	_ = drainClientMessages(t, actor)
+
+	command := codec.MustNewMessage(protocol.MsgReady, nil)
+	command.Command = &protocol.CommandMeta{RequestID: "ready-request-a"}
+	entry, err := server.commandCache.begin(actor.GetID(), command.Command.RequestID, commandFingerprint(command))
+	require.NoError(t, err)
+	actor.beginCommandExecution(command.Command.RequestID, command.Type)
+
+	require.NoError(t, roomManager.SetPlayerReady(actor, true))
+	require.NoError(t, roomManager.SetPlayerReady(peer, true))
+
+	responses := actor.endCommandExecution()
+	require.Len(t, responses, 1)
+	require.Equal(t, "ready-request-a", responses[0].Command.RequestID)
+	ack := codec.NewCommandAckMessage(command.Command.RequestID, command.Type)
+	responses = append(responses, ack)
+	server.commandCache.finish(entry.entry, responses, actor.GetID(), command.Command.RequestID)
+
+	delivered := drainClientMessages(t, actor)
+	require.Len(t, delivered, 2)
+	require.Equal(t, "ready-request-a", delivered[0].Command.RequestID)
+	require.Nil(t, delivered[1].Command, "the peer Ready is an event, not actor A's result")
+	peerReady, err := codec.ParsePayload[protocol.PlayerReadyPayload](delivered[1])
+	require.NoError(t, err)
+	require.Equal(t, peer.GetID(), peerReady.PlayerID)
+
+	duplicate, err := server.commandCache.begin(actor.GetID(), command.Command.RequestID, commandFingerprint(command))
+	require.NoError(t, err)
+	replayed := server.commandCache.responsesAfter(duplicate.entry)
+	require.Equal(t, []protocol.MessageType{protocol.MsgPlayerReady, protocol.MsgCommandAck}, messageTypes(replayed))
+	replayedReady, err := codec.ParsePayload[protocol.PlayerReadyPayload](replayed[0])
+	require.NoError(t, err)
+	require.Equal(t, actor.GetID(), replayedReady.PlayerID)
 }
 
 func TestLegacyChatFixtureIsCountedAndIdempotent(t *testing.T) {

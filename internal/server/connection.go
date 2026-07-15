@@ -319,3 +319,41 @@ func (s *Server) RebindClient(temporaryID, playerID, playerName, roomCode string
 	}
 	return previous, nil
 }
+
+// RollbackRebindClient restores the exact registry and physical identity that
+// existed before RebindClient. It is used when the final reconnect snapshot
+// cannot be enqueued, so the rotated credential and identity never commit
+// without an observable success response.
+func (s *Server) RollbackRebindClient(temporaryID, temporaryName, playerID, roomCode string, client, previous types.ClientInterface) error {
+	_ = roomCode
+	rebound, ok := client.(*Client)
+	if !ok {
+		return fmt.Errorf("client %T does not support identity rollback", client)
+	}
+	var previousClient *Client
+	if previous != nil {
+		var previousOK bool
+		previousClient, previousOK = previous.(*Client)
+		if !previousOK {
+			return fmt.Errorf("previous client %T cannot be restored", previous)
+		}
+	}
+
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+	if s.clients[playerID] != rebound {
+		return fmt.Errorf("restored player %q is no longer owned by rebound client", playerID)
+	}
+	if current := s.clients[temporaryID]; current != nil && current != rebound {
+		return fmt.Errorf("temporary identity %q has already been reused", temporaryID)
+	}
+	if !rebound.rollbackReboundIdentity(playerID, temporaryID, temporaryName) {
+		return fmt.Errorf("rebound client identity changed before rollback")
+	}
+	delete(s.clients, playerID)
+	if previousClient != nil {
+		s.clients[playerID] = previousClient
+	}
+	s.clients[temporaryID] = rebound
+	return nil
+}

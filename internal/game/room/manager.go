@@ -51,7 +51,7 @@ func (rm *RoomManager) createRoom(client types.ClientInterface, publishResponse 
 				IsBot:  creator.IsBot,
 			},
 		})
-		if _, err := rm.sendIfCurrentMemberPublished(room, creator.ID, client, message); err != nil {
+		if _, err := rm.sendCommandResultIfCurrentMemberPublished(room, creator.ID, client, message); err != nil {
 			log.Printf("发送房间 %s 创建结果给玩家 %s 失败: %v", room.Code, creator.ID, err)
 		}
 	}
@@ -131,7 +131,7 @@ func (rm *RoomManager) joinRoom(client types.ClientInterface, code string, publi
 
 	log.Printf("👤 玩家 %s 加入房间 %s", joining.Name, code)
 	if joinedMessage != nil {
-		if _, err := rm.sendIfCurrentMemberPublished(room, joining.ID, client, joinedMessage); err != nil {
+		if _, err := rm.sendCommandResultIfCurrentMemberPublished(room, joining.ID, client, joinedMessage); err != nil {
 			log.Printf("发送房间 %s 加入结果给玩家 %s 失败: %v", room.Code, joining.ID, err)
 		}
 	}
@@ -286,7 +286,7 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	room.mu.Unlock()
 	rm.mu.RUnlock()
 
-	rm.sendToCurrentRoomPublished(room, recipients, codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
+	rm.sendCommandResultToCurrentRoomPublished(room, recipients, playerID, codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
 		PlayerID: playerID,
 		Ready:    ready,
 	}))

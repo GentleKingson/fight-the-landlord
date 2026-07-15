@@ -26,6 +26,23 @@ func (r *Room) Broadcast(msg *protocol.Message) {
 	r.publishMu.Unlock()
 }
 
+// BroadcastCommandResult is the manager-free equivalent used by focused
+// GameSession tests and bots.
+func (r *Room) BroadcastCommandResult(resultPlayerID string, msg *protocol.Message) {
+	r.publishMu.Lock()
+	r.mu.RLock()
+	recipients := r.snapshotDeliveryRecipientsLocked("")
+	r.mu.RUnlock()
+	for _, recipient := range recipients {
+		if recipient.playerID == resultPlayerID {
+			_, _ = types.SendCommandResultIfIdentity(recipient.client, recipient.playerID, r.Code, msg)
+		} else {
+			_, _ = types.SendMessageIfIdentity(recipient.client, recipient.playerID, r.Code, msg)
+		}
+	}
+	r.publishMu.Unlock()
+}
+
 // broadcastExcept 广播消息给除指定玩家外的所有玩家
 func (r *Room) BroadcastExcept(excludeID string, msg *protocol.Message) {
 	r.publishMu.Lock()
@@ -195,6 +212,17 @@ func (rm *RoomManager) sendIfCurrentMemberPublished(gameRoom *Room, playerID str
 	return types.SendMessageIfIdentity(client, playerID, gameRoom.Code, msg)
 }
 
+func (rm *RoomManager) sendCommandResultIfCurrentMemberPublished(gameRoom *Room, playerID string, client types.ClientInterface, msg *protocol.Message) (bool, error) {
+	gameRoom.mu.RLock()
+	player := gameRoom.players[playerID]
+	current := player != nil && player.Client == client
+	gameRoom.mu.RUnlock()
+	if !current {
+		return false, nil
+	}
+	return types.SendCommandResultIfIdentity(client, playerID, gameRoom.Code, msg)
+}
+
 // SendIfCurrentMember orders delivery with exact room, logical-player, and
 // physical-client ownership. Room mutations wait on publishMu, while client
 // identity rebinding is checked atomically by the production Client.
@@ -266,6 +294,34 @@ func (rm *RoomManager) sendToCurrentRoomPublished(gameRoom *Room, recipients []r
 			log.Printf("发送房间消息给玩家 %s 失败: %v", recipient.playerID, err)
 		}
 	}
+}
+
+func (rm *RoomManager) sendCommandResultToCurrentRoomPublished(gameRoom *Room, recipients []roomRecipient, resultPlayerID string, msg *protocol.Message) {
+	for _, recipient := range recipients {
+		var err error
+		if recipient.playerID == resultPlayerID {
+			_, err = rm.sendCommandResultIfCurrentMemberPublished(gameRoom, recipient.playerID, recipient.client, msg)
+		} else {
+			_, err = rm.sendIfCurrentMemberPublished(gameRoom, recipient.playerID, recipient.client, msg)
+		}
+		if err != nil {
+			log.Printf("发送房间消息给玩家 %s 失败: %v", recipient.playerID, err)
+		}
+	}
+}
+
+// BroadcastCommandResultIfCurrentRoom sends one room event to every current
+// member while marking only the command's logical actor as its direct result.
+func (rm *RoomManager) BroadcastCommandResultIfCurrentRoom(gameRoom *Room, resultPlayerID string, msg *protocol.Message) bool {
+	if !rm.lockPublishedRoom(gameRoom) {
+		return false
+	}
+	defer gameRoom.publishMu.Unlock()
+	gameRoom.mu.RLock()
+	recipients := gameRoom.snapshotDeliveryRecipientsLocked("")
+	gameRoom.mu.RUnlock()
+	rm.sendCommandResultToCurrentRoomPublished(gameRoom, recipients, resultPlayerID, msg)
+	return true
 }
 
 // BroadcastIfCurrentRoom publishes to the exact current roster as one ordered

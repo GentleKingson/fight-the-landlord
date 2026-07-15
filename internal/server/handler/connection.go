@@ -49,6 +49,7 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	}
 
 	temporaryID := client.GetID()
+	temporaryName := client.GetName()
 	restored, ok := h.restoreReconnectSession(client, payload, temporaryID)
 	if !ok {
 		return
@@ -69,9 +70,17 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	// updated inside the room publication transaction below.
 	h.sessionManager.SetOnline(restored.PlayerID)
 
-	restoredRoom, responseSent := h.restoreReconnectRoom(client, restored, &reconnectPayload)
+	restoredRoom, responseSent, restoreErr := h.restoreReconnectRoom(client, restored, &reconnectPayload)
+	if errors.Is(restoreErr, room.ErrReconnectResponseDelivery) {
+		h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName)
+		return
+	}
 	if restoredRoom == nil {
-		h.sendReconnected(client, restored, nil, &reconnectPayload)
+		sent, sendErr := h.sendReconnected(client, restored, nil, &reconnectPayload)
+		if sendErr != nil || !sent {
+			h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName)
+			return
+		}
 	} else if !responseSent {
 		h.closeSkippedReconnect(client, previous, restored.PlayerID)
 		return
@@ -133,9 +142,9 @@ func (h *Handler) restoreReconnectRoom(
 	client types.ClientInterface,
 	restored *session.RestoredSession,
 	payload *protocol.ReconnectedPayload,
-) (*room.Room, bool) {
+) (*room.Room, bool, error) {
 	if restored.RoomCode == "" || h.roomManager == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	restoredRoom, responseSent, err := h.roomManager.ReconnectPlayerWithResponse(
 		restored.PlayerID,
@@ -146,11 +155,34 @@ func (h *Handler) restoreReconnectRoom(
 		},
 	)
 	if err == nil {
-		return restoredRoom, responseSent
+		return restoredRoom, responseSent, nil
 	}
 	log.Printf("重连到房间失败: %v", err)
+	if errors.Is(err, room.ErrReconnectResponseDelivery) {
+		return nil, false, err
+	}
 	types.CompareAndSetRoom(client, restored.PlayerID, restored.RoomCode, "")
-	return nil, false
+	return nil, false, nil
+}
+
+func (h *Handler) rollbackReconnect(
+	client, previous types.ClientInterface,
+	restored *session.RestoredSession,
+	temporaryID, temporaryName string,
+) {
+	if err := h.server.RollbackRebindClient(
+		temporaryID, temporaryName, restored.PlayerID, restored.RoomCode, client, previous,
+	); err != nil {
+		log.Printf("重连身份回滚失败: %v", err)
+		h.sessionManager.SetOffline(restored.PlayerID)
+		client.Close()
+		return
+	}
+	if !h.sessionManager.RollbackRestore(restored) {
+		log.Printf("重连凭据回滚失败: player=%s", restored.PlayerID)
+		h.sessionManager.SetOffline(restored.PlayerID)
+	}
+	client.Close()
 }
 
 func (h *Handler) closeSkippedReconnect(
@@ -225,7 +257,7 @@ func (h *Handler) buildReconnectedMessage(
 
 // sendReconnected is retained for roomless recovery and focused tests. Room
 // restores build and enqueue the snapshot under RoomManager.publishMu.
-func (h *Handler) sendReconnected(client types.ClientInterface, restored *session.RestoredSession, expectedRoom *room.Room, payload *protocol.ReconnectedPayload) {
+func (h *Handler) sendReconnected(client types.ClientInterface, restored *session.RestoredSession, expectedRoom *room.Room, payload *protocol.ReconnectedPayload) (bool, error) {
 	if expectedRoom != nil && h.roomManager != nil {
 		sent, err := h.roomManager.SendBuiltIfCurrentMember(expectedRoom, restored.PlayerID, client, func() *protocol.Message {
 			return h.buildReconnectedMessage(client, restored, expectedRoom, payload)
@@ -234,12 +266,16 @@ func (h *Handler) sendReconnected(client types.ClientInterface, restored *sessio
 			log.Printf("发送重连状态给玩家 %s 失败: %v", restored.PlayerID, err)
 		}
 		if sent {
-			return
+			return true, nil
 		}
+		return false, err
 	}
 	types.CompareAndSetRoom(client, restored.PlayerID, restored.RoomCode, "")
 	message := h.buildReconnectedMessage(client, restored, nil, payload)
-	if _, err := types.SendMessageIfIdentity(client, restored.PlayerID, "", message); err != nil {
+	sent, err := types.SendCommandResultIfIdentity(client, restored.PlayerID, "", message)
+	if err != nil {
 		log.Printf("发送重连状态给玩家 %s 失败: %v", restored.PlayerID, err)
+		return false, err
 	}
+	return sent, nil
 }

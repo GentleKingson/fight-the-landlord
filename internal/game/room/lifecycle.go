@@ -1,6 +1,7 @@
 package room
 
 import (
+	"errors"
 	"log"
 	"math/rand/v2"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
+
+var ErrReconnectResponseDelivery = errors.New("reconnect response delivery failed")
 
 // SetAllPlayersReady 设置所有玩家准备状态
 func (r *Room) SetAllPlayersReady() {
@@ -149,6 +152,9 @@ func (rm *RoomManager) ReconnectPlayerWithResponse(
 		rm.mu.RUnlock()
 		return nil, false, apperrors.ErrNotInRoom
 	}
+	previousName := player.Name
+	previousIsBot := player.IsBot
+	previousClient := player.Client
 	player.Name = playerName
 	player.IsBot = isBot
 	player.Client = newClient
@@ -156,6 +162,12 @@ func (rm *RoomManager) ReconnectPlayerWithResponse(
 	presenceCallback := rm.onPresence
 	room.mu.Unlock()
 	rm.mu.RUnlock()
+	responseSent, sendErr := rm.sendReconnectResponsePublished(room, oldPlayerID, newClient, buildResponse)
+	if sendErr != nil {
+		rollbackRoomReconnect(room, oldPlayerID, player, newClient, previousName, previousIsBot, previousClient)
+		room.publishMu.Unlock()
+		return nil, false, sendErr
+	}
 	if presenceCallback != nil {
 		presenceCallback(room, oldPlayerID, true)
 	}
@@ -163,21 +175,52 @@ func (rm *RoomManager) ReconnectPlayerWithResponse(
 		PlayerID:   oldPlayerID,
 		PlayerName: playerName,
 	}))
-	responseSent := false
-	if buildResponse != nil {
-		if response := buildResponse(room); response != nil {
-			var sendErr error
-			responseSent, sendErr = rm.sendIfCurrentMemberPublished(room, oldPlayerID, newClient, response)
-			if sendErr != nil {
-				log.Printf("发送玩家 %s 的重连快照失败: %v", oldPlayerID, sendErr)
-			}
-		}
-	}
 	room.publishMu.Unlock()
 
 	log.Printf("📶 玩家 %s 重连到房间 %s", playerName, roomCode)
 
 	return room, responseSent, nil
+}
+
+func (rm *RoomManager) sendReconnectResponsePublished(
+	room *Room,
+	playerID string,
+	client types.ClientInterface,
+	buildResponse func(*Room) *protocol.Message,
+) (bool, error) {
+	if buildResponse == nil {
+		return false, nil
+	}
+	response := buildResponse(room)
+	if response == nil {
+		return false, nil
+	}
+	sent, err := rm.sendCommandResultIfCurrentMemberPublished(room, playerID, client, response)
+	if err != nil {
+		return false, errors.Join(ErrReconnectResponseDelivery, err)
+	}
+	if !sent {
+		return false, ErrReconnectResponseDelivery
+	}
+	return true, nil
+}
+
+func rollbackRoomReconnect(
+	room *Room,
+	playerID string,
+	player *RoomPlayer,
+	newClient types.ClientInterface,
+	previousName string,
+	previousIsBot bool,
+	previousClient types.ClientInterface,
+) {
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	if current := room.players[playerID]; current == player && current.Client == newClient {
+		current.Name = previousName
+		current.IsBot = previousIsBot
+		current.Client = previousClient
+	}
 }
 
 // SetOnPresenceChanged installs a callback that mirrors exact room presence

@@ -2,7 +2,7 @@ name: Test
 
 on:
   push:
-    branches: [main, codex/web-client-remediation-followup]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -30,7 +30,7 @@ jobs:
           cache: false
 
       - name: Restore Go cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
@@ -95,7 +95,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Save Go cache
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         if: github.ref == 'refs/heads/main'
         with:
           path: |
@@ -104,7 +104,7 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.out
           flags: unittests
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -189,7 +189,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v6

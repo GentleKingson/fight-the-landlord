@@ -10,8 +10,9 @@ import (
 )
 
 type pendingDelivery struct {
-	playerID string
-	message  *protocol.Message
+	playerID       string
+	resultPlayerID string
+	message        *protocol.Message
 }
 
 type pendingGameResult struct {
@@ -32,6 +33,13 @@ type pendingWork struct {
 // Room.mu while preserving the event order committed by the game state.
 func (gs *GameSession) queueBroadcastLocked(message *protocol.Message) {
 	gs.pendingDeliveries = append(gs.pendingDeliveries, pendingDelivery{message: message})
+}
+
+func (gs *GameSession) queueCommandBroadcastLocked(playerID string, message *protocol.Message) {
+	gs.pendingDeliveries = append(gs.pendingDeliveries, pendingDelivery{
+		resultPlayerID: playerID,
+		message:        message,
+	})
 }
 
 func (gs *GameSession) queuePrivateLocked(playerID string, message *protocol.Message) {
@@ -55,37 +63,7 @@ func (gs *GameSession) takePendingWorkLocked() pendingWork {
 
 func (gs *GameSession) dispatchPendingWork(work pendingWork) {
 	for _, delivery := range work.deliveries {
-		if delivery.playerID == "" {
-			if manager := gs.roomManager.Load(); manager != nil {
-				if delivery.message.Type == protocol.MsgGameStart {
-					manager.BroadcastBuiltIfCurrentRoom(gs.room, func() *protocol.Message {
-						message := codec.MustNewMessage(protocol.MsgGameStart, protocol.GameStartPayload{
-							Players: gs.room.GetAllPlayersInfo(),
-						})
-						message.Event = delivery.message.Event
-						return message
-					})
-				} else {
-					manager.BroadcastIfCurrentRoom(gs.room, delivery.message)
-				}
-				continue
-			}
-			gs.room.Broadcast(delivery.message)
-			continue
-		}
-		client, online := gs.room.PrivateRecipient(delivery.playerID)
-		if !online {
-			continue
-		}
-		var err error
-		if manager := gs.roomManager.Load(); manager != nil {
-			_, err = manager.SendIfCurrentMember(gs.room, delivery.playerID, client, delivery.message)
-		} else {
-			_, err = types.SendMessageIfIdentity(client, delivery.playerID, gs.room.Code, delivery.message)
-		}
-		if err != nil {
-			log.Printf("发送玩家 %s 的私有游戏消息失败: %v", delivery.playerID, err)
-		}
+		gs.dispatchPendingDelivery(delivery)
 	}
 	if work.resetRoom {
 		gs.room.ResetAfterGame()
@@ -106,4 +84,50 @@ func (gs *GameSession) dispatchPendingWork(work pendingWork) {
 			log.Printf("记录游戏结果失败: %v", err)
 		}
 	}
+}
+
+func (gs *GameSession) dispatchPendingDelivery(delivery pendingDelivery) {
+	if delivery.playerID == "" {
+		gs.dispatchBroadcastDelivery(delivery)
+		return
+	}
+	client, online := gs.room.PrivateRecipient(delivery.playerID)
+	if !online {
+		return
+	}
+	var err error
+	if manager := gs.roomManager.Load(); manager != nil {
+		_, err = manager.SendIfCurrentMember(gs.room, delivery.playerID, client, delivery.message)
+	} else {
+		_, err = types.SendMessageIfIdentity(client, delivery.playerID, gs.room.Code, delivery.message)
+	}
+	if err != nil {
+		log.Printf("发送玩家 %s 的私有游戏消息失败: %v", delivery.playerID, err)
+	}
+}
+
+func (gs *GameSession) dispatchBroadcastDelivery(delivery pendingDelivery) {
+	if manager := gs.roomManager.Load(); manager != nil {
+		if delivery.resultPlayerID != "" {
+			manager.BroadcastCommandResultIfCurrentRoom(gs.room, delivery.resultPlayerID, delivery.message)
+			return
+		}
+		if delivery.message.Type == protocol.MsgGameStart {
+			manager.BroadcastBuiltIfCurrentRoom(gs.room, func() *protocol.Message {
+				message := codec.MustNewMessage(protocol.MsgGameStart, protocol.GameStartPayload{
+					Players: gs.room.GetAllPlayersInfo(),
+				})
+				message.Event = delivery.message.Event
+				return message
+			})
+			return
+		}
+		manager.BroadcastIfCurrentRoom(gs.room, delivery.message)
+		return
+	}
+	if delivery.resultPlayerID != "" {
+		gs.room.BroadcastCommandResult(delivery.resultPlayerID, delivery.message)
+		return
+	}
+	gs.room.Broadcast(delivery.message)
 }

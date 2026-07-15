@@ -370,6 +370,21 @@ func (c *Client) WritePump() {
 func (c *Client) SendMessage(msg *protocol.Message) error {
 	c.initializeLifecycle()
 
+	data, err := encodeClientMessage(msg)
+	if err != nil {
+		return err
+	}
+	sendErr := c.enqueueEncodedMessage(data)
+	c.handleSendError(sendErr)
+	return sendErr
+}
+
+// SendCommandResult correlates and records only a response explicitly emitted
+// as the result of the active command. Concurrent broadcasts use SendMessage
+// and therefore remain uncorrelated events.
+func (c *Client) SendCommandResult(msg *protocol.Message) error {
+	c.initializeLifecycle()
+
 	outgoing := c.prepareActiveCommandResponse(msg)
 	data, err := encodeClientMessage(outgoing)
 	if err != nil {
@@ -440,8 +455,7 @@ func (c *Client) SendMessageIfRoom(expectedRoom string, msg *protocol.Message) (
 		c.mu.RUnlock()
 		return false, nil
 	}
-	outgoing := c.prepareActiveCommandResponse(msg)
-	data, err := encodeClientMessage(outgoing)
+	data, err := encodeClientMessage(msg)
 	if err != nil {
 		c.mu.RUnlock()
 		return false, err
@@ -460,6 +474,28 @@ func (c *Client) SendMessageIfRoom(expectedRoom string, msg *protocol.Message) (
 // mutex, so an old private delivery and a new identity have one deterministic
 // ordering boundary.
 func (c *Client) SendMessageIfIdentity(expectedPlayerID, expectedRoom string, msg *protocol.Message) (bool, error) {
+	c.initializeLifecycle()
+
+	c.mu.RLock()
+	if c.ID != expectedPlayerID || c.RoomID != expectedRoom {
+		c.mu.RUnlock()
+		return false, nil
+	}
+	data, err := encodeClientMessage(msg)
+	if err != nil {
+		c.mu.RUnlock()
+		return false, err
+	}
+	sendErr := c.enqueueEncodedMessage(data)
+	c.mu.RUnlock()
+
+	c.handleSendError(sendErr)
+	return sendErr == nil, sendErr
+}
+
+// SendCommandResultIfIdentity is the direct-result counterpart to
+// SendMessageIfIdentity.
+func (c *Client) SendCommandResultIfIdentity(expectedPlayerID, expectedRoom string, msg *protocol.Message) (bool, error) {
 	c.initializeLifecycle()
 
 	c.mu.RLock()
@@ -684,6 +720,18 @@ func (c *Client) rebindIdentityIfUnbound(expectedTemporaryID, playerID, playerNa
 	c.ID = playerID
 	c.Name = playerName
 	c.RoomID = roomID
+	return true
+}
+
+func (c *Client) rollbackReboundIdentity(expectedPlayerID, temporaryID, temporaryName string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ID != expectedPlayerID {
+		return false
+	}
+	c.ID = temporaryID
+	c.Name = temporaryName
+	c.RoomID = ""
 	return true
 }
 

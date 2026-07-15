@@ -80,7 +80,7 @@ func (gs *GameSession) handlePlayCardsAt(playerID string, cardInfos []protocol.C
 	gs.playedCards[gs.currentPlayer] = append(gs.playedCards[gs.currentPlayer], sortedCards...)
 
 	// 广播出牌信息
-	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
+	gs.queueCommandBroadcastLocked(playerID, gs.newGameEventMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
 		PlayerID:   playerID,
 		PlayerName: play.player.Name,
 		Cards:      convert.CardsToInfos(sortedCards), // 使用排序后的牌
@@ -206,7 +206,7 @@ func (gs *GameSession) handlePassAt(playerID, expectedGameID string, expectedTur
 	gs.consecutivePasses++
 
 	// 广播不出
-	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
+	gs.queueCommandBroadcastLocked(playerID, gs.newGameEventMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
 		PlayerID:   playerID,
 		PlayerName: currentPlayer.Name,
 	}))

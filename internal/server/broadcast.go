@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
+	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
 // GetOnlineCount 获取在线人数（按需调用）
@@ -11,6 +12,25 @@ func (s *Server) GetOnlineCount() int {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
 	return len(s.clients)
+}
+
+// BroadcastToLobbyFrom publishes a chat-like command result to its sender and
+// the same payload as an uncorrelated event to every other lobby client.
+func (s *Server) BroadcastToLobbyFrom(sender types.ClientInterface, msg *protocol.Message) {
+	for _, client := range s.snapshotClients() {
+		if client.GetRoom() != "" {
+			continue
+		}
+		var err error
+		if sender != nil && client == sender {
+			err = client.SendCommandResult(msg)
+		} else {
+			err = client.SendMessage(msg)
+		}
+		if err != nil {
+			log.Printf("广播大厅消息 %s 给玩家 %s 失败: %v", msg.Type, client.GetID(), err)
+		}
+	}
 }
 
 // Broadcast 广播消息给所有客户端

@@ -236,7 +236,7 @@ func TestHandleReconnectPublishesRotatedIdentityBeforeMigratedMatchQueue(t *test
 	server.AssertExpectations(t)
 }
 
-func TestHandleReconnectSnapshotFailureClosesBothConnectionsAndCancelsMatch(t *testing.T) {
+func TestHandleReconnectSnapshotFailureRollsBackAndOriginalTokenRetries(t *testing.T) {
 	sessionManager := session.NewSessionManager()
 	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
 	original := testutil.NewSimpleClient("snapshot-failure-player", "Original")
@@ -246,6 +246,7 @@ func TestHandleReconnectSnapshotFailureClosesBothConnectionsAndCancelsMatch(t *t
 	_, err = roomManager.JoinRoom(peer, gameRoom.Code)
 	require.NoError(t, err)
 	playerSession := sessionManager.MustCreateSession(original.GetID(), original.GetName())
+	originalToken := playerSession.ReconnectToken
 	sessionManager.SetRoom(original.GetID(), gameRoom.Code)
 	sessionManager.SetOffline(original.GetID())
 	roomManager.NotifyPlayerOffline(original)
@@ -276,6 +277,22 @@ func TestHandleReconnectSnapshotFailureClosesBothConnectionsAndCancelsMatch(t *t
 		client.roomCode = args.String(3)
 		client.mu.Unlock()
 	}).Return(previous, nil).Once()
+	server.On(
+		"RollbackRebindClient",
+		"temporary-snapshot-failure",
+		"Temporary",
+		original.GetID(),
+		gameRoom.Code,
+		replacement,
+		previous,
+	).Run(func(args mock.Arguments) {
+		client := args.Get(4).(*reconnectSnapshotFailureClient)
+		client.mu.Lock()
+		client.id = args.String(0)
+		client.name = args.String(1)
+		client.roomCode = ""
+		client.mu.Unlock()
+	}).Return(nil).Once()
 	h := NewHandler(HandlerDeps{
 		Server:         server,
 		RoomManager:    roomManager,
@@ -284,14 +301,59 @@ func TestHandleReconnectSnapshotFailureClosesBothConnectionsAndCancelsMatch(t *t
 	})
 
 	h.handleReconnect(replacement, codec.MustNewMessage(protocol.MsgReconnect, protocol.ReconnectPayload{
-		Token:    playerSession.ReconnectToken,
+		Token:    originalToken,
 		PlayerID: playerSession.PlayerID,
 	}))
 
 	require.True(t, replacement.isClosed())
-	require.True(t, previous.isClosed())
-	require.Zero(t, matcher.GetQueueLength())
+	require.False(t, previous.isClosed())
+	require.Equal(t, 1, matcher.GetQueueLength())
 	require.Empty(t, replacement.sentMessages())
+	require.Equal(t, "temporary-snapshot-failure", replacement.GetID())
+	require.Same(t, sessionManager.GetSession(original.GetID()), sessionManager.GetSessionByToken(originalToken))
+	_, online := gameRoom.PrivateRecipient(original.GetID())
+	require.False(t, online)
+
+	retry := &synchronizedClient{
+		id:       "temporary-snapshot-retry",
+		name:     "Retry",
+		messages: make([]*protocol.Message, 0),
+	}
+	sessionManager.MustCreateSession(retry.GetID(), retry.GetName())
+	server.On(
+		"RebindClient",
+		retry.GetID(),
+		original.GetID(),
+		original.GetName(),
+		gameRoom.Code,
+		retry,
+	).Run(func(args mock.Arguments) {
+		client := args.Get(4).(*synchronizedClient)
+		client.mu.Lock()
+		client.id = args.String(1)
+		client.name = args.String(2)
+		client.roomCode = args.String(3)
+		client.mu.Unlock()
+	}).Return(previous, nil).Once()
+
+	h.handleReconnect(retry, codec.MustNewMessage(protocol.MsgReconnect, protocol.ReconnectPayload{
+		Token:    originalToken,
+		PlayerID: playerSession.PlayerID,
+	}))
+
+	messages := retry.sentMessages()
+	require.NotEmpty(t, messages)
+	require.Equal(t, protocol.MsgReconnected, messages[0].Type)
+	reconnected, err := codec.ParsePayload[protocol.ReconnectedPayload](messages[0])
+	require.NoError(t, err)
+	require.Equal(t, original.GetID(), reconnected.PlayerID)
+	require.Equal(t, gameRoom.Code, reconnected.RoomCode)
+	require.NotNil(t, reconnected.GameState)
+	require.NotEqual(t, originalToken, reconnected.ReconnectToken)
+	recipient, online := gameRoom.PrivateRecipient(original.GetID())
+	require.True(t, online)
+	require.Same(t, retry, recipient)
+	require.True(t, previous.isClosed())
 	server.AssertExpectations(t)
 }
 
@@ -391,7 +453,7 @@ func TestTryRestoreRoomStateRejectsRoomRemovedAfterReconnectBeforeRegistryCallba
 	peerReleaseOnce.Do(func() { close(peer.release) })
 	restoredRoom := waitHandlerValue(t, restoredRooms, "room reconnect completion")
 	waitHandlerSignal(t, removalEntered, "room removal after PlayerOnline publication")
-	h.sendReconnected(replacement, restored, restoredRoom, payload)
+	_, _ = h.sendReconnected(replacement, restored, restoredRoom, payload)
 
 	require.Empty(t, replacement.GetRoom())
 	require.Empty(t, payload.RoomCode)
@@ -436,7 +498,7 @@ func TestReconnectRemovalDuringFinalSendOrdersRoomLeftAfterReconnected(t *testin
 	t.Cleanup(func() { releaseOnce.Do(func() { close(replacement.release) }) })
 	sendDone := make(chan struct{})
 	go func() {
-		h.sendReconnected(replacement, restored, restoredRoom, payload)
+		_, _ = h.sendReconnected(replacement, restored, restoredRoom, payload)
 		close(sendDone)
 	}()
 	waitHandlerSignal(t, replacement.entered, "blocked final Reconnected enqueue")
@@ -485,7 +547,7 @@ func TestFinalReconnectUsesCurrentReplacementSession(t *testing.T) {
 		RoomCode:       gameRoom.Code,
 	}
 	payload := &protocol.ReconnectedPayload{PlayerID: restored.PlayerID, PlayerName: restored.PlayerName}
-	h.sendReconnected(clients[0], restored, gameRoom, payload)
+	_, _ = h.sendReconnected(clients[0], restored, gameRoom, payload)
 
 	reconnected := requireLastReconnectedPayload(t, clients[0].SentMessages())
 	require.Equal(t, gameRoom.Code, reconnected.RoomCode)
@@ -528,7 +590,7 @@ func TestEndedSessionSettlementIsNotRestoredToReplacementRoomMember(t *testing.T
 		RoomCode:       gameRoom.Code,
 	}
 	restoredRoom := h.tryRestoreRoomState(reconnectedNewcomer, restoredNewcomer)
-	h.sendReconnected(reconnectedNewcomer, restoredNewcomer, restoredRoom, &protocol.ReconnectedPayload{
+	_, _ = h.sendReconnected(reconnectedNewcomer, restoredNewcomer, restoredRoom, &protocol.ReconnectedPayload{
 		PlayerID: restoredNewcomer.PlayerID, PlayerName: restoredNewcomer.PlayerName,
 	})
 	newcomerPayload := requireLastReconnectedPayload(t, reconnectedNewcomer.SentMessages())
@@ -551,7 +613,7 @@ func TestEndedSessionSettlementIsNotRestoredToReplacementRoomMember(t *testing.T
 		ReconnectToken: originalSession.ReconnectToken,
 		RoomCode:       gameRoom.Code,
 	}
-	h.sendReconnected(oldPlayers[0], restoredOriginal, gameRoom, &protocol.ReconnectedPayload{
+	_, _ = h.sendReconnected(oldPlayers[0], restoredOriginal, gameRoom, &protocol.ReconnectedPayload{
 		PlayerID: restoredOriginal.PlayerID, PlayerName: restoredOriginal.PlayerName,
 	})
 	originalPayload := requireLastReconnectedPayload(t, oldPlayers[0].SentMessages())
