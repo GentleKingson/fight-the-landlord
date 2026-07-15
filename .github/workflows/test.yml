@@ -188,6 +188,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Verify Compose security invariants
+        run: ./scripts/check-compose-security.sh
+
       - name: Validate Compose configuration
         run: docker compose --env-file .env.example config --quiet
 
@@ -205,8 +208,8 @@ jobs:
           export GAME_IMAGE=fight-the-landlord
           export IMAGE_TAG=ci
           export SERVER_PORT=1780
-          export REDIS_PORT=6380
           export REDIS_ADDR=redis:6379
+          export REDIS_PASSWORD="$(openssl rand -hex 32)"
           export BOT_ENABLED=false
           export DOUZERO_ENABLED=false
           export GAME_ROOM_CLEANUP_DELAY=0
@@ -224,6 +227,9 @@ jobs:
           trap cleanup EXIT
 
           docker compose --env-file .env.example up -d --wait redis poker-server
+          redis_id="$(docker compose --env-file .env.example ps -q redis)"
+          test -n "$redis_id"
+          test "$(docker exec "$redis_id" awk '/^Uid:/{print $2}' /proc/1/status)" != 0
 
           if docker compose --env-file .env.example ps --services --status running | grep -qx douzero; then
             echo "DouZero must remain disabled without the optional profile"

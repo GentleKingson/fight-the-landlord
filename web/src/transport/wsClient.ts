@@ -118,7 +118,10 @@ export class GameSocket {
         capabilities: [...REQUIRED_CAPABILITIES],
         client_kind: WEB_CLIENT_KIND
       }, { request_id: requestId });
-      if (!result.ok) this.closeUnhealthySocket(socket, '无法完成协议协商');
+      if (!result.ok) {
+        const detail = result.error?.message;
+        this.closeUnhealthySocket(socket, detail ? `无法完成协议协商：${detail}` : '无法完成协议协商');
+      }
     };
 
     socket.onmessage = (event) => {
@@ -195,9 +198,31 @@ export class GameSocket {
     useAppStore.getState().clearIdentity();
   }
 
-  logout(): void {
-    this.forgetIdentity();
+  async logout(): Promise<boolean> {
+    // Detach handlers before reading the credential. A late Reconnected frame
+    // can no longer rotate localStorage while revocation is in flight.
     this.shutdown();
+    const identity = loadReconnect();
+    this.forgetIdentity();
+    let revokeFailed = false;
+    if (identity && typeof fetch === 'function') {
+      try {
+        const response = await fetch('/session/revoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ player_id: identity.id, token: identity.token }),
+          credentials: 'same-origin',
+          keepalive: true
+        });
+        revokeFailed = !response.ok;
+      } catch {
+        revokeFailed = true;
+      }
+    }
+    if (revokeFailed) {
+      useAppStore.getState().setError('服务器会话撤销失败，旧凭证将在短期有效期结束后失效');
+    }
+    return !revokeFailed;
   }
 
   send(type: MessageType, payload?: OutgoingPayload, command?: CommandMetadata): SendResult {

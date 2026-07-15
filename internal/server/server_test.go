@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -66,6 +68,57 @@ func TestServer_HandleHealth(t *testing.T) {
 	assert.Equal(t, "text/plain; charset=utf-8", res.Header.Get("Content-Type"))
 }
 
+func TestNewServerRejectsMissingProductionRedisCredentialBeforeDial(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{}
+	cfg.Server.Environment = "production"
+	cfg.Security.AllowedOrigins = []string{"https://game.example"}
+
+	server, err := NewServer(cfg)
+
+	assert.Nil(t, server)
+	assert.EqualError(t, err, "production requires a non-empty Redis password")
+}
+
+func TestServer_ReadinessChecksDependencyAndShutdownState(t *testing.T) {
+	t.Parallel()
+	s := &Server{readinessCheck: func(context.Context) error { return nil }}
+
+	ready := httptest.NewRecorder()
+	s.handleReadyz(ready, httptest.NewRequest(http.MethodGet, "/readyz", http.NoBody))
+	assert.Equal(t, http.StatusOK, ready.Code)
+	assert.Equal(t, "READY", ready.Body.String())
+
+	s.readinessCheck = func(context.Context) error { return errors.New("redis unavailable") }
+	unavailable := httptest.NewRecorder()
+	s.handleReadyz(unavailable, httptest.NewRequest(http.MethodGet, "/readyz", http.NoBody))
+	assert.Equal(t, http.StatusServiceUnavailable, unavailable.Code)
+
+	s.readinessCheck = func(context.Context) error { return nil }
+	s.shuttingDown.Store(true)
+	shuttingDown := httptest.NewRecorder()
+	s.handleReadyz(shuttingDown, httptest.NewRequest(http.MethodGet, "/readyz", http.NoBody))
+	assert.Equal(t, http.StatusServiceUnavailable, shuttingDown.Code)
+
+	live := httptest.NewRecorder()
+	s.handleLivez(live, httptest.NewRequest(http.MethodGet, "/livez", http.NoBody))
+	assert.Equal(t, http.StatusOK, live.Code, "liveness remains healthy during graceful shutdown")
+}
+
+func TestHTTPHandlerAppliesBrowserSecurityHeaders(t *testing.T) {
+	t.Parallel()
+	s := &Server{}
+	recorder := httptest.NewRecorder()
+	s.httpHandler(nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/livez", http.NoBody))
+
+	assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "no-referrer", recorder.Header().Get("Referrer-Policy"))
+	assert.Contains(t, recorder.Header().Get("Permissions-Policy"), "camera=()")
+	assert.Contains(t, recorder.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'")
+	assert.Contains(t, recorder.Header().Get("Content-Security-Policy"), "object-src 'none'")
+	assert.Equal(t, "DENY", recorder.Header().Get("X-Frame-Options"))
+}
+
 func TestServer_HandleVersion(t *testing.T) {
 	t.Parallel()
 
@@ -104,6 +157,8 @@ func TestServer_ReadOnlyEndpointsRejectWrites(t *testing.T) {
 		handler http.HandlerFunc
 	}{
 		{name: "health", handler: s.handleHealth},
+		{name: "livez", handler: s.handleLivez},
+		{name: "readyz", handler: s.handleReadyz},
 		{name: "version", handler: s.handleVersion},
 	} {
 		t.Run(endpoint.name, func(t *testing.T) {

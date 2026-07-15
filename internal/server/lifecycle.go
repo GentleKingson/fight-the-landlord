@@ -68,6 +68,7 @@ func (s *Server) IsMaintenanceMode() bool {
 
 // GracefulShutdown 优雅关闭服务器
 func (s *Server) GracefulShutdown(timeout time.Duration) {
+	s.shuttingDown.Store(true)
 	// 1. 进入维护模式
 	s.EnterMaintenanceMode()
 
@@ -159,6 +160,7 @@ func (s *Server) sendShutdownNotification() {
 
 // Shutdown 关闭服务器
 func (s *Server) Shutdown() {
+	s.shuttingDown.Store(true)
 	// Stop authoritative queue deadlines, bot-fill work, and room assembly
 	// before closing the clients and backing services they may still reference.
 	if s.matcher != nil {

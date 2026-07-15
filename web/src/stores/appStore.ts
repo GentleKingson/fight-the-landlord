@@ -405,26 +405,45 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }));
 
+const RECONNECT_STORAGE_KEY = 'ddz_next_reconnect';
+export const RECONNECT_STORAGE_TTL_MS = 10 * 60 * 1000;
+
 export function loadReconnect(): { id: string; token: string } | null {
   try {
-    const raw = localStorage.getItem('ddz_next_reconnect');
+    const raw = localStorage.getItem(RECONNECT_STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || !('id' in parsed) || !('token' in parsed)) return null;
-    const { id, token } = parsed as { id?: unknown; token?: unknown };
-    return typeof id === 'string' && id && typeof token === 'string' && token ? { id, token } : null;
+    if (typeof parsed !== 'object' || parsed === null || !('id' in parsed) || !('token' in parsed)) {
+      localStorage.removeItem(RECONNECT_STORAGE_KEY);
+      return null;
+    }
+    const { id, token, expires_at: expiresAt } = parsed as { id?: unknown; token?: unknown; expires_at?: unknown };
+    const valid = typeof id === 'string' && id
+      && typeof token === 'string' && token
+      && typeof expiresAt === 'number' && Number.isFinite(expiresAt)
+      && expiresAt > Date.now();
+    if (!valid) {
+      localStorage.removeItem(RECONNECT_STORAGE_KEY);
+      return null;
+    }
+    return { id, token };
   } catch {
+    localStorage.removeItem(RECONNECT_STORAGE_KEY);
     return null;
   }
 }
 
 function persistReconnect(id: string, token: string): void {
   if (!id || !token) return;
-  localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token }));
+  localStorage.setItem(RECONNECT_STORAGE_KEY, JSON.stringify({
+    id,
+    token,
+    expires_at: Date.now() + RECONNECT_STORAGE_TTL_MS
+  }));
 }
 
 export function forgetReconnect(): void {
-  localStorage.removeItem('ddz_next_reconnect');
+  localStorage.removeItem(RECONNECT_STORAGE_KEY);
 }
 
 function isReconnectFailure(code?: number, message?: string): boolean {

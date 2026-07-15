@@ -108,7 +108,7 @@ func TestHandleReconnectRestoresIdentityRoomAndReadyCommand(t *testing.T) {
 	_, err = roomManager.JoinRoom(observer, gameRoom.Code)
 	require.NoError(t, err)
 
-	restoredSession := sessionManager.CreateSession(restoredClient.GetID(), restoredClient.GetName())
+	restoredSession := sessionManager.MustCreateSession(restoredClient.GetID(), restoredClient.GetName())
 	sessionManager.SetRoom(restoredClient.GetID(), gameRoom.Code)
 	sessionManager.SetOffline(restoredClient.GetID())
 	roomManager.NotifyPlayerOffline(restoredClient)
@@ -119,7 +119,7 @@ func TestHandleReconnectRestoresIdentityRoomAndReadyCommand(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
 
 	provisionalClient := testutil.NewSimpleClient("temporary-player", "Temporary Player")
-	provisionalSession := sessionManager.CreateSession(provisionalClient.GetID(), provisionalClient.GetName())
+	provisionalSession := sessionManager.MustCreateSession(provisionalClient.GetID(), provisionalClient.GetName())
 	provisionalToken := provisionalSession.ReconnectToken
 
 	server := new(testutil.MockServer)
@@ -189,7 +189,7 @@ func TestHandleReconnectRestoresIdentityRoomAndReadyCommand(t *testing.T) {
 
 func TestHandleReconnectPublishesRotatedIdentityBeforeMigratedMatchQueue(t *testing.T) {
 	sessionManager := session.NewSessionManager()
-	original := sessionManager.CreateSession("queued-player", "Queued Player")
+	original := sessionManager.MustCreateSession("queued-player", "Queued Player")
 	originalToken := original.ReconnectToken
 	sessionManager.SetOffline(original.PlayerID)
 	previous := testutil.NewSimpleClient(original.PlayerID, original.PlayerName)
@@ -198,7 +198,7 @@ func TestHandleReconnectPublishesRotatedIdentityBeforeMigratedMatchQueue(t *test
 	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
 
 	provisional := testutil.NewSimpleClient("temporary-queued", "Temporary")
-	sessionManager.CreateSession(provisional.GetID(), provisional.GetName())
+	sessionManager.MustCreateSession(provisional.GetID(), provisional.GetName())
 	server := new(testutil.MockServer)
 	server.On(
 		"RebindClient",
@@ -245,7 +245,7 @@ func TestHandleReconnectSnapshotFailureClosesBothConnectionsAndCancelsMatch(t *t
 	require.NoError(t, err)
 	_, err = roomManager.JoinRoom(peer, gameRoom.Code)
 	require.NoError(t, err)
-	playerSession := sessionManager.CreateSession(original.GetID(), original.GetName())
+	playerSession := sessionManager.MustCreateSession(original.GetID(), original.GetName())
 	sessionManager.SetRoom(original.GetID(), gameRoom.Code)
 	sessionManager.SetOffline(original.GetID())
 	roomManager.NotifyPlayerOffline(original)
@@ -259,7 +259,7 @@ func TestHandleReconnectSnapshotFailureClosesBothConnectionsAndCancelsMatch(t *t
 		name:     "Temporary",
 		messages: make([]*protocol.Message, 0),
 	}}
-	sessionManager.CreateSession(replacement.GetID(), replacement.GetName())
+	sessionManager.MustCreateSession(replacement.GetID(), replacement.GetName())
 	server := new(testutil.MockServer)
 	server.On(
 		"RebindClient",
@@ -302,8 +302,8 @@ func TestHandleReconnectRejectsRoomBoundProvisionalClientBeforeConsumingToken(t 
 	gameRoom, err := roomManager.CreateRoom(provisional)
 	require.NoError(t, err)
 
-	provisionalSession := sessionManager.CreateSession(provisional.GetID(), provisional.GetName())
-	restoredSession := sessionManager.CreateSession("restored-player", "Restored")
+	provisionalSession := sessionManager.MustCreateSession(provisional.GetID(), provisional.GetName())
+	restoredSession := sessionManager.MustCreateSession("restored-player", "Restored")
 	sessionManager.SetOffline(restoredSession.PlayerID)
 	server := new(testutil.MockServer)
 	h := NewHandler(HandlerDeps{
@@ -344,7 +344,7 @@ func TestTryRestoreRoomStateRejectsRoomRemovedAfterReconnectBeforeRegistryCallba
 	require.NoError(t, err)
 	_, err = roomManager.JoinRoom(peer, gameRoom.Code)
 	require.NoError(t, err)
-	playerSession := sessionManager.CreateSession(original.GetID(), original.GetName())
+	playerSession := sessionManager.MustCreateSession(original.GetID(), original.GetName())
 	sessionManager.SetRoom(original.GetID(), gameRoom.Code)
 	game := session.NewGameSession(gameRoom, nil, config.GameConfig{TurnTimeout: 3600, BidTimeout: 3600})
 	t.Cleanup(game.StopAllTimers)
@@ -407,7 +407,7 @@ func TestReconnectRemovalDuringFinalSendOrdersRoomLeftAfterReconnected(t *testin
 	original := &synchronizedClient{id: "ordered-player", name: "Player"}
 	gameRoom, err := roomManager.CreateRoom(original)
 	require.NoError(t, err)
-	playerSession := sessionManager.CreateSession(original.GetID(), original.GetName())
+	playerSession := sessionManager.MustCreateSession(original.GetID(), original.GetName())
 	sessionManager.SetRoom(original.GetID(), gameRoom.Code)
 	game := session.NewGameSession(gameRoom, nil, config.GameConfig{TurnTimeout: 3600, BidTimeout: 3600})
 	t.Cleanup(game.StopAllTimers)
@@ -464,7 +464,7 @@ func TestFinalReconnectUsesCurrentReplacementSession(t *testing.T) {
 	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
 	roomManager.AddRoomForTest(gameRoom)
 	sessionManager := session.NewSessionManager()
-	playerSession := sessionManager.CreateSession(clients[0].GetID(), clients[0].GetName())
+	playerSession := sessionManager.MustCreateSession(clients[0].GetID(), clients[0].GetName())
 	sessionManager.SetRoom(clients[0].GetID(), gameRoom.Code)
 	h := NewHandler(HandlerDeps{RoomManager: roomManager, SessionManager: sessionManager})
 	require.True(t, h.SetGameSession(gameRoom.Code, oldGame))
@@ -517,7 +517,7 @@ func TestEndedSessionSettlementIsNotRestoredToReplacementRoomMember(t *testing.T
 	newcomer := testutil.NewSimpleClient("newcomer", "New Player")
 	_, err := roomManager.JoinRoom(newcomer, gameRoom.Code)
 	require.NoError(t, err)
-	newcomerSession := sessionManager.CreateSession(newcomer.GetID(), newcomer.GetName())
+	newcomerSession := sessionManager.MustCreateSession(newcomer.GetID(), newcomer.GetName())
 	sessionManager.SetRoom(newcomer.GetID(), gameRoom.Code)
 	roomManager.NotifyPlayerOffline(newcomer)
 	reconnectedNewcomer := testutil.NewSimpleClient(newcomer.GetID(), newcomer.GetName())
@@ -543,7 +543,7 @@ func TestEndedSessionSettlementIsNotRestoredToReplacementRoomMember(t *testing.T
 		newcomerPayload.GameState.Players[2].ID,
 	}, newcomer.GetID())
 
-	originalSession := sessionManager.CreateSession(oldPlayers[0].GetID(), oldPlayers[0].GetName())
+	originalSession := sessionManager.MustCreateSession(oldPlayers[0].GetID(), oldPlayers[0].GetName())
 	sessionManager.SetRoom(oldPlayers[0].GetID(), gameRoom.Code)
 	restoredOriginal := &session.RestoredSession{
 		PlayerID:       originalSession.PlayerID,
@@ -578,9 +578,18 @@ func TestHandleReconnectReturnsDistinctCredentialErrors(t *testing.T) {
 		{
 			name: "expired",
 			setup: func(manager *session.SessionManager) (string, string) {
-				playerSession := manager.CreateSession("player-1", "Player One")
+				playerSession := manager.MustCreateSession("player-1", "Player One")
 				manager.SetOffline("player-1")
 				playerSession.DisconnectedAt = time.Now().Add(-3 * time.Minute)
+				return playerSession.ReconnectToken, playerSession.PlayerID
+			},
+			wantCode: protocol.ErrCodeReconnectExpired,
+		},
+		{
+			name: "credential ttl expired while online",
+			setup: func(manager *session.SessionManager) (string, string) {
+				playerSession := manager.MustCreateSession("player-1", "Player One")
+				playerSession.ReconnectTokenExpiresAt = time.Now().Add(-time.Second)
 				return playerSession.ReconnectToken, playerSession.PlayerID
 			},
 			wantCode: protocol.ErrCodeReconnectExpired,
@@ -592,7 +601,7 @@ func TestHandleReconnectReturnsDistinctCredentialErrors(t *testing.T) {
 			manager := session.NewSessionManager()
 			token, playerID := tt.setup(manager)
 			provisional := testutil.NewSimpleClient("temporary", "Temporary")
-			manager.CreateSession(provisional.GetID(), provisional.GetName())
+			manager.MustCreateSession(provisional.GetID(), provisional.GetName())
 			h := NewHandler(HandlerDeps{
 				Server:         new(testutil.MockServer),
 				SessionManager: manager,
@@ -616,11 +625,11 @@ func TestHandleReconnectRebindFailureRestoresConsumedCredential(t *testing.T) {
 	t.Parallel()
 
 	manager := session.NewSessionManager()
-	original := manager.CreateSession("player-1", "Player One")
+	original := manager.MustCreateSession("player-1", "Player One")
 	manager.SetOffline(original.PlayerID)
 	originalToken := original.ReconnectToken
 	provisional := testutil.NewSimpleClient("temporary", "Temporary")
-	manager.CreateSession(provisional.GetID(), provisional.GetName())
+	manager.MustCreateSession(provisional.GetID(), provisional.GetName())
 
 	server := new(testutil.MockServer)
 	server.On(

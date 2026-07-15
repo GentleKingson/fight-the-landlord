@@ -3,11 +3,13 @@ ARG NODE_VERSION=22
 ARG VERSION=dev
 ARG GO_REGISTRY=docker.io/library
 ARG GO_VARIANT=-alpine
-ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+ARG GO_DIGEST=sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2
+ARG NODE_DIGEST=sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot@sha256:aef9602f8710ec12bde19d593fed1f76c708531bb7aba205110f1029786ead7b
 
 # Build the Vite client first. The release version is written into index.html
 # and is also exposed by the Go /version endpoint.
-FROM node:${NODE_VERSION}-alpine AS web-builder
+FROM node:${NODE_VERSION}-alpine@${NODE_DIGEST} AS web-builder
 
 ARG VERSION
 ENV VITE_APP_VERSION=${VERSION}
@@ -20,7 +22,7 @@ COPY web/ ./
 RUN npm run build
 
 # Build a static Go server with the web distribution embedded.
-FROM ${GO_REGISTRY}/golang:${GO_VERSION}${GO_VARIANT} AS server-builder
+FROM ${GO_REGISTRY}/golang:${GO_VERSION}${GO_VARIANT}@${GO_DIGEST} AS server-builder
 
 USER root
 WORKDIR /src

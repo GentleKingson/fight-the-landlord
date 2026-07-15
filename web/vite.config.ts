@@ -16,6 +16,17 @@ export default defineConfig(({ mode }) => {
         }
       }
     ],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.endsWith('/src/protocol/generated-runtime.js')) return 'protocol-runtime';
+            if (id.includes('/node_modules/protobufjs/')) return 'protobuf-runtime';
+            return undefined;
+          }
+        }
+      }
+    },
     server: {
       host: '0.0.0.0',
       port: 5174,

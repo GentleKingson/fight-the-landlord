@@ -194,7 +194,7 @@ describe('app store message flow', () => {
   });
 
   it('keeps saved credentials while Connected is only provisional', () => {
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'old-player', token: 'old-token' }));
+    storeReconnect('old-player', 'old-token');
     useAppStore.setState({ playerId: 'old-player', reconnectToken: 'old-token' });
     useAppStore.getState().prepareConnection(loadReconnect());
 
@@ -211,7 +211,7 @@ describe('app store message flow', () => {
   });
 
   it('persists only the rotated identity confirmed by Reconnected', () => {
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'old-player', token: 'old-token' }));
+    storeReconnect('old-player', 'old-token');
     useAppStore.getState().prepareConnection(loadReconnect());
     useAppStore.getState().handleMessage({
       type: MsgType.Connected,
@@ -238,7 +238,7 @@ describe('app store message flow', () => {
     [1003, '重连令牌无效'],
     [1004, '重连令牌已过期']
   ])('accepts the provisional identity after reconnect error %s', (code, message) => {
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'old-player', token: 'old-token' }));
+    storeReconnect('old-player', 'old-token');
     useAppStore.setState({ phase: 'playing', roomCode: '888888' });
     useAppStore.getState().prepareConnection(loadReconnect());
     useAppStore.getState().handleMessage({
@@ -261,7 +261,7 @@ describe('app store message flow', () => {
   });
 
   it('does not overwrite credentials rotated by another tab after a reconnect conflict', () => {
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'shared-player', token: 'shared-token' }));
+    storeReconnect('shared-player', 'shared-token');
     useAppStore.getState().prepareConnection(loadReconnect());
     useAppStore.getState().handleMessage({
       type: MsgType.Connected,
@@ -270,7 +270,7 @@ describe('app store message flow', () => {
     useAppStore.getState().setConnectionStatus('reconnecting');
 
     // Another tab won the single-use token race and committed its rotation.
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'shared-player', token: 'rotated-by-tab-one' }));
+    storeReconnect('shared-player', 'rotated-by-tab-one');
     useAppStore.getState().handleMessage({
       type: MsgType.Error,
       payload: { code: 1003, message: '重连令牌无效', request_id: '' }
@@ -278,6 +278,16 @@ describe('app store message flow', () => {
 
     expect(useAppStore.getState().playerId).toBe('tab-two-temp');
     expect(loadReconnect()).toEqual({ id: 'shared-player', token: 'rotated-by-tab-one' });
+  });
+
+  it('rejects expired and pre-TTL reconnect credentials', () => {
+    storeReconnect('expired-player', 'expired-token', Date.now() - 1);
+    expect(loadReconnect()).toBeNull();
+    expect(localStorage.getItem('ddz_next_reconnect')).toBeNull();
+
+    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'legacy-player', token: 'legacy-token' }));
+    expect(loadReconnect()).toBeNull();
+    expect(localStorage.getItem('ddz_next_reconnect')).toBeNull();
   });
 
   it('updates hand and action history after playing cards', () => {
@@ -347,3 +357,7 @@ describe('app store message flow', () => {
     expect(Object.keys(useAppStore.getState().seatActions)).toEqual(['p2']);
   });
 });
+
+function storeReconnect(id: string, token: string, expiresAt = Date.now() + 120_000): void {
+  localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token, expires_at: expiresAt }));
+}

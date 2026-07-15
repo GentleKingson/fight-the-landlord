@@ -36,7 +36,7 @@ func newSnapshotTestSession(t *testing.T) (*GameSession, *SessionManager) {
 
 	sessionManager := NewSessionManager()
 	for _, client := range clients {
-		sessionManager.CreateSession(client.ID, client.Name)
+		sessionManager.MustCreateSession(client.ID, client.Name)
 		client.SetRoom(gameRoom.Code)
 		sessionManager.SetRoom(client.ID, gameRoom.Code)
 	}

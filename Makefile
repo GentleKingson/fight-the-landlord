@@ -54,7 +54,7 @@ proto:  ## Regenerate Protocol Buffer and message type mapping code
 
 ## proto-check: 验证所有 protobuf 生成物已提交且为最新
 proto-check: proto
-	git diff --exit-code -- internal/protocol/pb internal/protocol/convert/msgtype/mapping.go web/src/protocol/generated.ts
+	git diff --exit-code -- internal/protocol/pb internal/protocol/convert/msgtype/mapping.go web/src/protocol/generated.ts web/src/protocol/generated-runtime.js web/src/protocol/generated-runtime.d.ts
 
 ## release: 创建并推送版本标签
 release:  ## Create and push version tag

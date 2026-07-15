@@ -80,8 +80,9 @@ mkdir fight-the-landlord && cd fight-the-landlord
 curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docker-compose.yml -o docker-compose.yml
 curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/.env.example -o .env
 
-# 3. 修改配置（可选）
+# 3. 修改公开来源等配置，并从 secret manager 注入 Redis 密码（必填）
 vim .env
+read -rsp "Redis password: " REDIS_PASSWORD && export REDIS_PASSWORD
 
 # 4. 启动服务
 docker compose up -d

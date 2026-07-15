@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
@@ -15,6 +17,9 @@ import (
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 获取真实客户端IP
 	clientIP := GetClientIP(r)
+	if s.ipResolver != nil {
+		clientIP = s.ipResolver.Resolve(r)
+	}
 
 	// 维护模式检查（最优先）
 	if s.IsMaintenanceMode() {
@@ -85,7 +90,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 创建会话
 	playerID := client.GetID()
 	playerName := client.GetName()
-	session := s.sessionManager.CreateSession(playerID, playerName)
+	session, err := s.sessionManager.CreateSession(playerID, playerName)
+	if err != nil {
+		log.Printf("创建安全会话失败: %v", err)
+		s.unregisterClient(client)
+		_ = conn.Close()
+		return
+	}
 
 	// 发送连接成功消息（包含重连令牌）
 	if err := client.SendMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
@@ -117,6 +128,30 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("OK"))
+}
+
+func (s *Server) handleLivez(w http.ResponseWriter, r *http.Request) {
+	s.handleHealth(w, r)
+}
+
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !allowReadMethod(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if s.shuttingDown.Load() || s.readinessCheck == nil {
+		http.Error(w, "NOT READY", http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if err := s.readinessCheck(ctx); err != nil {
+		http.Error(w, "NOT READY", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("READY"))
 }
 
 // handleVersion 版本接口，向客户端公布服务端版本及其要求的最低客户端版本。

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,6 +57,7 @@ type Server struct {
 	messageLimiter *MessageRateLimiter
 	chatLimiter    *ChatRateLimiter
 	ipFilter       *IPFilter
+	ipResolver     *ClientIPResolver
 
 	// 连接控制
 	maxConnections        int
@@ -64,6 +66,8 @@ type Server struct {
 	slowClientDisconnects atomic.Int64
 	commandCacheOnce      sync.Once
 	commandCache          *commandCache
+	readinessCheck        func(context.Context) error
+	shuttingDown          atomic.Bool
 
 	// 维护模式
 	maintenanceMode bool
@@ -72,6 +76,19 @@ type Server struct {
 
 // NewServer 创建服务器实例
 func NewServer(cfg *config.Config) (*Server, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+	if err := validateOriginPolicy(cfg.Server.Environment, cfg.Security.AllowedOrigins); err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Server.Environment), "production") && strings.TrimSpace(cfg.Redis.Password) == "" {
+		return nil, fmt.Errorf("production requires a non-empty Redis password")
+	}
+	ipResolver, err := NewClientIPResolver(cfg.Security.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
+	}
 	// 初始化 Redis 客户端
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Redis.Addr,
@@ -106,12 +123,14 @@ func NewServer(cfg *config.Config) (*Server, error) {
 			cfg.Security.ChatLimit.MaxPerMinute,
 			cfg.Security.ChatLimit.CooldownDuration(),
 		),
-		ipFilter: NewIPFilter(),
+		ipFilter:   NewIPFilter(),
+		ipResolver: ipResolver,
 		// 初始化连接控制
 		maxConnections:    cfg.Server.MaxConnections,
 		connectionLimiter: newConnectionLimiter(cfg.Server.MaxConnections),
 		commandCache:      newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL),
 	}
+	s.readinessCheck = func(ctx context.Context) error { return rdb.Ping(ctx).Err() }
 
 	// 初始化房间管理器
 	s.roomManager = room.NewRoomManager(s.redisStore, cfg.Game)
@@ -171,6 +190,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 聊天限制=%d/s, 最大连接数=%d",
 		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)
+	log.Printf("🔒 WebSocket Origin 白名单: %s", strings.Join(cfg.Security.AllowedOrigins, ", "))
 
 	return s, nil
 }

@@ -265,6 +265,8 @@ describe('observable command dispatch', () => {
     });
     render(<Lobby socket={socket} />);
 
+    expect(screen.queryByRole('button', { name: '退出并撤销本机会话' })).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: '离开房间' }));
     expect(useAppStore.getState().phase).toBe('waiting');
     expect(useAppStore.getState().roomCode).toBe('778899');

@@ -148,7 +148,7 @@ describe('GameSocket reconnect identity state machine', () => {
       request_id: requestId,
       reason: '协议版本不兼容',
       supported_protocol_version: '1',
-      min_client_version: 'v2.0.0'
+      min_client_version: ''
     }, { request_id: requestId }));
 
     expect(useAppStore.getState().error).toBe('协议版本不兼容');
@@ -235,7 +235,7 @@ describe('GameSocket reconnect identity state machine', () => {
   });
 
   it('keeps provisional credentials out of storage until reconnect succeeds', async () => {
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'old-player', token: 'old-token' }));
+    storeReconnect('old-player', 'old-token');
     useAppStore.setState({ playerId: 'old-player', reconnectToken: 'old-token' });
     const gameSocket = new GameSocket('ws://example.test/ws');
     gameSocket.connect();
@@ -269,7 +269,7 @@ describe('GameSocket reconnect identity state machine', () => {
   });
 
   it('can reconnect the same identity twice with successively rotated tokens', async () => {
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'player', token: 'token-1' }));
+    storeReconnect('player', 'token-1');
     const gameSocket = new GameSocket('ws://example.test/ws');
 
     gameSocket.connect();
@@ -301,7 +301,7 @@ describe('GameSocket reconnect identity state machine', () => {
   });
 
   it('StrictMode-style shutdown and reconnect preserves identity', () => {
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'player', token: 'token' }));
+    storeReconnect('player', 'token');
     const gameSocket = new GameSocket('ws://example.test/ws');
     gameSocket.connect();
     gameSocket.shutdown();
@@ -311,6 +311,54 @@ describe('GameSocket reconnect identity state machine', () => {
     expect(loadReconnect()).toEqual({ id: 'player', token: 'token' });
     expect(useAppStore.getState().connectionStatus).toBe('connecting');
     gameSocket.shutdown();
+  });
+
+  it('revokes the exact persisted credential before clearing a logout', async () => {
+    storeReconnect('logout-player', 'logout-token');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws');
+
+    await expect(gameSocket.logout()).resolves.toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledWith('/session/revoke', expect.objectContaining({
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+      body: JSON.stringify({ player_id: 'logout-player', token: 'logout-token' })
+    }));
+    expect(loadReconnect()).toBeNull();
+    expect(useAppStore.getState().connectionStatus).toBe('idle');
+  });
+
+  it('quiesces reconnect handlers before revoking so a late rotation cannot orphan a live token', async () => {
+    storeReconnect('logout-player', 'logout-token');
+    let resolveFetch: ((value: { ok: boolean }) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<{ ok: boolean }>((resolve) => {
+      resolveFetch = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws');
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'temporary', player_name: '临时玩家', reconnect_token: 'temporary-token'
+    }));
+
+    const logoutResult = gameSocket.logout();
+    expect(loadReconnect()).toBeNull();
+    socket.receive(encodeMessage(MsgType.Reconnected, {
+      player_id: 'logout-player', player_name: '玩家', room_code: '', reconnect_token: 'late-rotated-token'
+    }));
+    expect(loadReconnect()).toBeNull();
+
+    resolveFetch?.({ ok: true });
+    await expect(logoutResult).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('/session/revoke', expect.objectContaining({
+      body: JSON.stringify({ player_id: 'logout-player', token: 'logout-token' })
+    }));
+    expect(useAppStore.getState().reconnectToken).toBe('');
   });
 
   it('returns an explicit failure instead of silently dropping a command', () => {
@@ -594,4 +642,8 @@ function openAndNegotiate(socket: FakeWebSocket): void {
     client_kind: 'web'
   }, { request_id: hello.command?.request_id }));
   socket.sent = [];
+}
+
+function storeReconnect(id: string, token: string, expiresAt = Date.now() + 120_000): void {
+  localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token, expires_at: expiresAt }));
 }

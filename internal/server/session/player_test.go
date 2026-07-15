@@ -1,18 +1,25 @@
 package session
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
+type failingTokenReader struct{}
+
+func (failingTokenReader) Read([]byte) (int, error) {
+	return 0, errors.New("entropy unavailable")
+}
+
 func TestSessionManager_CRUD(t *testing.T) {
 	t.Parallel()
 	sm := NewSessionManager()
 
 	// Create
-	session := sm.CreateSession("p1", "Player1")
+	session := sm.MustCreateSession("p1", "Player1")
 	assert.NotNil(t, session)
 	assert.Equal(t, "p1", session.PlayerID)
 	assert.Equal(t, "Player1", session.PlayerName)
@@ -33,10 +40,88 @@ func TestSessionManager_CRUD(t *testing.T) {
 	assert.Nil(t, sm.GetSessionByToken(session.ReconnectToken))
 }
 
+func TestSessionManagerTokenGenerationFailureDoesNotCreateOrRotateSession(t *testing.T) {
+	t.Parallel()
+
+	t.Run("create", func(t *testing.T) {
+		sm := NewSessionManager()
+		sm.tokenReader = failingTokenReader{}
+		session, err := sm.CreateSession("p1", "Player1")
+		assert.Nil(t, session)
+		assert.ErrorIs(t, err, ErrTokenGeneration)
+		assert.Nil(t, sm.GetSession("p1"))
+	})
+
+	t.Run("rotate", func(t *testing.T) {
+		sm := NewSessionManager()
+		original := sm.MustCreateSession("p1", "Player1")
+		originalToken := original.ReconnectToken
+		sm.SetOffline("p1")
+		temporary := sm.MustCreateSession("temporary", "Temporary")
+		sm.tokenReader = failingTokenReader{}
+
+		restored, err := sm.RestoreSession(originalToken, "p1", "temporary")
+		assert.Nil(t, restored)
+		assert.ErrorIs(t, err, ErrTokenGeneration)
+		assert.Same(t, original, sm.GetSessionByToken(originalToken))
+		assert.Same(t, temporary, sm.GetSession("temporary"))
+	})
+}
+
+func TestSessionManagerRevokeRejectsStaleRotatedToken(t *testing.T) {
+	t.Parallel()
+	sm := NewSessionManager()
+	original := sm.MustCreateSession("p1", "Player1")
+	oldToken := original.ReconnectToken
+	sm.SetOffline("p1")
+	sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSession(oldToken, "p1", "temporary")
+	assert.NoError(t, err)
+
+	assert.False(t, sm.RevokeSession(oldToken, "p1"))
+	assert.NotNil(t, sm.GetSession("p1"))
+	assert.True(t, sm.RevokeSession(restored.ReconnectToken, "p1"))
+	assert.Nil(t, sm.GetSession("p1"))
+	assert.False(t, sm.CanReconnect(restored.ReconnectToken, "p1"))
+}
+
+func TestSessionManagerEnforcesCredentialTTLAndResetsItOnRotation(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	sm := NewSessionManager()
+	sm.now = func() time.Time { return now }
+	original := sm.MustCreateSession("p1", "Player1")
+	originalToken := original.ReconnectToken
+	assert.Equal(t, now.Add(reconnectCredentialTTL), original.ReconnectTokenExpiresAt)
+
+	// Browser-controlled localStorage metadata cannot extend the server deadline.
+	now = now.Add(reconnectCredentialTTL)
+	assert.False(t, sm.CanReconnect(originalToken, original.PlayerID))
+	assert.Nil(t, sm.GetSessionByToken(originalToken))
+	temporary := sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSession(originalToken, original.PlayerID, temporary.PlayerID)
+	assert.Nil(t, restored)
+	assert.ErrorIs(t, err, ErrReconnectExpired)
+	assert.Same(t, temporary, sm.GetSession(temporary.PlayerID))
+
+	// A credential used before its deadline is single-use and receives a fresh TTL.
+	now = now.Add(time.Second)
+	fresh := sm.MustCreateSession("p2", "Player2")
+	freshToken := fresh.ReconnectToken
+	sm.SetOffline(fresh.PlayerID)
+	provisional := sm.MustCreateSession("temporary-2", "Temporary 2")
+	now = now.Add(2 * time.Minute)
+	rotated, err := sm.RestoreSession(freshToken, fresh.PlayerID, provisional.PlayerID)
+	assert.NoError(t, err)
+	assert.Equal(t, now.Add(reconnectCredentialTTL), fresh.ReconnectTokenExpiresAt)
+	assert.True(t, sm.CanReconnect(rotated.ReconnectToken, fresh.PlayerID))
+}
+
 func TestSessionManager_OnlineStatus(t *testing.T) {
 	t.Parallel()
 	sm := NewSessionManager()
-	session := sm.CreateSession("p1", "Player1")
+	session := sm.MustCreateSession("p1", "Player1")
 
 	// Initial state: online
 	assert.True(t, session.IsOnline)
@@ -57,10 +142,10 @@ func TestSessionManager_RestoreSessionRotatesTokenAndDeletesTemporarySession(t *
 	t.Parallel()
 
 	sm := NewSessionManager()
-	original := sm.CreateSession("p1", "Player1")
+	original := sm.MustCreateSession("p1", "Player1")
 	sm.SetRoom("p1", "123456")
 	sm.SetOffline("p1")
-	temporary := sm.CreateSession("temporary", "Temporary")
+	temporary := sm.MustCreateSession("temporary", "Temporary")
 	originalToken := original.ReconnectToken
 	temporaryToken := temporary.ReconnectToken
 
@@ -82,12 +167,12 @@ func TestSessionManager_RestoreSessionRejectsExpiredTokenWithoutDeletingTemporar
 	t.Parallel()
 
 	sm := NewSessionManager()
-	original := sm.CreateSession("p1", "Player1")
+	original := sm.MustCreateSession("p1", "Player1")
 	sm.SetOffline("p1")
 	original.mu.Lock()
 	original.DisconnectedAt = time.Now().Add(-3 * time.Minute)
 	original.mu.Unlock()
-	temporary := sm.CreateSession("temporary", "Temporary")
+	temporary := sm.MustCreateSession("temporary", "Temporary")
 
 	restored, err := sm.RestoreSession(original.ReconnectToken, "p1", "temporary")
 	assert.Nil(t, restored)
@@ -100,10 +185,10 @@ func TestSessionManager_RestoreSessionConsumesTokenOnce(t *testing.T) {
 	t.Parallel()
 
 	sm := NewSessionManager()
-	original := sm.CreateSession("p1", "Player1")
+	original := sm.MustCreateSession("p1", "Player1")
 	sm.SetOffline("p1")
-	sm.CreateSession("temporary-1", "Temporary 1")
-	sm.CreateSession("temporary-2", "Temporary 2")
+	sm.MustCreateSession("temporary-1", "Temporary 1")
+	sm.MustCreateSession("temporary-2", "Temporary 2")
 	originalToken := original.ReconnectToken
 
 	results := make(chan error, 2)
@@ -133,14 +218,14 @@ func TestSessionManager_RestoreSessionSupportsConsecutiveReconnects(t *testing.T
 	t.Parallel()
 
 	sm := NewSessionManager()
-	original := sm.CreateSession("p1", "Player1")
+	original := sm.MustCreateSession("p1", "Player1")
 	sm.SetOffline("p1")
-	sm.CreateSession("temporary-1", "Temporary 1")
+	sm.MustCreateSession("temporary-1", "Temporary 1")
 
 	first, err := sm.RestoreSession(original.ReconnectToken, "p1", "temporary-1")
 	assert.NoError(t, err)
 	sm.SetOffline("p1")
-	sm.CreateSession("temporary-2", "Temporary 2")
+	sm.MustCreateSession("temporary-2", "Temporary 2")
 
 	second, err := sm.RestoreSession(first.ReconnectToken, "p1", "temporary-2")
 	assert.NoError(t, err)
@@ -154,13 +239,13 @@ func TestSessionManager_RollbackRestoreMakesOriginalTokenRetryable(t *testing.T)
 	t.Parallel()
 
 	sm := NewSessionManager()
-	original := sm.CreateSession("p1", "Player1")
+	original := sm.MustCreateSession("p1", "Player1")
 	sm.SetOffline("p1")
 	original.mu.RLock()
 	disconnectedAt := original.DisconnectedAt
 	originalToken := original.ReconnectToken
 	original.mu.RUnlock()
-	sm.CreateSession("temporary-1", "Temporary 1")
+	sm.MustCreateSession("temporary-1", "Temporary 1")
 
 	restored, err := sm.RestoreSession(originalToken, "p1", "temporary-1")
 	assert.NoError(t, err)
@@ -174,7 +259,7 @@ func TestSessionManager_RollbackRestoreMakesOriginalTokenRetryable(t *testing.T)
 	assert.Nil(t, sm.GetSessionByToken(restored.ReconnectToken))
 	assert.Same(t, rolledBack, sm.GetSessionByToken(originalToken))
 
-	sm.CreateSession("temporary-2", "Temporary 2")
+	sm.MustCreateSession("temporary-2", "Temporary 2")
 	retried, err := sm.RestoreSession(originalToken, "p1", "temporary-2")
 	assert.NoError(t, err)
 	assert.NotEqual(t, originalToken, retried.ReconnectToken)
@@ -191,7 +276,7 @@ func TestSessionManager_CanReconnect(t *testing.T) {
 		{
 			name: "valid reconnection (online)",
 			setup: func(sm *SessionManager) (string, string) {
-				session := sm.CreateSession("p1", "Player1")
+				session := sm.MustCreateSession("p1", "Player1")
 				return session.ReconnectToken, "p1"
 			},
 			wantAllow: true,
@@ -199,7 +284,7 @@ func TestSessionManager_CanReconnect(t *testing.T) {
 		{
 			name: "valid reconnection (offline)",
 			setup: func(sm *SessionManager) (string, string) {
-				session := sm.CreateSession("p1", "Player1")
+				session := sm.MustCreateSession("p1", "Player1")
 				sm.SetOffline("p1")
 				return session.ReconnectToken, "p1"
 			},
@@ -208,7 +293,7 @@ func TestSessionManager_CanReconnect(t *testing.T) {
 		{
 			name: "invalid token",
 			setup: func(sm *SessionManager) (string, string) {
-				sm.CreateSession("p1", "Player1")
+				sm.MustCreateSession("p1", "Player1")
 				return "wrong-token", "p1"
 			},
 			wantAllow: false,
@@ -216,7 +301,7 @@ func TestSessionManager_CanReconnect(t *testing.T) {
 		{
 			name: "wrong player ID",
 			setup: func(sm *SessionManager) (string, string) {
-				session := sm.CreateSession("p1", "Player1")
+				session := sm.MustCreateSession("p1", "Player1")
 				return session.ReconnectToken, "p2"
 			},
 			wantAllow: false,
@@ -224,7 +309,7 @@ func TestSessionManager_CanReconnect(t *testing.T) {
 		{
 			name: "expired session",
 			setup: func(sm *SessionManager) (string, string) {
-				session := sm.CreateSession("p1", "Player1")
+				session := sm.MustCreateSession("p1", "Player1")
 				sm.SetOffline("p1")
 				// Hack internal time for testing
 				session.mu.Lock()
@@ -265,7 +350,7 @@ func TestSessionManager_SetRoom(t *testing.T) {
 			t.Parallel()
 			sm := NewSessionManager()
 			if tt.shouldCreate {
-				sm.CreateSession("p1", "Player1")
+				sm.MustCreateSession("p1", "Player1")
 			}
 
 			sm.SetRoom(tt.playerID, tt.roomCode)
@@ -290,7 +375,7 @@ func TestSessionManager_IsOnline(t *testing.T) {
 		{
 			name: "online player",
 			setup: func(sm *SessionManager) {
-				sm.CreateSession("p1", "Player1")
+				sm.MustCreateSession("p1", "Player1")
 			},
 			playerID:   "p1",
 			wantOnline: true,
@@ -298,7 +383,7 @@ func TestSessionManager_IsOnline(t *testing.T) {
 		{
 			name: "offline player",
 			setup: func(sm *SessionManager) {
-				sm.CreateSession("p1", "Player1")
+				sm.MustCreateSession("p1", "Player1")
 				sm.SetOffline("p1")
 			},
 			playerID:   "p1",
@@ -328,14 +413,14 @@ func TestSessionManager_GetSessionByToken_EdgeCases(t *testing.T) {
 	t.Run("invalid token returns nil", func(t *testing.T) {
 		t.Parallel()
 		sm := NewSessionManager()
-		sm.CreateSession("p1", "Player1")
+		sm.MustCreateSession("p1", "Player1")
 		assert.Nil(t, sm.GetSessionByToken("invalid-token"))
 	})
 
 	t.Run("empty token returns nil", func(t *testing.T) {
 		t.Parallel()
 		sm := NewSessionManager()
-		sm.CreateSession("p1", "Player1")
+		sm.MustCreateSession("p1", "Player1")
 		assert.Nil(t, sm.GetSessionByToken(""))
 	})
 }

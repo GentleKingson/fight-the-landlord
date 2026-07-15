@@ -19,6 +19,19 @@ export function Lobby({ socket }: LobbyProps) {
   const pendingQuickMatch = useAppStore((state) => state.pendingCommands['quick-match']);
   const pendingPracticeMatch = useAppStore((state) => state.pendingCommands['practice-match']);
   const showingMatch = phase === 'matching' || Boolean(pendingQuickMatch || pendingPracticeMatch);
+  const canLogout = phase === 'lobby' && roomCode === '' && !showingMatch;
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function logout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    const revoked = await socket.logout();
+    if (revoked) {
+      window.location.reload();
+      return;
+    }
+    setLoggingOut(false);
+  }
 
   return (
     <main className="lobby-screen">
@@ -30,9 +43,24 @@ export function Lobby({ socket }: LobbyProps) {
             <p>{playerName ? `${playerName}，准备开局` : '轻量牌桌，快速开局'}</p>
           </div>
         </div>
-        <div className="lobby-status">
-          <span className="status-dot" />
-          在线 {onlineCount || 0}
+        <div className="lobby-header__actions">
+          <div className="lobby-status">
+            <span className="status-dot" />
+            在线 {onlineCount || 0}
+          </div>
+          {canLogout ? (
+            <button
+              className="logout-action"
+              type="button"
+              disabled={loggingOut}
+              onClick={() => { void logout(); }}
+              aria-label="退出并撤销本机会话"
+              title="退出并撤销本机会话"
+            >
+              <Icon name="logout" />
+              <span>{loggingOut ? '退出中...' : '退出'}</span>
+            </button>
+          ) : null}
         </div>
       </header>
 

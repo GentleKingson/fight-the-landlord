@@ -15,6 +15,7 @@ import (
 // 默认配置值
 const (
 	defaultHost                  = "0.0.0.0"
+	defaultEnvironment           = "development"
 	defaultPort                  = 1780
 	defaultMaxConnections        = 10000
 	defaultRedisAddr             = "localhost:6379"
@@ -55,6 +56,7 @@ type BotConfig struct {
 
 // ServerConfig WebSocket 服务器配置
 type ServerConfig struct {
+	Environment    string `yaml:"environment"`
 	Host           string `yaml:"host"`
 	Port           int    `yaml:"port"`
 	MaxConnections int    `yaml:"max_connections"` // 最大并发连接数，0 表示无限制
@@ -83,10 +85,11 @@ type GameConfig struct {
 
 // SecurityConfig 安全配置
 type SecurityConfig struct {
-	AllowedOrigins []string           `yaml:"allowed_origins"` // 允许的来源
-	RateLimit      RateLimitConfig    `yaml:"rate_limit"`      // 连接速率限制
-	MessageLimit   MessageLimitConfig `yaml:"message_limit"`   // 消息速率限制
-	ChatLimit      ChatLimitConfig    `yaml:"chat_limit"`      // 聊天消息速率限制
+	AllowedOrigins    []string           `yaml:"allowed_origins"`     // 允许的来源
+	TrustedProxyCIDRs []string           `yaml:"trusted_proxy_cidrs"` // 允许提供转发 IP 头的代理网段
+	RateLimit         RateLimitConfig    `yaml:"rate_limit"`          // 连接速率限制
+	MessageLimit      MessageLimitConfig `yaml:"message_limit"`       // 消息速率限制
+	ChatLimit         ChatLimitConfig    `yaml:"chat_limit"`          // 聊天消息速率限制
 }
 
 // RateLimitConfig 连接速率限制配置
@@ -220,6 +223,7 @@ func getEnvBool(key string, target *bool) {
 // loadFromEnv 从环境变量加载配置（覆盖文件配置）
 func loadFromEnv(cfg *Config) {
 	// Server
+	getEnvStr("SERVER_ENV", &cfg.Server.Environment)
 	getEnvStr("SERVER_HOST", &cfg.Server.Host)
 	getEnvInt("SERVER_PORT", &cfg.Server.Port)
 	getEnvInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
@@ -247,6 +251,7 @@ func loadFromEnv(cfg *Config) {
 
 	// Security
 	getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins)
+	getEnvStrSlice("SECURITY_TRUSTED_PROXY_CIDRS", &cfg.Security.TrustedProxyCIDRs)
 	getEnvInt("SECURITY_RATE_LIMIT_PER_SECOND", &cfg.Security.RateLimit.MaxPerSecond)
 	getEnvInt("SECURITY_MESSAGE_LIMIT_PER_SECOND", &cfg.Security.MessageLimit.MaxPerSecond)
 }
@@ -274,6 +279,7 @@ func setDefaultStrSlice(target *[]string, defaultVal []string) {
 // setDefaults 设置默认值
 func setDefaults(cfg *Config) {
 	// Server
+	setDefaultStr(&cfg.Server.Environment, defaultEnvironment)
 	setDefaultStr(&cfg.Server.Host, defaultHost)
 	setDefaultInt(&cfg.Server.Port, defaultPort)
 

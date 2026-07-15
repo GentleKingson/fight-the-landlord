@@ -1,5 +1,5 @@
 interface IconProps {
-  name: 'play' | 'room' | 'bot' | 'rank' | 'stats' | 'chat' | 'counter' | 'history' | 'rules' | 'close';
+  name: 'play' | 'room' | 'bot' | 'rank' | 'stats' | 'chat' | 'counter' | 'history' | 'rules' | 'close' | 'logout';
 }
 
 export function Icon({ name }: IconProps) {
@@ -21,5 +21,6 @@ const icons: Record<IconProps['name'], string> = {
   counter: 'M4 4h16v16H4V4Zm3 3v3h3V7H7Zm0 5v5h3v-5H7Zm5-5v3h5V7h-5Zm0 5v5h5v-5h-5Z',
   history: 'M12 5a7 7 0 1 1-6.3 4H3l3.5-4L10 9H7.9A5 5 0 1 0 12 7v5l4 2-.9 1.8-5.1-2.6V5h2Z',
   rules: 'M5 4h14v16H5V4Zm3 4h8V6H8v2Zm0 4h8v-2H8v2Zm0 4h5v-2H8v2Z',
-  close: 'm6 7.4 1.4-1.4 4.6 4.6L16.6 6 18 7.4 13.4 12l4.6 4.6-1.4 1.4-4.6-4.6L7.4 18 6 16.6l4.6-4.6L6 7.4Z'
+  close: 'm6 7.4 1.4-1.4 4.6 4.6L16.6 6 18 7.4 13.4 12l4.6 4.6-1.4 1.4-4.6-4.6L7.4 18 6 16.6l4.6-4.6L6 7.4Z',
+  logout: 'M4 3h9v2H6v14h7v2H4V3Zm11.6 4.4L20.2 12l-4.6 4.6-1.4-1.4 2.2-2.2H9v-2h7.4l-2.2-2.2 1.4-1.4Z'
 };

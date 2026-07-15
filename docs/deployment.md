@@ -6,7 +6,8 @@
 
 ## 构建镜像
 
-Dockerfile 默认使用公开的官方 Go/Node 构建镜像和 distroless 运行镜像：
+Dockerfile 默认使用按多架构 manifest digest 固定的官方 Go/Node 构建镜像和
+distroless 运行镜像：
 
 ```bash
 docker build \
@@ -15,8 +16,9 @@ docker build \
   .
 ```
 
-需要使用企业镜像仓库时，可以通过 `GO_REGISTRY`、`GO_VARIANT` 和
-`RUNTIME_IMAGE` build args 覆盖这些基础镜像。
+需要使用企业镜像仓库时，可以通过 `GO_REGISTRY`、`GO_VARIANT`、
+`GO_DIGEST`、`NODE_DIGEST` 和 `RUNTIME_IMAGE` build args 覆盖这些基础镜像。
+标签和 digest 必须作为一组更新，避免标签变化后悄悄改变构建输入。
 
 `VERSION` 同时写入服务端、嵌入的 HTML 和 `/version` 响应。生产发布应使用
 不可变的语义化版本标签，不要把 `dev` 镜像用于兼容性门禁。
@@ -25,6 +27,8 @@ docker build \
 
 ```bash
 cp .env.example .env
+# 示例仅用于交互式部署；自动化部署应由 secret manager 注入同名环境变量。
+read -rsp "Redis password: " REDIS_PASSWORD && export REDIS_PASSWORD
 docker compose config --quiet
 docker compose pull
 docker compose up -d
@@ -34,6 +38,22 @@ docker compose ps --all
 默认使用内置启发式机器人，不启动 DouZero。需要神经网络推理服务时设置
 `DOUZERO_ENABLED=true`，并用 `docker compose --profile douzero up -d` 启动。
 不指定该 profile 时，`docker compose up -d` 只启动 Go 服务和 Redis。
+
+`REDIS_PASSWORD` 是必填部署 secret。Compose 将它作为 secret 文件挂载给
+Redis，并仅通过进程环境交给 Go 服务；不要把真实值写入 `.env`、镜像、
+Compose 文件或仓库。Redis 默认没有任何宿主机端口映射，只能从内部
+`poker-network` 访问。
+
+排查本机 Redis 时可临时启用明确的非生产 profile：
+
+```bash
+docker compose --profile redis-debug up -d redis-debug
+REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 127.0.0.1 -p 6379 ping
+docker compose --profile redis-debug rm -sf redis-debug
+```
+
+该代理只绑定 `127.0.0.1`，但仍然不得在生产环境启用。需要更换本机端口时
+设置 `REDIS_DEBUG_PORT`。
 
 默认访问地址为 `http://localhost:1780/`。修改 `.env` 中的 `SERVER_PORT`
 只改变宿主机公开端口，容器内部始终监听 1780。
@@ -49,6 +69,14 @@ SERVER_MIN_CLIENT_VERSION=v1.2.0
 
 多个来源使用逗号分隔。WebSocket 的 `Origin` 值仍是 `https://...`，不是
 `wss://...`。不要在互联网部署中使用 `*`。
+
+只有反向代理所在网段才应加入 `SECURITY_TRUSTED_PROXY_CIDRS`。留空时服务
+忽略 `X-Forwarded-For` 和 `X-Real-IP`，直接使用连接的 `RemoteAddr`。
+
+Web 客户端的重连凭证仍保存在 `localStorage`，因此服务端强制 10 分钟
+凭证 TTL，每次成功重连都立即旋转。大厅的退出操作会先停止重连、
+调用 `/session/revoke` 撤销当前凭证，再建立新身份。浏览器中的过期时间
+只是提前清理提示，无法延长服务端截止时间。
 
 ## TLS 和反向代理
 
@@ -129,3 +157,7 @@ docker compose --profile douzero up -d
 
 抬高 `SERVER_MIN_CLIENT_VERSION` 会阻止旧客户端继续进入牌局。先发布兼容的
 新 Web 资源，再提高最低版本；回滚服务端时也要同步检查该值。
+
+标签发布工作流使用 BuildKit 为两个镜像生成最大模式 provenance 和 SBOM，
+随后使用 GitHub OIDC 身份通过 cosign 对具体 digest 做无密钥签名。部署系统
+应校验签名主体和仓库工作流身份，而不是只信任可变标签。

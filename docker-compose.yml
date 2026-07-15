@@ -11,8 +11,10 @@ services:
       # SERVER_PORT in .env is the published host port. The container always
       # listens on 1780 so changing the host port cannot break the mapping.
       SERVER_PORT: 1780
+      SERVER_ENV: ${SERVER_ENV:-production}
       SERVER_MIN_CLIENT_VERSION: ${SERVER_MIN_CLIENT_VERSION:-}
       SECURITY_ALLOWED_ORIGINS: ${SECURITY_ALLOWED_ORIGINS:-http://localhost:1780,http://127.0.0.1:1780}
+      SECURITY_TRUSTED_PROXY_CIDRS: ${SECURITY_TRUSTED_PROXY_CIDRS:-}
       REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
@@ -57,21 +59,57 @@ services:
 
   # Redis 数据库
   redis:
-    image: redis:8-alpine
+    image: ${REDIS_IMAGE:-redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005}
     restart: unless-stopped
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    secrets:
+      - redis_password
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    command:
+      - sh
+      - -ec
+      - |
+        password="$$(cat /run/secrets/redis_password)"
+        if [ -z "$$password" ]; then
+          echo >&2 "REDIS_PASSWORD must be provided by the deployment secret manager"
+          exit 1
+        fi
+        password_hash="$$(printf '%s' "$$password" | sha256sum)"
+        password_hash="$${password_hash%% *}"
+        umask 077
+        printf 'user default on #%s ~* &* +@all\n' "$$password_hash" > /tmp/users.acl
+        chown redis:redis /tmp/users.acl
+        exec /usr/local/bin/docker-entrypoint.sh redis-server --appendonly yes --aclfile /tmp/users.acl
     networks:
       - poker-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  # LOCAL DEBUG ONLY. This loopback proxy must never be enabled in production.
+  redis-debug:
+    image: ${REDIS_DEBUG_IMAGE:-alpine/socat:1.8.0.3@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e}
+    profiles: ["redis-debug"]
+    restart: "no"
+    user: "65534:65534"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["tcp-listen:6379,fork,reuseaddr", "tcp-connect:redis:6379"]
+    ports:
+      - "127.0.0.1:${REDIS_DEBUG_PORT:-6379}:6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - poker-network
+    labels:
+      io.palemoky.fight-the-landlord.purpose: "LOCAL DEBUG ONLY - DO NOT USE IN PRODUCTION"
 
 networks:
   poker-network:
@@ -80,3 +118,9 @@ networks:
 volumes:
   redis-data:
     driver: local
+
+secrets:
+  # Compose receives the value from the process environment. Keep it out of
+  # .env files in production and inject it through the deployment secret store.
+  redis_password:
+    environment: REDIS_PASSWORD

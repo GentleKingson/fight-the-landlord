@@ -32,6 +32,31 @@
   color: var(--text-light);
 }
 
+.lobby-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logout-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: var(--radius-sm);
+  color: var(--text-light);
+  background: rgba(16, 36, 31, .52);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.logout-action:disabled {
+  opacity: .5;
+}
+
 .brand-lockup {
   display: flex;
   align-items: center;
@@ -458,6 +483,17 @@
   .bottom-nav button {
     min-height: 44px;
     font-size: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .logout-action {
+    width: 36px;
+    padding: 0;
+  }
+
+  .logout-action span {
+    display: none;
   }
 }
 

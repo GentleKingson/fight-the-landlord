@@ -64,7 +64,7 @@ func TestClient_SetRoomSynchronizesPlayerSession(t *testing.T) {
 	sessionManager := session.NewSessionManager()
 	server := &Server{sessionManager: sessionManager}
 	client := NewClient(server, nil)
-	playerSession := sessionManager.CreateSession(client.GetID(), client.GetName())
+	playerSession := sessionManager.MustCreateSession(client.GetID(), client.GetName())
 
 	client.SetRoom("123456")
 	assert.Equal(t, "123456", playerSession.RoomCode)
@@ -216,14 +216,14 @@ func TestClient_StaleDisconnectDoesNotClobberReboundConnection(t *testing.T) {
 	previous := NewClient(server, nil)
 	previous.rebindIdentity("restored-id", "Restored Player", "")
 	server.registerClient(previous)
-	restoredSession := sessionManager.CreateSession(previous.GetID(), previous.GetName())
+	restoredSession := sessionManager.MustCreateSession(previous.GetID(), previous.GetName())
 	gameRoom, err := roomManager.CreateRoom(previous)
 	require.NoError(t, err)
 
 	rebound := NewClient(server, nil)
 	temporaryID := rebound.GetID()
 	server.registerClient(rebound)
-	sessionManager.CreateSession(temporaryID, rebound.GetName())
+	sessionManager.MustCreateSession(temporaryID, rebound.GetName())
 	sessionManager.SetOffline(previous.GetID())
 	restored, err := sessionManager.RestoreSession(restoredSession.ReconnectToken, previous.GetID(), temporaryID)
 	require.NoError(t, err)
@@ -300,7 +300,7 @@ func TestClient_StaleLeaveDoesNotClobberReboundSessionRoom(t *testing.T) {
 	server := &Server{sessionManager: sessionManager, roomManager: roomManager}
 	previous := NewClient(server, nil)
 	previous.rebindIdentity("restored-id", "Restored Player", "")
-	playerSession := sessionManager.CreateSession(previous.GetID(), previous.GetName())
+	playerSession := sessionManager.MustCreateSession(previous.GetID(), previous.GetName())
 	firstRoom, err := roomManager.CreateRoom(previous)
 	require.NoError(t, err)
 
