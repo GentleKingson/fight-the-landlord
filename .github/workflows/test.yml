@@ -2,7 +2,7 @@ name: Test
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/web-client-remediation-followup]
   pull_request:
     branches: [main]
   workflow_dispatch:
