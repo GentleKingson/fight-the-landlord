@@ -6,7 +6,7 @@
 
 修复分支：`codex/web-client-remediation-followup`
 
-最终实现验证提交：`6731bb3`
+最终实现验证提交：`e2bc4c5`
 
 本报告不沿用旧 `final-review.md` 的通过结论。Phase 0 的原始基线记录在
 `followup-baseline.md`；以下状态来自本分支实现、定向测试和 2026-07-15
@@ -34,6 +34,11 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 幂等重放测试均已通过；临时分支 CI trigger、Actions 版本回退和根目录审计报告也已
 同步清理。
 
+合并前复核又发现重连凭证采用连接建立后绝对 10 分钟 TTL，导致正常长局在第 10
+分钟后失去重连能力。`e2bc4c5` 改为在线期间不按墙钟淘汰凭证，只有物理连接实际
+断开时才开启完整两分钟恢复窗口；成功恢复仍原子消费并轮换 token，显式退出仍立即
+撤销。Web 不再用本地绝对时间抢先删除服务端凭证，而把有效性判定交给服务端。
+
 ## 问题状态
 
 | ID | 状态 | 实现与测试证据 |
@@ -50,7 +55,7 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 | P1-03 request ID 和幂等 | 完成 | 所有命令 dispatcher 统一带 `request_id`；叫地主、出牌和不出额外带 `expected_game_id`/`expected_turn_id`；ack/error 关联；服务端 TTL/容量有界缓存复用首次结果并拒绝冲突重放。 |
 | P1-04 匹配权威超时 | 完成 | 服务端 deadline/context 独立于浏览器计时；冻结客户端、主动取消、断线、inflight deadline 和 shutdown 均回滚。 |
 | P1-05 trusted proxy / Origin | 完成 | 只有配置 CIDR 内的代理来源可提供转发 IP；生产拒绝 `*`；最终镜像同源 Upgrade=101、异源=403。 |
-| P1-06 Web 会话和安全头 | 完成（受控 localStorage 方案） | Web 重连凭证仍保存在 `localStorage`，但服务端强制 10 分钟 TTL、成功重连即单次消费并轮换，退出调用 `/session/revoke`；CSP、nosniff、referrer、permissions、DENY/frame-ancestors 在最终镜像验证。 |
+| P1-06 Web 会话和安全头 | 完成（受控 localStorage 方案） | Web 重连凭证仍保存在 `localStorage`；在线凭证由服务端持有，物理断线时才开启两分钟恢复窗口，成功重连单次消费并轮换，退出调用 `/session/revoke`；CSP、nosniff、referrer、permissions、DENY/frame-ancestors 在最终镜像验证。 |
 | P1-07 GameSession 注销 | 完成 | Room removal exact-once 通知 Handler；games、timer、Redis、Bot 和 Matcher 关联统一退休；并发删除和长期循环不持续增长。 |
 | P1-08 配置验证 | 完成 | `Config.Validate()` 覆盖端口、连接、timeout、Redis、URL、semver、Origin、proxy CIDR、rate limit；非法 env 返回错误，生产启动不回退。 |
 | P1-09 生产镜像 E2E | 完成 | 最终 Docker 镜像直接由 Compose 启动，无 Vite/`go run`；Chromium 完整部署/故障/两局流程，Firefox/WebKit 真实连接和选牌；本地和远端均 11/11。 |
@@ -83,6 +88,7 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 | 8：旧 CI 运行 Vite/`go run`，curl 冒烟不能证明发布镜像浏览器和故障路径 | production Playwright 配置、deployment/full-game/fault/cross-browser specs、`production-e2e` job、race/coverage/trace/video/log/SBOM artifacts。初始脚本不存在和旧服务断言先失败。 | 本地最终镜像 11/11；15 screenshots、9 traces、17 videos；远端完整 job 和严格 Compose cleanup 通过。 | `c6157f0` |
 | 8 远端门禁：workflow 未登记，存量 Go lint 阻塞 race，旧 setup-protoc 不兼容 Node 24 | 修复分支 push 触发与手动运行；消除 93 个 lint 问题而不隐藏错误；恢复 `"cancelled"` wire 兼容；改为 SHA-256 校验的 protoc 3.13.0 官方资产。 | `golangci-lint` 0 issues；全量 race 与生产 E2E 复测通过；手动运行 `29413404382` 全绿。 | `5e55079`, `6ad793d`, `11267bc` |
 | 9 独立审查：重连失败消费 token；广播按类型误入命令缓存 | Room/client/session 三层 rollback；显式 command-result/event sender；发起者专属 Chat/Ready/game event 关联；并发缓存回放和原 token 重试测试；CI/审计文件清理。 | 定向 Go 包、golangci-lint、Web 全门禁、mock E2E、最终镜像 11/11 和 actionlint 通过。 | `6731bb3` |
+| 10 合并复核：在线会话仍受绝对 10 分钟重连 TTL 限制 | 在线凭证不按墙钟失效；实际断线时设置完整两分钟 deadline；重复离线信号不能延长窗口；Web 不再按本地时间删除凭证。 | 注入时钟覆盖在线 24 小时、旧 TTL 前十秒断线、完整窗口、失败保留旧 token 和并发单次消费；全量 Go race、Web 244/244、mock E2E 通过。 | `e2bc4c5` |
 
 ## 提交清单
 
@@ -101,6 +107,7 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 | `6ad793d` | `fix(ci): satisfy the full Go quality gate` |
 | `11267bc` | `fix(ci): install a pinned protoc toolchain` |
 | `6731bb3` | `fix(server): close post-audit merge blockers` |
+| `e2bc4c5` | `fix(session): preserve reconnect window for long sessions` |
 
 ### 独立审查后的本地复测
 
@@ -115,6 +122,16 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 | `docker build --build-arg VERSION=ci --tag fight-the-landlord:ci .` | 通过；manifest list `sha256:bdab6b6728471e05e13313ff6d1c81c0cf51aa729f44a3428f703743bce385f8`。 |
 | 最终镜像 `playwright test --config playwright.production.config.ts` | 11/11 通过（2.4m）；Chromium 部署/故障/双牌局，Firefox/WebKit 真实连接与选牌均通过。 |
 | `docker compose ... down --timeout 90 --volumes --remove-orphans` | 通过；测试 server、Redis、network 和 volume 全部删除。 |
+
+### 长连接重连修复复测
+
+| 实际执行命令 | 结果 |
+| --- | --- |
+| `go test -race ./internal/server/session ./internal/server/handler -count=1`（Go 1.26 容器） | 全部通过；覆盖在线 24 小时、旧 TTL 前十秒断线仍获得完整两分钟窗口、重复离线不续期、轮换失败保留旧 token 及并发单次消费。 |
+| `go test -tags=ci -race -p 4 -count=1 ./...`（Go 1.26 容器） | 全部通过，无 race 或失败。 |
+| `golangci-lint run --build-tags=ci`（v2.11.1 容器） | `0 issues.` |
+| Web `proto:check`、typecheck、ESLint、Vitest、benchmark、Vite build | 全部通过；18 files、244/244 tests；规则枚举和 Hint p99 分别为 10.9315ms、11.9142ms。 |
+| `playwright test` | 15/15 通过；desktop、mobile portrait、mobile landscape 均通过。 |
 
 ## 最终实际命令与关键原始输出
 
@@ -249,8 +266,8 @@ transport。
    failover 和高连接数 soak；容量上限仍需按生产硬件压测。
 3. 外部 DouZero profile、模型拉取和推理服务没有进入最终 E2E；本次明确禁用它以
    验证核心服务不依赖可选组件。
-4. Web 重连凭证仍在 `localStorage`，因此同源 JavaScript 在 TTL 内可读取；
-   当前用严格 CSP、10 分钟服务端 TTL、单次消费/轮换和显式撤销降低风险，
+4. Web 重连凭证仍在 `localStorage`，因此同源 JavaScript 在会话期间可读取；
+   当前用严格 CSP、断线后两分钟有效期、单次消费/轮换和显式撤销降低风险，
    但未达到 HttpOnly cookie 对凭证脚本可见性的隔离程度。
 5. Playwright 在本机输出宿主 `NO_COLOR` 与 `FORCE_COLOR` 同时存在的 Node warning；
    这不是 TypeScript、Go、ESLint 或生成文件 warning。基线 `npm ci` 的间接依赖
