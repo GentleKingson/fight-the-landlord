@@ -15,7 +15,7 @@ func (h *Handler) handleGetStats(client types.ClientInterface) {
 	ctx := context.Background()
 	playerStats, err := h.leaderboard.GetPlayerStats(ctx, client.GetID())
 	if err != nil {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "获取统计失败"))
+		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "获取统计失败", protocol.MsgGetStats))
 		return
 	}
 
@@ -76,7 +76,7 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 
 	entries, err := h.leaderboard.GetLeaderboard(context.Background(), payload.Limit)
 	if err != nil {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "获取排行榜失败"))
+		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "获取排行榜失败", protocol.MsgGetLeaderboard))
 		return
 	}
 

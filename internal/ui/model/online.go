@@ -67,14 +67,14 @@ type OnlineModel struct {
 }
 
 // NewOnlineModel creates a new OnlineModel.
-func NewOnlineModel(serverURL string) *OnlineModel {
+func NewOnlineModel(serverURL string, clientVersions ...string) *OnlineModel {
 	ti := textinput.New()
 	ti.Placeholder = "输入选项 (1-7) 或房间号"
 	ti.CharLimit = 20
 	ti.SetWidth(30)
 	ti.Focus()
 
-	c := transport.NewClient(serverURL)
+	c := transport.NewClient(serverURL, clientVersions...)
 	reconnectChan := make(chan tea.Msg, 10)
 
 	m := &OnlineModel{

@@ -58,6 +58,13 @@ func Encode(m *protocol.Message) ([]byte, error) {
 			TurnDeadlineMs: m.Event.TurnDeadlineMS,
 		}
 	}
+	if m.Command != nil {
+		pbMsg.Command = &pb.CommandMeta{
+			RequestId:      m.Command.RequestID,
+			ExpectedGameId: m.Command.ExpectedGameID,
+			ExpectedTurnId: m.Command.ExpectedTurnID,
+		}
+	}
 
 	return proto.Marshal(pbMsg)
 }
@@ -92,6 +99,13 @@ func Decode(data []byte) (*protocol.Message, error) {
 			TurnDeadlineMS: pbMsg.Event.TurnDeadlineMs,
 		}
 	}
+	if pbMsg.Command != nil {
+		msg.Command = &protocol.CommandMeta{
+			RequestID:      pbMsg.Command.RequestId,
+			ExpectedGameID: pbMsg.Command.ExpectedGameId,
+			ExpectedTurnID: pbMsg.Command.ExpectedTurnId,
+		}
+	}
 
 	return msg, nil
 }
@@ -103,6 +117,31 @@ func ParsePayload[T any](msg *protocol.Message) (*T, error) {
 		return nil, err
 	}
 	return &payload, nil
+}
+
+// ParseChatPayload also accepts the legacy JSON Chat payload embedded in a
+// protobuf Message envelope. The bool reports whether that fallback was used.
+func ParseChatPayload(msg *protocol.Message) (*protocol.ChatPayload, bool, error) {
+	var payload protocol.ChatPayload
+	legacy, err := payloadconv.DecodeChatPayload(msg.Payload, &payload)
+	return &payload, legacy, err
+}
+
+// CloneMessage returns an immutable copy suitable for replay caches.
+func CloneMessage(msg *protocol.Message) *protocol.Message {
+	if msg == nil {
+		return nil
+	}
+	clone := &protocol.Message{Type: msg.Type, Payload: append([]byte(nil), msg.Payload...)}
+	if msg.Event != nil {
+		event := *msg.Event
+		clone.Event = &event
+	}
+	if msg.Command != nil {
+		command := *msg.Command
+		clone.Command = &command
+	}
+	return clone
 }
 
 // NewErrorMessage 创建错误消息
@@ -140,5 +179,44 @@ func NewCommandErrorMessageWithText(code int, text string, command protocol.Mess
 		Message:     text,
 		CommandType: command,
 	})
+	return msg
+}
+
+// CorrelateError copies an Error and attaches the command request identity to
+// both the envelope and payload without mutating a shared/broadcast message.
+func CorrelateError(msg *protocol.Message, requestID string, command protocol.MessageType) *protocol.Message {
+	if msg == nil || msg.Type != protocol.MsgError {
+		return CloneMessage(msg)
+	}
+	var payload protocol.ErrorPayload
+	if err := payloadconv.DecodePayload(msg.Type, msg.Payload, &payload); err != nil {
+		return CloneMessage(msg)
+	}
+	if payload.CommandType == "" {
+		payload.CommandType = command
+	}
+	payload.RequestID = requestID
+	correlated := MustNewMessage(protocol.MsgError, payload)
+	correlated.Event = msg.Event
+	correlated.Command = &protocol.CommandMeta{RequestID: requestID}
+	return correlated
+}
+
+func NewCommandAckMessage(requestID string, command protocol.MessageType) *protocol.Message {
+	msg := MustNewMessage(protocol.MsgCommandAck, protocol.CommandAckPayload{
+		RequestID: requestID, CommandType: command,
+	})
+	msg.Command = &protocol.CommandMeta{RequestID: requestID}
+	return msg
+}
+
+func NewCorrelatedCommandErrorMessage(code int, text, requestID string, command protocol.MessageType) *protocol.Message {
+	if text == "" {
+		text = protocol.ErrorMessages[code]
+	}
+	msg := MustNewMessage(protocol.MsgError, protocol.ErrorPayload{
+		Code: code, Message: text, CommandType: command, RequestID: requestID,
+	})
+	msg.Command = &protocol.CommandMeta{RequestID: requestID}
 	return msg
 }

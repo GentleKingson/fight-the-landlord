@@ -16,6 +16,7 @@ import (
 func (h *Handler) handlePing(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.PingPayload](msg)
 	if err != nil {
+		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgPing))
 		return
 	}
 
@@ -30,7 +31,7 @@ func (h *Handler) handlePing(client types.ClientInterface, msg *protocol.Message
 func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.ReconnectPayload](msg)
 	if err != nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgReconnect))
 		return
 	}
 
@@ -39,9 +40,10 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	// Reject before consuming either reconnect credential; clients must leave
 	// their provisional room before restoring another identity.
 	if client.GetRoom() != "" {
-		client.SendMessage(codec.NewErrorMessageWithText(
+		client.SendMessage(codec.NewCommandErrorMessageWithText(
 			protocol.ErrCodeReconnectInvalid,
 			"当前连接已加入房间，无法恢复其他身份",
+			protocol.MsgReconnect,
 		))
 		return
 	}
@@ -53,7 +55,7 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		if errors.Is(err, session.ErrReconnectExpired) {
 			code = protocol.ErrCodeReconnectExpired
 		}
-		client.SendMessage(codec.NewErrorMessage(code))
+		client.SendMessage(codec.NewCommandErrorMessage(code, protocol.MsgReconnect))
 		return
 	}
 
@@ -69,7 +71,7 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 			h.sessionManager.SetOffline(restored.PlayerID)
 		}
 		log.Printf("重连身份绑定失败: %v", err)
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "重连身份恢复失败"))
+		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "重连身份恢复失败", protocol.MsgReconnect))
 		client.Close()
 		return
 	}

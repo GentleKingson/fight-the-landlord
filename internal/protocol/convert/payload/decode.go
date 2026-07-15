@@ -1,6 +1,7 @@
 package payload
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"google.golang.org/protobuf/proto"
@@ -34,6 +35,18 @@ func DecodePayload(msgType protocol.MessageType, data []byte, target any) error 
 // 返回 (是否处理了该消息类型, 错误)
 func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
 	switch msgType {
+	case protocol.MsgHello:
+		var pbMsg pb.HelloPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.HelloPayload) = protocol.HelloPayload{
+			ProtocolVersion: pbMsg.ProtocolVersion,
+			ClientVersion:   pbMsg.ClientVersion,
+			Capabilities:    append([]string(nil), pbMsg.Capabilities...),
+			ClientKind:      pbMsg.ClientKind,
+		}
+		return true, nil
 	case protocol.MsgReconnect:
 		var pbMsg pb.ReconnectPayload
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
@@ -113,6 +126,23 @@ func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) 
 	return false, nil
 }
 
+// DecodeChatPayload accepts the canonical protobuf payload and, during the
+// migration window, the former JSON bytes embedded in the protobuf envelope.
+func DecodeChatPayload(data []byte, target *protocol.ChatPayload) (legacy bool, err error) {
+	if target == nil {
+		return false, fmt.Errorf("chat payload target is nil")
+	}
+	if _, decodeErr := decodeClientPayload(protocol.MsgChat, data, target); decodeErr == nil {
+		return false, nil
+	}
+	var fallback protocol.ChatPayload
+	if err := json.Unmarshal(data, &fallback); err != nil {
+		return false, err
+	}
+	*target = fallback
+	return true, nil
+}
+
 // decodeServerPayload 解码服务端发送的消息
 // 返回 (是否处理了该消息类型, 错误)
 func decodeServerPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
@@ -137,6 +167,47 @@ func decodeServerPayload(msgType protocol.MessageType, data []byte, target any) 
 // decodeConnectionMessages 解码连接相关消息
 func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target any) (bool, error) {
 	switch msgType {
+	case protocol.MsgNegotiated:
+		var pbMsg pb.NegotiatedPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.NegotiatedPayload) = protocol.NegotiatedPayload{
+			ProtocolVersion: pbMsg.ProtocolVersion,
+			ServerVersion:   pbMsg.ServerVersion,
+			Capabilities:    append([]string(nil), pbMsg.Capabilities...),
+			ClientKind:      pbMsg.ClientKind,
+		}
+		return true, nil
+	case protocol.MsgProtocolRejected:
+		var pbMsg pb.ProtocolRejectedPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.ProtocolRejectedPayload) = protocol.ProtocolRejectedPayload{
+			RequestID:                pbMsg.RequestId,
+			Reason:                   pbMsg.Reason,
+			SupportedProtocolVersion: pbMsg.SupportedProtocolVersion,
+			MinClientVersion:         pbMsg.MinClientVersion,
+		}
+		return true, nil
+	case protocol.MsgCommandAck:
+		var pbMsg pb.CommandAckPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.CommandAckPayload) = protocol.CommandAckPayload{
+			RequestID:   pbMsg.RequestId,
+			CommandType: protocol.MessageType(msgtype.ProtoMessageTypeToString(pbMsg.CommandType)),
+		}
+		return true, nil
+	case protocol.MsgWarning:
+		var pbMsg pb.WarningPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.WarningPayload) = protocol.WarningPayload{Code: int(pbMsg.Code), Message: pbMsg.Message}
+		return true, nil
 	case protocol.MsgConnected:
 		var pbMsg pb.ConnectedPayload
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
@@ -188,6 +259,7 @@ func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target 
 			Code:        int(pbMsg.Code),
 			Message:     pbMsg.Message,
 			CommandType: commandType,
+			RequestID:   pbMsg.RequestId,
 		}
 		return true, nil
 	}

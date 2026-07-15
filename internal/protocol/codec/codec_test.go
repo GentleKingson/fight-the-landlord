@@ -157,6 +157,24 @@ func TestEncodeDecodeEventMeta(t *testing.T) {
 	assert.Equal(t, original.Event, decoded.Event)
 }
 
+func TestEncodeDecodeCommandMeta(t *testing.T) {
+	t.Parallel()
+
+	original := MustNewMessage(protocol.MsgPlayCards, protocol.PlayCardsPayload{Cards: []protocol.CardInfo{}})
+	original.Command = &protocol.CommandMeta{
+		RequestID: "request-42", ExpectedGameID: "game-7", ExpectedTurnID: 11,
+	}
+	t.Cleanup(func() { PutMessage(original) })
+
+	encoded, err := Encode(original)
+	require.NoError(t, err)
+	decoded, err := Decode(encoded)
+	require.NoError(t, err)
+	t.Cleanup(func() { PutMessage(decoded) })
+
+	assert.Equal(t, original.Command, decoded.Command)
+}
+
 func TestParsePayload(t *testing.T) {
 	t.Parallel()
 

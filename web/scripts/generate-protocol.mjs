@@ -42,11 +42,13 @@ const enums = Object.values(nested)
   .sort((left, right) => left.name.localeCompare(right.name));
 const optionalFields = new Set([
   'Message.event',
+  'Message.command',
   'PlayerInfo.is_bot',
   'ReconnectedPayload.room_code',
   'ReconnectedPayload.game_state',
   'ReconnectedPayload.reconnect_token',
   'ErrorPayload.command_type',
+  'ErrorPayload.request_id',
   'GameStateDTO.snapshot_version',
   'GameStateDTO.game_id',
   'GameStateDTO.bottom_cards_revealed',
@@ -134,7 +136,7 @@ lines.push(
   '}',
   '',
   'export type ProtocolMessage<N extends MessageName = MessageName> = {',
-  '  [K in N]: { type: K; payload: PayloadByName[K]; event?: EventMeta }',
+  '  [K in N]: { type: K; payload: PayloadByName[K]; event?: EventMeta; command?: CommandMeta }',
   '}[N];',
   '',
   `const schema = ${JSON.stringify(sortObject(root.toJSON()), null, 2)} satisfies protobuf.INamespace;`,

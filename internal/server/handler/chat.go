@@ -18,10 +18,16 @@ const (
 
 // handleChat 处理聊天消息
 func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message) {
-	payload, err := codec.ParsePayload[protocol.ChatPayload](msg)
+	payload, legacy, err := codec.ParseChatPayload(msg)
 	if err != nil {
 		sendChatError(client, protocol.ErrCodeInvalidMsg, "聊天消息格式无效")
 		return
+	}
+	if legacy {
+		h.legacyChatMessages.Add(1)
+		if !validChatMessageID(payload.MessageID) && msg.Command != nil {
+			payload.MessageID = msg.Command.RequestID
+		}
 	}
 
 	// 聊天限流检查

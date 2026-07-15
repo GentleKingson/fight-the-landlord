@@ -97,13 +97,126 @@ describe('GameSocket reconnect identity state machine', () => {
     vi.restoreAllMocks();
   });
 
+  it('sends Hello first and gates heartbeats and commands until negotiation succeeds', () => {
+    const gameSocket = new GameSocket('ws://example.test/ws', { heartbeatIntervalMs: 100 });
+    gameSocket.connect();
+    const socket = latestSocket();
+    socket.open();
+
+    expect(socket.sent).toHaveLength(1);
+    expect(decodeMessage(socket.sent[0])).toMatchObject({
+      type: MsgType.Hello,
+      payload: {
+        protocol_version: '1',
+        client_version: 'dev',
+        capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+        client_kind: 'web'
+      },
+      command: { request_id: expect.any(String) }
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(gameSocket.send(MsgType.Ready, undefined, { request_id: 'too-early' })).toEqual({
+      ok: false,
+      reason: 'not-connected'
+    });
+
+    const helloRequestId = decodeMessage(socket.sent[0]).command?.request_id;
+    if (!helloRequestId) throw new Error('expected hello request id');
+    socket.receive(encodeMessage(MsgType.Negotiated, {
+      protocol_version: '1',
+      server_version: 'test',
+      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+      client_kind: 'web'
+    }, { request_id: helloRequestId }));
+    expect(vi.getTimerCount()).toBe(1);
+    expect(gameSocket.send(MsgType.Ready, undefined, { request_id: 'after-negotiation' })).toEqual({ ok: true });
+    gameSocket.shutdown();
+  });
+
+  it('surfaces a protocol rejection and does not reconnect indefinitely', () => {
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      reconnectBaseDelayMs: 25,
+      reconnectJitterRatio: 0
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    socket.open();
+    const requestId = decodeMessage(socket.sent[0]).command?.request_id;
+    if (!requestId) throw new Error('expected hello request id');
+
+    socket.receive(encodeMessage(MsgType.ProtocolRejected, {
+      request_id: requestId,
+      reason: '协议版本不兼容',
+      supported_protocol_version: '1',
+      min_client_version: 'v2.0.0'
+    }, { request_id: requestId }));
+
+    expect(useAppStore.getState().error).toBe('协议版本不兼容');
+    expect(socket.closeCalls).toContainEqual({ code: 4002, reason: 'protocol rejected' });
+    vi.advanceTimersByTime(1_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    gameSocket.shutdown();
+  });
+
+  it.each([
+    {
+      name: 'mismatched request ID',
+      requestId: 'different-hello',
+      overrides: {},
+      error: 'request_id 不匹配'
+    },
+    {
+      name: 'incompatible protocol version',
+      overrides: { protocol_version: '2' },
+      error: '不兼容的协议版本'
+    },
+    {
+      name: 'wrong client kind',
+      overrides: { client_kind: 'tui' },
+      error: '错误的客户端类型'
+    },
+    {
+      name: 'missing required capability',
+      overrides: { capabilities: ['command_correlation', 'idempotency', 'game_context'] },
+      error: 'protobuf_chat'
+    }
+  ])('rejects Negotiated with $name without reconnecting', ({ requestId, overrides, error }) => {
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      reconnectBaseDelayMs: 25,
+      reconnectJitterRatio: 0
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    socket.open();
+    const helloRequestId = decodeMessage(socket.sent[0]).command?.request_id;
+    if (!helloRequestId) throw new Error('expected hello request id');
+
+    socket.receive(encodeMessage(MsgType.Negotiated, {
+      protocol_version: '1',
+      server_version: 'test',
+      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+      client_kind: 'web',
+      ...overrides
+    }, { request_id: requestId ?? helloRequestId }));
+
+    expect(useAppStore.getState().error).toContain(error);
+    expect(socket.closeCalls).toContainEqual({ code: 4002, reason: 'invalid negotiation' });
+    expect(gameSocket.send(MsgType.Ready, undefined, { request_id: 'must-stay-gated' })).toEqual({
+      ok: false,
+      reason: 'not-connected'
+    });
+    vi.advanceTimersByTime(1_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    gameSocket.shutdown();
+  });
+
   it('accepts and persists a fresh connection only after Connected', async () => {
     const gameSocket = new GameSocket('ws://example.test/ws');
     gameSocket.connect();
     const socket = latestSocket();
     expect(useAppStore.getState().connectionStatus).toBe('connecting');
 
-    socket.open();
+    openAndNegotiate(socket);
     expect(loadReconnect()).toBeNull();
     socket.receive(encodeMessage(MsgType.Connected, {
       player_id: 'fresh-player',
@@ -127,7 +240,7 @@ describe('GameSocket reconnect identity state machine', () => {
     const gameSocket = new GameSocket('ws://example.test/ws');
     gameSocket.connect();
     const socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
     socket.receive(encodeMessage(MsgType.Connected, {
       player_id: 'temp-player',
       player_name: '临时玩家',
@@ -137,9 +250,10 @@ describe('GameSocket reconnect identity state machine', () => {
     expect(useAppStore.getState().connectionStatus).toBe('reconnecting');
     expect(useAppStore.getState().playerId).toBe('old-player');
     expect(loadReconnect()).toEqual({ id: 'old-player', token: 'old-token' });
-    expect(decodeMessage(socket.sent[0])).toEqual({
+    expect(decodeMessage(socket.sent[0])).toMatchObject({
       type: MsgType.Reconnect,
-      payload: { token: 'old-token', player_id: 'old-player' }
+      payload: { token: 'old-token', player_id: 'old-player' },
+      command: { request_id: expect.any(String) }
     });
 
     socket.receive(encodeMessage(MsgType.Reconnected, {
@@ -160,7 +274,7 @@ describe('GameSocket reconnect identity state machine', () => {
 
     gameSocket.connect();
     let socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
     socket.receive(encodeMessage(MsgType.Connected, {
       player_id: 'temp-1', player_name: '临时一', reconnect_token: 'temp-token-1'
     }));
@@ -172,7 +286,7 @@ describe('GameSocket reconnect identity state machine', () => {
 
     gameSocket.connect();
     socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
     socket.receive(encodeMessage(MsgType.Connected, {
       player_id: 'temp-2', player_name: '临时二', reconnect_token: 'temp-token-2'
     }));
@@ -208,7 +322,7 @@ describe('GameSocket reconnect identity state machine', () => {
     const gameSocket = new GameSocket('ws://example.test/ws', { heartbeatIntervalMs: 60_000 });
     gameSocket.connect();
     const socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
 
     const result = gameSocket.send(MsgType.Reconnect);
     expect(result.ok).toBe(false);
@@ -277,7 +391,7 @@ describe('GameSocket reconnect identity state machine', () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
 
     const recovered = latestSocket();
-    recovered.open();
+    openAndNegotiate(recovered);
     recovered.receive(encodeMessage(MsgType.Connected, {
       player_id: 'fresh-player',
       player_name: '新玩家',
@@ -303,7 +417,7 @@ describe('GameSocket reconnect identity state machine', () => {
     });
     gameSocket.connect();
     const socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
 
     vi.advanceTimersByTime(100);
     expect(socket.sent.map((frame) => decodeMessage(frame).type)).toEqual([MsgType.Ping]);
@@ -328,7 +442,7 @@ describe('GameSocket reconnect identity state machine', () => {
     });
     gameSocket.connect();
     const socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
     expect(vi.getTimerCount()).toBe(1);
 
     vi.advanceTimersByTime(100);
@@ -355,7 +469,7 @@ describe('GameSocket reconnect identity state machine', () => {
     });
     gameSocket.connect();
     const socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
 
     window.dispatchEvent(new Event('offline'));
     expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
@@ -379,7 +493,7 @@ describe('GameSocket reconnect identity state machine', () => {
     });
     gameSocket.connect();
     const socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
     socket.deferClose = true;
 
     window.dispatchEvent(new Event('offline'));
@@ -421,7 +535,7 @@ describe('GameSocket reconnect identity state machine', () => {
     });
     gameSocket.connect();
     const socket = latestSocket();
-    socket.open();
+    openAndNegotiate(socket);
     expect(vi.getTimerCount()).toBe(1);
 
     hidden = true;
@@ -459,4 +573,25 @@ function latestSocket(): FakeWebSocket {
   const socket = FakeWebSocket.instances.at(-1);
   if (!socket) throw new Error('expected a WebSocket instance');
   return socket;
+}
+
+function openAndNegotiate(socket: FakeWebSocket): void {
+  socket.open();
+  const hello = decodeMessage(socket.sent.at(-1) ?? new Uint8Array());
+  expect(hello).toMatchObject({
+    type: MsgType.Hello,
+    payload: {
+      protocol_version: '1',
+      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+      client_kind: 'web'
+    },
+    command: { request_id: expect.any(String) }
+  });
+  socket.receive(encodeMessage(MsgType.Negotiated, {
+    protocol_version: '1',
+    server_version: 'test',
+    capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+    client_kind: 'web'
+  }, { request_id: hello.command?.request_id }));
+  socket.sent = [];
 }

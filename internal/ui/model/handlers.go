@@ -19,8 +19,7 @@ func (m *OnlineModel) handleWindowSize(msg tea.WindowSizeMsg) {
 
 func (m *OnlineModel) handleConnected() tea.Cmd {
 	m.EnterLobby()
-	m.playerID = m.client.PlayerID
-	m.playerName = m.client.PlayerName
+	m.playerID, m.playerName, _ = m.client.Identity()
 	m.client.StartHeartbeat()
 	return m.listenForMessages()
 }

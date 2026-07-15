@@ -8,8 +8,8 @@ import (
 )
 
 // NewOnlineModel creates a new OnlineModel for online game mode.
-func NewOnlineModel(serverURL string) *model.OnlineModel {
-	m := model.NewOnlineModel(serverURL)
+func NewOnlineModel(serverURL string, clientVersions ...string) *model.OnlineModel {
+	m := model.NewOnlineModel(serverURL, clientVersions...)
 	m.SetViewRenderer(view.CreateViewRenderer())
 	m.SetKeyHandler(HandleKeyPress)
 	m.SetServerMessageHandler(handler.HandleServerMessage)

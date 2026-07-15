@@ -4,7 +4,10 @@ export { MessageType as WireMessageType, MsgType } from './generated';
 export type {
   CardInfo,
   ChatPayload,
+  CommandAckPayload,
+  CommandMeta,
   EventMeta,
+  ErrorPayload,
   GameSettlementDTO,
   GameStateDTO,
   LeaderboardEntry,
@@ -13,9 +16,11 @@ export type {
   PlayerPlayedCards,
   PlayerScore,
   PongPayload,
+  HelloPayload,
   ReconnectedPayload,
   RoomListItem,
-  StatsResultPayload
+  StatsResultPayload,
+  WarningPayload
 } from './generated';
 
 export type MessageType = MessageName;

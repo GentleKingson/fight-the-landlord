@@ -76,7 +76,11 @@ describe('GameTable rule-gated actions', () => {
     expect(play).toBeEnabled();
     fireEvent.click(play);
 
-    expect(send).toHaveBeenCalledWith(MsgType.PlayCards, { cards: hand.slice(0, 2) });
+    expect(send).toHaveBeenCalledWith(
+      MsgType.PlayCards,
+      { cards: hand.slice(0, 2) },
+      expect.objectContaining({ request_id: expect.any(String) })
+    );
     expect(useAppStore.getState().selectedCards).toEqual(new Set(hand.slice(0, 2).map(cardKey)));
   });
 
@@ -121,7 +125,7 @@ describe('GameTable rule-gated actions', () => {
 
     act(() => useAppStore.getState().handleMessage({
       type: MsgType.Error,
-      payload: { code: 3003, message: '所选牌型不能压过上一手' }
+      payload: { code: 3003, message: '所选牌型不能压过上一手', request_id: '' }
     }));
     expect(useAppStore.getState().selectedCards).toEqual(selectedCards);
     expect(screen.getByText('所选牌型不能压过上一手')).toBeInTheDocument();

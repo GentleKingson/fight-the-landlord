@@ -2,6 +2,13 @@ package protocol
 
 // --- 客户端请求 Payloads ---
 
+type HelloPayload struct {
+	ProtocolVersion string   `json:"protocol_version"`
+	ClientVersion   string   `json:"client_version"`
+	Capabilities    []string `json:"capabilities"`
+	ClientKind      string   `json:"client_kind"`
+}
+
 // ReconnectPayload 断线重连请求
 type ReconnectPayload struct {
 	Token    string `json:"token"`     // 重连令牌
@@ -36,6 +43,30 @@ type GetLeaderboardPayload struct {
 }
 
 // --- 服务端响应 Payloads ---
+
+type NegotiatedPayload struct {
+	ProtocolVersion string   `json:"protocol_version"`
+	ServerVersion   string   `json:"server_version"`
+	Capabilities    []string `json:"capabilities"`
+	ClientKind      string   `json:"client_kind"`
+}
+
+type ProtocolRejectedPayload struct {
+	RequestID                string `json:"request_id"`
+	Reason                   string `json:"reason"`
+	SupportedProtocolVersion string `json:"supported_protocol_version"`
+	MinClientVersion         string `json:"min_client_version,omitempty"`
+}
+
+type CommandAckPayload struct {
+	RequestID   string      `json:"request_id"`
+	CommandType MessageType `json:"command_type"`
+}
+
+type WarningPayload struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
 
 // ConnectedPayload 连接成功响应
 type ConnectedPayload struct {
@@ -264,6 +295,7 @@ type ErrorPayload struct {
 	Code        int         `json:"code"`
 	Message     string      `json:"message"`
 	CommandType MessageType `json:"command_type,omitempty"`
+	RequestID   string      `json:"request_id,omitempty"`
 }
 
 // StatsResultPayload 个人统计结果

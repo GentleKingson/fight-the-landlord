@@ -44,6 +44,7 @@ const (
 	MessageType_MSG_CHAT                   MessageType = 16
 	MessageType_MSG_GET_MAINTENANCE_STATUS MessageType = 17
 	MessageType_MSG_CANCEL_MATCH           MessageType = 18
+	MessageType_MSG_HELLO                  MessageType = 19
 	// 服务端 -> 客户端
 	MessageType_MSG_CONNECTED          MessageType = 100
 	MessageType_MSG_RECONNECTED        MessageType = 101
@@ -75,6 +76,10 @@ const (
 	MessageType_MSG_MATCH_QUEUED       MessageType = 127
 	MessageType_MSG_MATCH_CANCELLED    MessageType = 128
 	MessageType_MSG_ROOM_LEFT          MessageType = 129
+	MessageType_MSG_NEGOTIATED         MessageType = 130
+	MessageType_MSG_PROTOCOL_REJECTED  MessageType = 131
+	MessageType_MSG_COMMAND_ACK        MessageType = 132
+	MessageType_MSG_WARNING            MessageType = 133
 	MessageType_MSG_ERROR              MessageType = 200
 	MessageType_MSG_PRACTICE_MATCH     MessageType = 201
 )
@@ -101,6 +106,7 @@ var (
 		16:  "MSG_CHAT",
 		17:  "MSG_GET_MAINTENANCE_STATUS",
 		18:  "MSG_CANCEL_MATCH",
+		19:  "MSG_HELLO",
 		100: "MSG_CONNECTED",
 		101: "MSG_RECONNECTED",
 		102: "MSG_PONG",
@@ -131,6 +137,10 @@ var (
 		127: "MSG_MATCH_QUEUED",
 		128: "MSG_MATCH_CANCELLED",
 		129: "MSG_ROOM_LEFT",
+		130: "MSG_NEGOTIATED",
+		131: "MSG_PROTOCOL_REJECTED",
+		132: "MSG_COMMAND_ACK",
+		133: "MSG_WARNING",
 		200: "MSG_ERROR",
 		201: "MSG_PRACTICE_MATCH",
 	}
@@ -154,6 +164,7 @@ var (
 		"MSG_CHAT":                   16,
 		"MSG_GET_MAINTENANCE_STATUS": 17,
 		"MSG_CANCEL_MATCH":           18,
+		"MSG_HELLO":                  19,
 		"MSG_CONNECTED":              100,
 		"MSG_RECONNECTED":            101,
 		"MSG_PONG":                   102,
@@ -184,6 +195,10 @@ var (
 		"MSG_MATCH_QUEUED":           127,
 		"MSG_MATCH_CANCELLED":        128,
 		"MSG_ROOM_LEFT":              129,
+		"MSG_NEGOTIATED":             130,
+		"MSG_PROTOCOL_REJECTED":      131,
+		"MSG_COMMAND_ACK":            132,
+		"MSG_WARNING":                133,
 		"MSG_ERROR":                  200,
 		"MSG_PRACTICE_MATCH":         201,
 	}
@@ -302,19 +317,82 @@ func (x *EventMeta) GetTurnDeadlineMs() int64 {
 	return 0
 }
 
+// CommandMeta correlates a client command with its completion and pins game
+// mutations to the authoritative game/turn snapshot seen by the caller.
+type CommandMeta struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExpectedGameId string                 `protobuf:"bytes,2,opt,name=expected_game_id,json=expectedGameId,proto3" json:"expected_game_id,omitempty"`
+	ExpectedTurnId int64                  `protobuf:"varint,3,opt,name=expected_turn_id,json=expectedTurnId,proto3" json:"expected_turn_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CommandMeta) Reset() {
+	*x = CommandMeta{}
+	mi := &file_internal_protocol_proto_message_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandMeta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandMeta) ProtoMessage() {}
+
+func (x *CommandMeta) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_proto_message_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandMeta.ProtoReflect.Descriptor instead.
+func (*CommandMeta) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_proto_message_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CommandMeta) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CommandMeta) GetExpectedGameId() string {
+	if x != nil {
+		return x.ExpectedGameId
+	}
+	return ""
+}
+
+func (x *CommandMeta) GetExpectedTurnId() int64 {
+	if x != nil {
+		return x.ExpectedTurnId
+	}
+	return 0
+}
+
 // Message 所有消息的外层包装
 type Message struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          MessageType            `protobuf:"varint,1,opt,name=type,proto3,enum=protocol.MessageType" json:"type,omitempty"`
 	Payload       []byte                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
 	Event         *EventMeta             `protobuf:"bytes,3,opt,name=event,proto3" json:"event,omitempty"`
+	Command       *CommandMeta           `protobuf:"bytes,4,opt,name=command,proto3" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_internal_protocol_proto_message_proto_msgTypes[1]
+	mi := &file_internal_protocol_proto_message_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -326,7 +404,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_proto_message_proto_msgTypes[1]
+	mi := &file_internal_protocol_proto_message_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -339,7 +417,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_proto_message_proto_rawDescGZIP(), []int{1}
+	return file_internal_protocol_proto_message_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Message) GetType() MessageType {
@@ -363,6 +441,13 @@ func (x *Message) GetEvent() *EventMeta {
 	return nil
 }
 
+func (x *Message) GetCommand() *CommandMeta {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
 var File_internal_protocol_proto_message_proto protoreflect.FileDescriptor
 
 const file_internal_protocol_proto_message_proto_rawDesc = "" +
@@ -374,11 +459,17 @@ const file_internal_protocol_proto_message_proto_rawDesc = "" +
 	"\agame_id\x18\x03 \x01(\tR\x06gameId\x12\x17\n" +
 	"\aturn_id\x18\x04 \x01(\x03R\x06turnId\x12$\n" +
 	"\x0eserver_time_ms\x18\x05 \x01(\x03R\fserverTimeMs\x12(\n" +
-	"\x10turn_deadline_ms\x18\x06 \x01(\x03R\x0eturnDeadlineMs\"y\n" +
+	"\x10turn_deadline_ms\x18\x06 \x01(\x03R\x0eturnDeadlineMs\"\x80\x01\n" +
+	"\vCommandMeta\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12(\n" +
+	"\x10expected_game_id\x18\x02 \x01(\tR\x0eexpectedGameId\x12(\n" +
+	"\x10expected_turn_id\x18\x03 \x01(\x03R\x0eexpectedTurnId\"\xaa\x01\n" +
 	"\aMessage\x12)\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x15.protocol.MessageTypeR\x04type\x12\x18\n" +
 	"\apayload\x18\x02 \x01(\fR\apayload\x12)\n" +
-	"\x05event\x18\x03 \x01(\v2\x13.protocol.EventMetaR\x05event*\xb2\b\n" +
+	"\x05event\x18\x03 \x01(\v2\x13.protocol.EventMetaR\x05event\x12/\n" +
+	"\acommand\x18\x04 \x01(\v2\x15.protocol.CommandMetaR\acommand*\x9a\t\n" +
 	"\vMessageType\x12\x0f\n" +
 	"\vMSG_UNKNOWN\x10\x00\x12\x11\n" +
 	"\rMSG_RECONNECT\x10\x01\x12\f\n" +
@@ -399,7 +490,8 @@ const file_internal_protocol_proto_message_proto_rawDesc = "" +
 	"\x14MSG_GET_ONLINE_COUNT\x10\x0f\x12\f\n" +
 	"\bMSG_CHAT\x10\x10\x12\x1e\n" +
 	"\x1aMSG_GET_MAINTENANCE_STATUS\x10\x11\x12\x14\n" +
-	"\x10MSG_CANCEL_MATCH\x10\x12\x12\x11\n" +
+	"\x10MSG_CANCEL_MATCH\x10\x12\x12\r\n" +
+	"\tMSG_HELLO\x10\x13\x12\x11\n" +
 	"\rMSG_CONNECTED\x10d\x12\x13\n" +
 	"\x0fMSG_RECONNECTED\x10e\x12\f\n" +
 	"\bMSG_PONG\x10f\x12\x16\n" +
@@ -429,7 +521,11 @@ const file_internal_protocol_proto_message_proto_rawDesc = "" +
 	"\x0fMSG_MAINTENANCE\x10~\x12\x14\n" +
 	"\x10MSG_MATCH_QUEUED\x10\x7f\x12\x18\n" +
 	"\x13MSG_MATCH_CANCELLED\x10\x80\x01\x12\x12\n" +
-	"\rMSG_ROOM_LEFT\x10\x81\x01\x12\x0e\n" +
+	"\rMSG_ROOM_LEFT\x10\x81\x01\x12\x13\n" +
+	"\x0eMSG_NEGOTIATED\x10\x82\x01\x12\x1a\n" +
+	"\x15MSG_PROTOCOL_REJECTED\x10\x83\x01\x12\x14\n" +
+	"\x0fMSG_COMMAND_ACK\x10\x84\x01\x12\x10\n" +
+	"\vMSG_WARNING\x10\x85\x01\x12\x0e\n" +
 	"\tMSG_ERROR\x10\xc8\x01\x12\x17\n" +
 	"\x12MSG_PRACTICE_MATCH\x10\xc9\x01B=Z;github.com/palemoky/fight-the-landlord/internal/protocol/pbb\x06proto3"
 
@@ -446,20 +542,22 @@ func file_internal_protocol_proto_message_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_protocol_proto_message_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_protocol_proto_message_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_internal_protocol_proto_message_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_internal_protocol_proto_message_proto_goTypes = []any{
-	(MessageType)(0),  // 0: protocol.MessageType
-	(*EventMeta)(nil), // 1: protocol.EventMeta
-	(*Message)(nil),   // 2: protocol.Message
+	(MessageType)(0),    // 0: protocol.MessageType
+	(*EventMeta)(nil),   // 1: protocol.EventMeta
+	(*CommandMeta)(nil), // 2: protocol.CommandMeta
+	(*Message)(nil),     // 3: protocol.Message
 }
 var file_internal_protocol_proto_message_proto_depIdxs = []int32{
 	0, // 0: protocol.Message.type:type_name -> protocol.MessageType
 	1, // 1: protocol.Message.event:type_name -> protocol.EventMeta
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	2, // 2: protocol.Message.command:type_name -> protocol.CommandMeta
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_internal_protocol_proto_message_proto_init() }
@@ -473,7 +571,7 @@ func file_internal_protocol_proto_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_protocol_proto_message_proto_rawDesc), len(file_internal_protocol_proto_message_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

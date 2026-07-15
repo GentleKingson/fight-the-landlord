@@ -7,6 +7,7 @@ type Message struct {
 	Type    MessageType     `json:"type"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 	Event   *EventMeta      `json:"event,omitempty"`
+	Command *CommandMeta    `json:"command,omitempty"`
 }
 
 // EventMeta carries the authoritative ordering and clock context for a
@@ -18,6 +19,35 @@ type EventMeta struct {
 	TurnID         int64  `json:"turn_id,omitempty"`
 	ServerTimeMS   int64  `json:"server_time_ms"`
 	TurnDeadlineMS int64  `json:"turn_deadline_ms,omitempty"`
+}
+
+// CommandMeta identifies one logical command and its expected game context.
+type CommandMeta struct {
+	RequestID      string `json:"request_id"`
+	ExpectedGameID string `json:"expected_game_id,omitempty"`
+	ExpectedTurnID int64  `json:"expected_turn_id,omitempty"`
+}
+
+const ProtocolVersion = "1"
+
+const (
+	ClientKindWeb = "web"
+	ClientKindTUI = "tui"
+	ClientKindBot = "bot"
+)
+
+const (
+	CapabilityCommandCorrelation = "command_correlation"
+	CapabilityIdempotency        = "idempotency"
+	CapabilityGameContext        = "game_context"
+	CapabilityProtobufChat       = "protobuf_chat"
+)
+
+var RequiredCapabilities = []string{
+	CapabilityCommandCorrelation,
+	CapabilityIdempotency,
+	CapabilityGameContext,
+	CapabilityProtobufChat,
 }
 
 // MessageType 消息类型
@@ -51,6 +81,7 @@ const (
 	MsgGetOnlineCount       MessageType = "get_online_count"       // 获取在线人数
 	MsgGetMaintenanceStatus MessageType = "get_maintenance_status" // 获取维护状态
 	MsgChat                 MessageType = "chat"                   // 聊天消息
+	MsgHello                MessageType = "hello"                  // 连接协议协商
 )
 
 // 服务端 → 客户端 消息类型
@@ -93,8 +124,12 @@ const (
 
 	// 系统通知
 	// 保留 Push/Pull 标识符兼容现有 Go 调用方，线上名称以 proto 枚举为准。
-	MsgMaintenancePush MessageType = "maintenance"        // 主动推送
-	MsgMaintenancePull MessageType = "maintenance_status" // 被动拉取
+	MsgMaintenancePush  MessageType = "maintenance"        // 主动推送
+	MsgMaintenancePull  MessageType = "maintenance_status" // 被动拉取
+	MsgNegotiated       MessageType = "negotiated"         // 协议协商成功
+	MsgProtocolRejected MessageType = "protocol_rejected"  // 协议协商失败
+	MsgCommandAck       MessageType = "command_ack"        // 命令完成确认
+	MsgWarning          MessageType = "warning"            // 不影响命令结果的告警
 
 	// 错误
 	MsgError MessageType = "error" // 错误消息

@@ -44,6 +44,7 @@ func PutMessage(msg *protocol.Message) {
 	msg.Type = ""
 	msg.Payload = nil
 	msg.Event = nil
+	msg.Command = nil
 	messagePool.Put(msg)
 }
 

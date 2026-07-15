@@ -48,7 +48,14 @@ func (h *Handler) handleBid(client types.ClientInterface, msg *protocol.Message)
 		return
 	}
 
-	if err := gameSession.HandleBid(client.GetID(), payload.Bid); err != nil {
+	command := msg.Command
+	if command == nil {
+		if err := gameSession.HandleBid(client.GetID(), payload.Bid); err != nil {
+			sendGameError(client, protocol.MsgBid, err)
+		}
+		return
+	}
+	if err := gameSession.HandleBidAt(client.GetID(), payload.Bid, command.ExpectedGameID, command.ExpectedTurnID); err != nil {
 		sendGameError(client, protocol.MsgBid, err)
 	}
 }
@@ -82,13 +89,20 @@ func (h *Handler) handlePlayCards(client types.ClientInterface, msg *protocol.Me
 		return
 	}
 
-	if err := gameSession.HandlePlayCards(client.GetID(), payload.Cards); err != nil {
+	command := msg.Command
+	if command == nil {
+		if err := gameSession.HandlePlayCards(client.GetID(), payload.Cards); err != nil {
+			sendGameError(client, protocol.MsgPlayCards, err)
+		}
+		return
+	}
+	if err := gameSession.HandlePlayCardsAt(client.GetID(), payload.Cards, command.ExpectedGameID, command.ExpectedTurnID); err != nil {
 		sendGameError(client, protocol.MsgPlayCards, err)
 	}
 }
 
 // handlePass 处理不出
-func (h *Handler) handlePass(client types.ClientInterface) {
+func (h *Handler) handlePass(client types.ClientInterface, messages ...*protocol.Message) {
 	if h.roomManager == nil {
 		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPass))
 		return
@@ -110,7 +124,17 @@ func (h *Handler) handlePass(client types.ClientInterface) {
 		return
 	}
 
-	if err := gameSession.HandlePass(client.GetID()); err != nil {
+	var command *protocol.CommandMeta
+	if len(messages) > 0 && messages[0] != nil {
+		command = messages[0].Command
+	}
+	if command == nil {
+		if err := gameSession.HandlePass(client.GetID()); err != nil {
+			sendGameError(client, protocol.MsgPass, err)
+		}
+		return
+	}
+	if err := gameSession.HandlePassAt(client.GetID(), command.ExpectedGameID, command.ExpectedTurnID); err != nil {
 		sendGameError(client, protocol.MsgPass, err)
 	}
 }

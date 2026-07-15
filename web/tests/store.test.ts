@@ -248,7 +248,7 @@ describe('app store message flow', () => {
     useAppStore.getState().setConnectionStatus('reconnecting');
     useAppStore.getState().handleMessage({
       type: MsgType.Error,
-      payload: { code, message }
+      payload: { code, message, request_id: '' }
     });
 
     const state = useAppStore.getState();
@@ -273,7 +273,7 @@ describe('app store message flow', () => {
     localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'shared-player', token: 'rotated-by-tab-one' }));
     useAppStore.getState().handleMessage({
       type: MsgType.Error,
-      payload: { code: 1003, message: '重连令牌无效' }
+      payload: { code: 1003, message: '重连令牌无效', request_id: '' }
     });
 
     expect(useAppStore.getState().playerId).toBe('tab-two-temp');

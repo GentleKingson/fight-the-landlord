@@ -5,10 +5,10 @@ import {
   type CommandRequest,
   type PendingCommand
 } from '../stores/appStore';
-import type { GameSocket, SendResult } from './wsClient';
+import { createRequestID, type CommandMetadata, type GameSocket, type SendResult } from './wsClient';
 
 export type CommandDispatchResult =
-  | { ok: true; request: CommandRequest }
+  | { ok: true; request: CommandRequest; requestId: string }
   | { ok: false; reason: Extract<SendResult, { ok: false }>['reason'] | 'duplicate' | 'validation' | 'maintenance' };
 
 const SAFE_RETRY_COMMANDS = new Set<CommandKind>([
@@ -16,7 +16,10 @@ const SAFE_RETRY_COMMANDS = new Set<CommandKind>([
   'cancel-match',
   'ready',
   'cancel-ready',
-  'leave-room'
+  'leave-room',
+  'stats',
+  'leaderboard',
+  'room-list'
 ]);
 
 const ROOM_TRANSITION_COMMANDS = new Set<CommandKind>([
@@ -49,7 +52,9 @@ export function dispatchCommand(socket: GameSocket, rawRequest: CommandRequest):
     return { ok: false, reason: 'maintenance' };
   }
 
-  const result = sendRequest(socket, request);
+  const requestId = createRequestID();
+  const command = commandMetadata(request, requestId, store.gameId, store.turnId);
+  const result = sendRequest(socket, request, command);
   if (!result.ok) {
     const message = networkFailureMessage(request.kind, result.reason);
     store.setBusinessError(
@@ -62,8 +67,8 @@ export function dispatchCommand(socket: GameSocket, rawRequest: CommandRequest):
   }
 
   store.clearBusinessError();
-  store.beginCommand(request, commandTimeoutMs(request.kind), SAFE_RETRY_COMMANDS.has(request.kind));
-  return { ok: true, request };
+  store.beginCommand(request, requestId, commandTimeoutMs(request.kind), SAFE_RETRY_COMMANDS.has(request.kind));
+  return { ok: true, request, requestId };
 }
 
 export function retryBusinessCommand(socket: GameSocket): CommandDispatchResult | null {
@@ -80,25 +85,48 @@ export function createChatCommand(content: string, scope: string): CommandReques
   };
 }
 
-function sendRequest(socket: GameSocket, request: CommandRequest): SendResult {
+function sendRequest(socket: GameSocket, request: CommandRequest, command: CommandMetadata): SendResult {
   switch (request.kind) {
-    case 'create-room': return socket.send(MsgType.CreateRoom);
-    case 'join-room': return socket.send(MsgType.JoinRoom, { room_code: request.roomCode });
-    case 'quick-match': return socket.send(MsgType.QuickMatch);
-    case 'practice-match': return socket.send(MsgType.PracticeMatch);
-    case 'cancel-match': return socket.send(MsgType.CancelMatch);
-    case 'ready': return socket.send(MsgType.Ready);
-    case 'cancel-ready': return socket.send(MsgType.CancelReady);
-    case 'bid': return socket.send(MsgType.Bid, { bid: request.bid });
-    case 'play': return socket.send(MsgType.PlayCards, { cards: request.cards });
-    case 'pass': return socket.send(MsgType.Pass);
-    case 'leave-room': return socket.send(MsgType.LeaveRoom);
+    case 'create-room': return socket.send(MsgType.CreateRoom, undefined, command);
+    case 'join-room': return socket.send(MsgType.JoinRoom, { room_code: request.roomCode }, command);
+    case 'quick-match': return socket.send(MsgType.QuickMatch, undefined, command);
+    case 'practice-match': return socket.send(MsgType.PracticeMatch, undefined, command);
+    case 'cancel-match': return socket.send(MsgType.CancelMatch, undefined, command);
+    case 'ready': return socket.send(MsgType.Ready, undefined, command);
+    case 'cancel-ready': return socket.send(MsgType.CancelReady, undefined, command);
+    case 'bid': return socket.send(MsgType.Bid, { bid: request.bid }, command);
+    case 'play': return socket.send(MsgType.PlayCards, { cards: request.cards }, command);
+    case 'pass': return socket.send(MsgType.Pass, undefined, command);
+    case 'leave-room': return socket.send(MsgType.LeaveRoom, undefined, command);
     case 'chat': return socket.send(MsgType.Chat, {
       content: request.content,
       scope: request.scope,
       message_id: request.messageId
-    });
+    }, command);
+    case 'stats': return socket.send(MsgType.GetStats, undefined, command);
+    case 'leaderboard': return socket.send(MsgType.GetLeaderboard, {
+      type: request.leaderboardType,
+      offset: request.offset,
+      limit: request.limit
+    }, command);
+    case 'room-list': return socket.send(MsgType.GetRoomList, undefined, command);
   }
+}
+
+function commandMetadata(
+  request: CommandRequest,
+  requestId: string,
+  gameId: string,
+  turnId: number
+): CommandMetadata {
+  if (request.kind === 'bid' || request.kind === 'play' || request.kind === 'pass') {
+    return {
+      request_id: requestId,
+      expected_game_id: gameId,
+      expected_turn_id: turnId
+    };
+  }
+  return { request_id: requestId };
 }
 
 function normalizeRequest(request: CommandRequest): CommandRequest | null {
@@ -139,7 +167,12 @@ function hasPendingConflict(
 }
 
 function blockedByMaintenance(kind: CommandKind): boolean {
-  return kind !== 'cancel-match' && kind !== 'leave-room' && kind !== 'chat';
+  return kind !== 'cancel-match'
+    && kind !== 'leave-room'
+    && kind !== 'chat'
+    && kind !== 'stats'
+    && kind !== 'leaderboard'
+    && kind !== 'room-list';
 }
 
 function commandTimeoutMs(kind: CommandKind): number {
@@ -168,10 +201,12 @@ function commandName(kind: CommandKind): string {
     case 'pass': return '不出';
     case 'leave-room': return '离开房间';
     case 'chat': return '发送消息';
+    case 'stats': return '获取战绩';
+    case 'leaderboard': return '获取排行榜';
+    case 'room-list': return '刷新房间列表';
   }
 }
 
 function createMessageID(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return createRequestID();
 }

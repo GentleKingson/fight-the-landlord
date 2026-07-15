@@ -22,12 +22,32 @@ func (gs *GameSession) HandleBid(playerID string, bid bool) error {
 }
 
 func (gs *GameSession) handleBid(playerID string, bid bool, expectedTurnID int64) error {
+	return gs.handleBidAt(playerID, bid, "", expectedTurnID)
+}
+
+// HandleBidAt rejects commands created from a different game or turn. The
+// comparison and mutation share the same action/state lock boundary.
+func (gs *GameSession) HandleBidAt(playerID string, bid bool, expectedGameID string, expectedTurnID int64) error {
+	if expectedGameID == "" {
+		return apperrors.ErrStaleGame
+	}
+	if expectedTurnID <= 0 {
+		return apperrors.ErrStaleTurn
+	}
+	return gs.handleBidAt(playerID, bid, expectedGameID, expectedTurnID)
+}
+
+func (gs *GameSession) handleBidAt(playerID string, bid bool, expectedGameID string, expectedTurnID int64) error {
 	gs.actionMu.Lock()
 	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
 	if gs.retired {
 		gs.mu.Unlock()
 		return apperrors.ErrGameNotStart
+	}
+	if expectedGameID != "" && gs.gameID != expectedGameID {
+		gs.mu.Unlock()
+		return apperrors.ErrStaleGame
 	}
 
 	if gs.state != GameStateBidding {
@@ -36,6 +56,9 @@ func (gs *GameSession) handleBid(playerID string, bid bool, expectedTurnID int64
 	}
 	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
 		gs.mu.Unlock()
+		if expectedGameID != "" {
+			return apperrors.ErrStaleTurn
+		}
 		return apperrors.ErrNotYourTurn
 	}
 

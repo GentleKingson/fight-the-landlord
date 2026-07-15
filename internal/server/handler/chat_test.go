@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,36 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
+
+func TestHandler_HandleChat_LegacyJSONFixture(t *testing.T) {
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "protocol", "testdata", "legacy_chat_payload.json"))
+	require.NoError(t, err)
+
+	// The previous web client still used the protobuf envelope, but embedded a
+	// JSON Chat object in Message.payload.
+	encoded, err := codec.Encode(&protocol.Message{Type: protocol.MsgChat, Payload: fixture})
+	require.NoError(t, err)
+	legacyMessage, err := codec.Decode(encoded)
+	require.NoError(t, err)
+	defer codec.PutMessage(legacyMessage)
+
+	server := new(testutil.MockServer)
+	client := testutil.NewSimpleClient("legacy-player", "Legacy Player")
+	var broadcast *protocol.Message
+	server.On("BroadcastToLobby", mock.Anything).Run(func(args mock.Arguments) {
+		broadcast = args.Get(0).(*protocol.Message)
+	}).Once()
+	h := NewHandler(HandlerDeps{Server: server})
+
+	h.handleChat(client, legacyMessage)
+
+	server.AssertExpectations(t)
+	require.NotNil(t, broadcast)
+	payload := requireChatPayload(t, broadcast)
+	assert.Equal(t, "legacy hello", payload.Content)
+	assert.Equal(t, "legacy-fixture-1", payload.MessageID)
+	assert.Equal(t, int64(1), h.LegacyChatMessages())
+}
 
 func TestHandler_HandleChat_InvalidPayloadIsCorrelated(t *testing.T) {
 	client := testutil.NewSimpleClient("p1", "Player1")

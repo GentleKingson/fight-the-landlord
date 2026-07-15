@@ -17,6 +17,7 @@
   { "type": "chat", "payload": { "sender_id": "玩家-1", "sender_name": "青竹", "content": "你好，世界", "scope": "room", "time": 0, "is_system": false, "message_id": "消息-1", "room_code": "012345", "game_id": "game-一", "server_time": 1700000000123 } },
   { "type": "get_maintenance_status", "payload": null },
   { "type": "cancel_match", "payload": null },
+  { "type": "hello", "payload": { "protocol_version": "1", "client_version": "v1.2.3", "capabilities": ["command_correlation", "idempotency", "game_context", "protobuf_chat"], "client_kind": "web" } },
   { "type": "connected", "payload": { "player_id": "temp-1", "player_name": "新玩家", "reconnect_token": "temp-token" } },
   { "type": "reconnected", "payload": { "player_id": "玩家-1", "player_name": "青竹", "room_code": "012345", "game_state": { "phase": "ended", "players": [{ "id": "玩家-1", "name": "青竹", "seat": 0, "ready": false, "is_landlord": true, "cards_count": 0, "online": false, "is_bot": false }, { "id": "玩家-2", "name": "山月", "seat": 1, "ready": false, "is_landlord": false, "cards_count": 1, "online": true, "is_bot": false }, { "id": "玩家-3", "name": "松风", "seat": 2, "ready": false, "is_landlord": false, "cards_count": 0, "online": true, "is_bot": false }], "hand": [], "bottom_cards": [{ "suit": 1, "rank": 5, "color": 1 }], "current_turn": "", "last_played": [], "last_player_id": "", "must_play": false, "can_beat": false, "snapshot_version": 7, "game_id": "game-一", "bottom_cards_revealed": true, "turn_id": 0, "turn_deadline_ms": 0, "server_time_ms": 1700000000123, "last_player_name": "", "last_hand_type": "", "is_grab": false, "multiplier": 4, "base_score": 1, "played_cards": [], "settlement": { "winner_id": "玩家-1", "winner_name": "青竹", "winner_is_landlord": true, "multiplier": 4, "scores": [{ "player_id": "玩家-1", "player_name": "青竹", "is_landlord": true, "score": 8 }, { "player_id": "玩家-2", "player_name": "山月", "is_landlord": false, "score": -4 }, { "player_id": "玩家-3", "player_name": "松风", "is_landlord": false, "score": -4 }], "player_hands": [{ "player_id": "玩家-1", "player_name": "青竹", "cards": [] }, { "player_id": "玩家-2", "player_name": "山月", "cards": [{ "suit": 2, "rank": 7, "color": 0 }] }, { "player_id": "玩家-3", "player_name": "松风", "cards": [] }] } }, "reconnect_token": "rotated-token" } },
   { "type": "reconnected", "payload": { "player_id": "旧玩家-1", "player_name": "旧客户端", "room_code": "654321", "game_state": { "phase": "ended", "players": [], "hand": [], "bottom_cards": [], "current_turn": "", "last_played": [], "last_player_id": "", "must_play": false, "can_beat": false, "snapshot_version": 3, "game_id": "legacy-ended", "bottom_cards_revealed": true, "turn_id": 0, "turn_deadline_ms": 0, "server_time_ms": 1700000000222, "last_player_name": "", "last_hand_type": "", "is_grab": false, "multiplier": 2, "base_score": 1, "played_cards": [] }, "reconnect_token": "legacy-rotated-token" } },
@@ -48,6 +49,10 @@
   { "type": "match_queued", "payload": { "deadline_ms": 1700000030123, "practice": false } },
   { "type": "match_cancelled", "payload": { "reason": "cancelled" } },
   { "type": "room_left", "payload": { "room_code": "012345" } },
-  { "type": "error", "payload": { "code": 1001, "message": "格式错误", "command_type": 10 } },
+  { "type": "negotiated", "payload": { "protocol_version": "1", "server_version": "v1.2.4", "capabilities": ["command_correlation", "idempotency", "game_context", "protobuf_chat"], "client_kind": "web" } },
+  { "type": "protocol_rejected", "payload": { "request_id": "hello-1", "reason": "协议版本不兼容", "supported_protocol_version": "1", "min_client_version": "v1.2.0" } },
+  { "type": "command_ack", "payload": { "request_id": "request-1", "command_type": 10 } },
+  { "type": "warning", "payload": { "code": 1002, "message": "请求过于频繁，请放慢速度" } },
+  { "type": "error", "payload": { "code": 1001, "message": "格式错误", "command_type": 10, "request_id": "request-error-1" } },
   { "type": "practice_match", "payload": null }
 ]

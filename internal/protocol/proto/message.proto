@@ -30,6 +30,7 @@ enum MessageType {
   MSG_CHAT = 16;
   MSG_GET_MAINTENANCE_STATUS = 17;
   MSG_CANCEL_MATCH = 18;
+  MSG_HELLO = 19;
 
   // 服务端 -> 客户端
   MSG_CONNECTED = 100;
@@ -62,6 +63,10 @@ enum MessageType {
   MSG_MATCH_QUEUED = 127;
   MSG_MATCH_CANCELLED = 128;
   MSG_ROOM_LEFT = 129;
+  MSG_NEGOTIATED = 130;
+  MSG_PROTOCOL_REJECTED = 131;
+  MSG_COMMAND_ACK = 132;
+  MSG_WARNING = 133;
   MSG_ERROR = 200;
   MSG_PRACTICE_MATCH = 201;
 }
@@ -79,9 +84,18 @@ message EventMeta {
   int64 turn_deadline_ms = 6;    // 当前回合的服务端绝对截止时间
 }
 
+// CommandMeta correlates a client command with its completion and pins game
+// mutations to the authoritative game/turn snapshot seen by the caller.
+message CommandMeta {
+  string request_id = 1;
+  string expected_game_id = 2;
+  int64 expected_turn_id = 3;
+}
+
 // Message 所有消息的外层包装
 message Message {
   MessageType type = 1;
   bytes payload = 2;
   EventMeta event = 3;
+  CommandMeta command = 4;
 }

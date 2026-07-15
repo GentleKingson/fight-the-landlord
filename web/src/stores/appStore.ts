@@ -21,9 +21,8 @@ interface AppActions {
   setError: (error: string) => void;
   setBusinessError: (category: BusinessErrorCategory, message: string, retry?: CommandRequest, command?: CommandKind) => void;
   clearBusinessError: () => void;
-  beginCommand: (request: CommandRequest, timeoutMs: number, retryable: boolean) => void;
-  finishCommand: (kind: CommandKind) => void;
-  finishCommands: (kinds: CommandKind[]) => void;
+  beginCommand: (request: CommandRequest, requestId: string, timeoutMs: number, retryable: boolean) => void;
+  finishCommand: (kind: CommandKind, requestId: string) => void;
   clearPendingCommands: () => void;
   setLobbyPanel: (panel: LobbyPanel) => void;
   setRoomCodeInput: (value: string) => void;
@@ -94,11 +93,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     businessError: createBusinessError(category, message, retry, command)
   }),
   clearBusinessError: () => set({ error: '', businessError: null }),
-  beginCommand: (request, timeoutMs, retryable) => {
+  beginCommand: (request, requestId, timeoutMs, retryable) => {
     const kind = request.kind;
     const startedAt = Date.now();
     const pending: PendingCommand = {
       kind,
+      requestId,
       request,
       startedAt,
       timeoutAt: startedAt + timeoutMs,
@@ -109,7 +109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const timer = window.setTimeout(() => {
       commandTimers.delete(kind);
       const current = get().pendingCommands[kind];
-      if (!current || current.startedAt !== startedAt) return;
+      if (!current || current.requestId !== requestId) return;
       const pendingCommands = { ...get().pendingCommands };
       delete pendingCommands[kind];
       set({
@@ -125,18 +125,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }, timeoutMs);
     commandTimers.set(kind, timer);
   },
-  finishCommand: (kind) => {
+  finishCommand: (kind, requestId) => {
+    const current = get().pendingCommands[kind];
+    if (!current || current.requestId !== requestId) return;
     cancelCommandTimer(kind);
     const pendingCommands = { ...get().pendingCommands };
     delete pendingCommands[kind];
-    set({ pendingCommands });
-  },
-  finishCommands: (kinds) => {
-    const pendingCommands = { ...get().pendingCommands };
-    for (const kind of kinds) {
-      cancelCommandTimer(kind);
-      delete pendingCommands[kind];
-    }
     set({ pendingCommands });
   },
   clearPendingCommands: () => {
@@ -170,10 +164,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       const receivedAt = Date.now();
       const result = reduceGameMessage(state, message, receivedAt, state.serverClockOffsetMs);
       if (!result || result.ignored) return;
-      if (message.type === MsgType.GameStart) {
-        get().finishCommands(['quick-match', 'practice-match', 'ready', 'cancel-ready']);
-      }
-      if (result.acknowledgements.length > 0) get().finishCommands(result.acknowledgements);
       const clock = observeServerTimestamp(state, result.serverTimestamp, receivedAt);
       const clearsTurnMessage = message.type === MsgType.BidTurn || message.type === MsgType.PlayTurn;
       const clearsMatch = message.type === MsgType.GameStart
@@ -265,15 +255,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.Error: {
-        const payload = message.payload as { code?: number; message?: string; command_type?: WireMessageType };
+        const payload = message.payload as { code?: number; message?: string; request_id?: string; command_type?: WireMessageType };
         if (state.connectionStatus === 'reconnecting' && isReconnectFailure(payload.code, payload.message)) {
           acceptProvisionalAfterReconnectFailure(set, state, payload.message || '旧会话已失效');
           break;
         }
-        const command = commandKindForMessageType(payload.command_type);
-        const pending = command ? state.pendingCommands[command] : undefined;
-        if (command) get().finishCommand(command);
-        else get().clearPendingCommands();
+        const requestId = payload.request_id || commandRequestID(message);
+        const correlated = findPendingCommand(state.pendingCommands, requestId, payload.command_type);
+        if (requestId && !correlated) break;
+        const command = correlated?.kind ?? commandKindForMessageType(payload.command_type);
+        const pending = correlated?.pending;
+        if (correlated && requestId) get().finishCommand(correlated.kind, requestId);
         const errorMessage = payload.message || '未知错误';
         set({
           error: errorMessage,
@@ -287,18 +279,32 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
         break;
       }
+      case MsgType.CommandAck: {
+        const payload = message.payload as { request_id?: string; command_type?: WireMessageType };
+        const requestId = payload.request_id || commandRequestID(message);
+        const correlated = findPendingCommand(state.pendingCommands, requestId, payload.command_type);
+        if (correlated && requestId) get().finishCommand(correlated.kind, requestId);
+        break;
+      }
+      case MsgType.Warning: {
+        const payload = message.payload as { code?: number; message?: string };
+        const warningMessage = payload.message || '请求过于频繁，请稍后再试';
+        set({
+          error: warningMessage,
+          businessError: createBusinessError('rate-limit', warningMessage)
+        });
+        break;
+      }
       case MsgType.OnlineCount:
         set({ onlineCount: (message.payload as { count: number }).count });
         break;
       case MsgType.RoomCreated: {
         const payload = message.payload as { room_code: string; player: PlayerInfo };
-        get().finishCommand('create-room');
         set({ roomCode: payload.room_code, players: [normalizeRoomPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.RoomJoined: {
         const payload = message.payload as { room_code: string; players: PlayerInfo[] };
-        get().finishCommands(['join-room', 'quick-match', 'practice-match']);
         set({
           roomCode: payload.room_code,
           players: normalizeRoomPlayers(payload.players ?? []),
@@ -323,17 +329,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayerReady: {
         const payload = message.payload as { player_id: string; ready: boolean };
-        if (payload.player_id === state.playerId) get().finishCommand(payload.ready ? 'ready' : 'cancel-ready');
         set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
         break;
       }
       case MsgType.MatchFound:
-        get().finishCommands(['quick-match', 'practice-match']);
         set({ phase: 'waiting' });
         break;
       case MsgType.MatchQueued: {
         const payload = message.payload as { deadline_ms: number; practice: boolean };
-        get().finishCommand(payload.practice ? 'practice-match' : 'quick-match');
         set({
           phase: 'matching',
           matchDeadlineMs: payload.deadline_ms,
@@ -343,7 +346,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.MatchCancelled: {
         const payload = message.payload as { reason: string };
-        get().finishCommands(['quick-match', 'practice-match', 'cancel-match']);
         const timedOut = payload.reason.toLowerCase().includes('timeout');
         set({
           phase: 'lobby',
@@ -364,7 +366,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       case MsgType.RoomLeft: {
         const payload = message.payload as { room_code: string };
         if (payload.room_code !== state.roomCode) break;
-        get().finishCommand('leave-room');
         get().leaveLocalRoom();
         break;
       }
@@ -381,10 +382,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.Chat: {
         const payload = message.payload as ChatPayload;
-        const pendingChat = state.pendingCommands.chat;
-        if (pendingChat?.request.kind === 'chat' && payload.message_id === pendingChat.request.messageId) {
-          get().finishCommand('chat');
-        }
         useChatStore.getState().push(payload);
         break;
       }
@@ -506,6 +503,25 @@ function classifyServerError(code?: number): BusinessErrorCategory {
   return 'validation';
 }
 
+function commandRequestID(message: IncomingMessage): string | undefined {
+  return message.command?.request_id;
+}
+
+function findPendingCommand(
+  pendingCommands: Partial<Record<CommandKind, PendingCommand>>,
+  requestId: string | undefined,
+  messageType?: WireMessageType | string
+): { kind: CommandKind; pending: PendingCommand } | undefined {
+  if (!requestId) return undefined;
+  const expectedKind = commandKindForMessageType(messageType);
+  for (const [kind, pending] of Object.entries(pendingCommands) as [CommandKind, PendingCommand | undefined][]) {
+    if (!pending || pending.requestId !== requestId) continue;
+    if (expectedKind && expectedKind !== kind) return undefined;
+    return { kind, pending };
+  }
+  return undefined;
+}
+
 function commandKindForMessageType(messageType?: WireMessageType | string): CommandKind | undefined {
   switch (messageType) {
     case WireMessageType.MSG_CREATE_ROOM:
@@ -532,6 +548,12 @@ function commandKindForMessageType(messageType?: WireMessageType | string): Comm
     case 'leave_room': return 'leave-room';
     case WireMessageType.MSG_CHAT:
     case 'chat': return 'chat';
+    case WireMessageType.MSG_GET_STATS:
+    case 'get_stats': return 'stats';
+    case WireMessageType.MSG_GET_LEADERBOARD:
+    case 'get_leaderboard': return 'leaderboard';
+    case WireMessageType.MSG_GET_ROOM_LIST:
+    case 'get_room_list': return 'room-list';
     default: return undefined;
   }
 }
@@ -550,5 +572,8 @@ function commandLabel(kind: CommandKind): string {
     case 'pass': return '不出';
     case 'leave-room': return '离开房间';
     case 'chat': return '发送聊天';
+    case 'stats': return '获取战绩';
+    case 'leaderboard': return '获取排行榜';
+    case 'room-list': return '刷新房间列表';
   }
 }

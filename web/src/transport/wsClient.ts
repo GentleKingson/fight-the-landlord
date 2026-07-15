@@ -1,17 +1,20 @@
 import { ProtocolDecodeError, ProtocolEncodeError, decodeMessage, encodeMessage } from '../protocol/codec';
-import { MsgType, type IncomingMessage, type MessageType, type OutgoingPayload } from '../protocol/types';
+import { MsgType, type CommandMeta, type IncomingMessage, type MessageType, type OutgoingPayload } from '../protocol/types';
 import {
   forgetReconnect,
   loadReconnect,
   useAppStore,
   type StoredIdentity
 } from '../stores/appStore';
+import { readClientVersion } from '../version/compatibility';
 
 type Listener = (message: IncomingMessage) => void;
 
 export type SendResult =
   | { ok: true }
   | { ok: false; reason: 'not-connected' | 'encode-failed' | 'send-failed'; error?: Error };
+
+export type CommandMetadata = Partial<CommandMeta> & { request_id: string };
 
 export interface GameSocketOptions {
   heartbeatIntervalMs?: number;
@@ -40,6 +43,15 @@ const DEFAULT_OPTIONS: ResolvedGameSocketOptions = {
   random: Math.random
 };
 
+const PROTOCOL_VERSION = '1';
+const WEB_CLIENT_KIND = 'web';
+const REQUIRED_CAPABILITIES = [
+  'command_correlation',
+  'idempotency',
+  'game_context',
+  'protobuf_chat'
+] as const;
+
 export class GameSocket {
   private socket: WebSocket | null = null;
   private heartbeat: number | null = null;
@@ -52,6 +64,8 @@ export class GameSocket {
   private reconnectWhenClosed = false;
   private closeError: string | null = null;
   private browserListenersInstalled = false;
+  private negotiated = false;
+  private helloRequestId: string | null = null;
   private readonly listeners = new Set<Listener>();
   private readonly options: ResolvedGameSocketOptions;
 
@@ -89,12 +103,22 @@ export class GameSocket {
     }
 
     this.socket = socket;
+    this.negotiated = false;
+    this.helloRequestId = null;
     this.closeError = null;
     socket.binaryType = 'arraybuffer';
 
     socket.onopen = () => {
       if (this.socket !== socket) return;
-      if (!document.hidden) this.startHeartbeat();
+      const requestId = createRequestID();
+      this.helloRequestId = requestId;
+      const result = this.send(MsgType.Hello, {
+        protocol_version: PROTOCOL_VERSION,
+        client_version: readClientVersion(),
+        capabilities: [...REQUIRED_CAPABILITIES],
+        client_kind: WEB_CLIENT_KIND
+      }, { request_id: requestId });
+      if (!result.ok) this.closeUnhealthySocket(socket, '无法完成协议协商');
     };
 
     socket.onmessage = (event) => {
@@ -109,6 +133,7 @@ export class GameSocket {
       }
 
       if (message.type === MsgType.Pong) this.clearPongWatchdog();
+      if (!this.advanceNegotiationState(message, socket)) return;
       useAppStore.getState().handleMessage(message);
       this.advanceIdentityState(message, socket);
       for (const listener of this.listeners) listener(message);
@@ -122,6 +147,8 @@ export class GameSocket {
     socket.onclose = () => {
       if (this.socket !== socket) return;
       this.stopHeartbeat();
+      this.negotiated = false;
+      this.helloRequestId = null;
       this.socket = null;
       const reconnectImmediately = this.reconnectWhenClosed;
       const closeError = this.closeError;
@@ -150,6 +177,8 @@ export class GameSocket {
     this.clearReconnectTimer();
     this.reconnectAttempt = 0;
     this.reconnectIdentity = null;
+    this.negotiated = false;
+    this.helloRequestId = null;
     this.reconnectWhenClosed = false;
     this.closeError = null;
     this.removeBrowserListeners();
@@ -171,12 +200,20 @@ export class GameSocket {
     this.shutdown();
   }
 
-  send(type: MessageType, payload?: OutgoingPayload): SendResult {
-    if (this.socket?.readyState !== WebSocket.OPEN) return { ok: false, reason: 'not-connected' };
+  send(type: MessageType, payload?: OutgoingPayload, command?: CommandMetadata): SendResult {
+    if (
+      this.socket?.readyState !== WebSocket.OPEN
+      || (!this.negotiated && type !== MsgType.Hello)
+    ) return { ok: false, reason: 'not-connected' };
     let frame: Uint8Array<ArrayBufferLike>;
     try {
-      const encode = encodeMessage as (messageType: MessageType, value?: OutgoingPayload) => Uint8Array<ArrayBufferLike>;
-      frame = encode(type, payload);
+      const effectiveCommand = command ?? { request_id: createRequestID() };
+      const encode = encodeMessage as (
+        messageType: MessageType,
+        value?: OutgoingPayload,
+        metadata?: CommandMetadata
+      ) => Uint8Array<ArrayBufferLike>;
+      frame = encode(type, payload, effectiveCommand);
     } catch (error) {
       const typedError = error instanceof Error ? error : new Error(String(error));
       const detail = error instanceof ProtocolEncodeError ? error.message : typedError.message;
@@ -205,7 +242,7 @@ export class GameSocket {
       const currentStore = useAppStore.getState();
       if (this.reconnectIdentity) {
         currentStore.setConnectionStatus('reconnecting');
-        const result = this.send(MsgType.Reconnect, {
+        const result = this.sendCommand(MsgType.Reconnect, {
           player_id: this.reconnectIdentity.id,
           token: this.reconnectIdentity.token
         });
@@ -215,8 +252,8 @@ export class GameSocket {
           if (this.socket === socket) useAppStore.getState().setConnectionStatus('connected');
         });
       }
-      this.send(MsgType.GetOnlineCount);
-      this.send(MsgType.GetMaintenanceStatus);
+      this.sendCommand(MsgType.GetOnlineCount);
+      this.sendCommand(MsgType.GetMaintenanceStatus);
       return;
     }
 
@@ -233,6 +270,65 @@ export class GameSocket {
     }
   }
 
+  private advanceNegotiationState(message: IncomingMessage, socket: WebSocket): boolean {
+    if (message.type === MsgType.Negotiated) {
+      const error = this.negotiationError(message);
+      if (error) {
+        this.rejectNegotiation(socket, error, 'invalid negotiation');
+        return false;
+      }
+      this.helloRequestId = null;
+      this.negotiated = true;
+      if (!document.hidden) this.startHeartbeat();
+      return true;
+    }
+
+    if (message.type === MsgType.ProtocolRejected) {
+      const payload = message.payload as { request_id?: string; reason?: string };
+      const reason = payload.request_id === this.helloRequestId
+        ? payload.reason || '客户端协议与服务器不兼容'
+        : '协议拒绝响应的 request_id 不匹配';
+      this.rejectNegotiation(socket, reason, 'protocol rejected');
+      return false;
+    }
+    return true;
+  }
+
+  private negotiationError(message: IncomingMessage): string | null {
+    if (!this.helloRequestId || message.command?.request_id !== this.helloRequestId) {
+      return '协议协商响应的 request_id 不匹配';
+    }
+    const payload = message.payload as {
+      protocol_version?: string;
+      capabilities?: string[];
+      client_kind?: string;
+    };
+    if (payload.protocol_version !== PROTOCOL_VERSION) {
+      return `服务器协商了不兼容的协议版本：${payload.protocol_version || '未知'}`;
+    }
+    if (payload.client_kind !== WEB_CLIENT_KIND) {
+      return `服务器协商了错误的客户端类型：${payload.client_kind || '未知'}`;
+    }
+    if (!Array.isArray(payload.capabilities)) {
+      return '服务器协议协商缺少 capabilities';
+    }
+    const missing = REQUIRED_CAPABILITIES.find((capability) => !payload.capabilities?.includes(capability));
+    return missing ? `服务器协议协商缺少必需 capability：${missing}` : null;
+  }
+
+  private rejectNegotiation(socket: WebSocket, message: string, closeReason: string): void {
+    this.intentionalClose = true;
+    this.negotiated = false;
+    this.helloRequestId = null;
+    this.closeError = message;
+    useAppStore.getState().setError(message);
+    socket.close(4002, closeReason);
+  }
+
+  private sendCommand(type: MessageType, payload?: OutgoingPayload): SendResult {
+    return this.send(type, payload, { request_id: createRequestID() });
+  }
+
   private startHeartbeat(sendImmediately = false): void {
     this.stopHeartbeat();
     if (sendImmediately) this.sendHeartbeat();
@@ -243,7 +339,7 @@ export class GameSocket {
     if (this.pongWatchdog !== null) return;
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    const result = this.send(MsgType.Ping, { timestamp: Date.now() });
+    const result = this.sendCommand(MsgType.Ping, { timestamp: Date.now() });
     if (!result.ok) {
       if (result.reason === 'send-failed') this.closeUnhealthySocket(socket, '心跳发送失败');
       return;
@@ -339,13 +435,18 @@ export class GameSocket {
       return;
     }
     if (this.networkOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
-    if (this.socket?.readyState === WebSocket.OPEN) {
+    if (this.socket?.readyState === WebSocket.OPEN && this.negotiated) {
       this.startHeartbeat(true);
     } else if (!this.socket) {
       this.clearReconnectTimer();
       this.connect();
     }
   };
+}
+
+export function createRequestID(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function createGameSocket(): GameSocket {

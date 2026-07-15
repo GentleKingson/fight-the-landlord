@@ -64,6 +64,23 @@ describe('protocol codec', () => {
     });
   });
 
+  it('round trips correlated command metadata in the message envelope', () => {
+    expect(decodeMessage(encodeMessage(MsgType.Pass, undefined, {
+      request_id: 'request-7',
+      expected_game_id: 'game-1',
+      expected_turn_id: 7
+    }))).toMatchObject({
+      type: MsgType.Pass,
+      payload: {},
+      command: {
+        request_id: 'request-7',
+        expected_game_id: 'game-1',
+        expected_turn_id: 7
+      }
+    });
+    expect(() => encodeMessage(MsgType.Pass, undefined, { request_id: '' })).toThrow(/requires request_id/);
+  });
+
   it('round trips Unicode chat as protobuf without a JSON fallback', () => {
     const payload = {
       sender_id: 'p1',

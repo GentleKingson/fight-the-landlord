@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -59,11 +61,14 @@ type Client struct {
 	RoomID string // 当前所在房间 ID
 	IP     string // 客户端 IP 地址
 
-	server *Server
-	conn   *websocket.Conn
-	send   chan []byte
-	done   chan struct{}
-	lease  *connectionLease
+	server        *Server
+	conn          *websocket.Conn
+	send          chan []byte
+	done          chan struct{}
+	lease         *connectionLease
+	clientVersion string
+	clientKind    string
+	capabilities  []string
 
 	mu            sync.RWMutex
 	lifecycleMu   sync.RWMutex
@@ -71,6 +76,14 @@ type Client struct {
 	closeOnce     sync.Once
 	slowCloseOnce sync.Once
 	closed        atomic.Bool
+	commandMu     sync.Mutex
+	activeCommand *activeCommandExecution
+}
+
+type activeCommandExecution struct {
+	requestID string
+	command   protocol.MessageType
+	responses []*protocol.Message
 }
 
 // NewClient 创建新客户端
@@ -106,7 +119,7 @@ func (c *Client) ReadPump() {
 	})
 
 	for {
-		_, message, err := c.conn.ReadMessage()
+		frameType, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("读取错误: %v", err)
@@ -114,35 +127,170 @@ func (c *Client) ReadPump() {
 			break
 		}
 
-		// 消息速率限制检查
-		clientID := c.GetID()
-		clientName := c.GetName()
-		allowed, warning := c.server.messageLimiter.AllowMessage(clientID)
-		if !allowed {
-			log.Printf("⚠️ 客户端 %s (IP: %s) 消息过于频繁", clientName, c.IP)
-			c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeRateLimit, "消息发送过于频繁"))
-			// 如果警告次数过多，断开连接
-			if c.server.messageLimiter.GetWarningCount(clientID) > 5 {
-				log.Printf("🚫 客户端 %s 因多次超速被断开连接", clientName)
-				break
-			}
-			continue
+		if !c.handleIncomingFrame(frameType, message) {
+			break
 		}
+	}
+}
+
+func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
+	if frameType != websocket.BinaryMessage {
+		_ = c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeInvalidMsg, "消息必须使用二进制 protobuf 帧"))
+		return true
+	}
+	msg, err := codec.Decode(frame)
+	if err != nil {
+		log.Printf("消息解析错误: %v", err)
+		_ = c.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+		return true
+	}
+	defer codec.PutMessage(msg)
+
+	c.attachLegacyChatCommand(msg)
+	requestID := ""
+	if msg.Command != nil {
+		requestID = msg.Command.RequestID
+	}
+	if !isClientCommand(msg.Type) || !validRequestID(requestID) {
+		correlatedRequestID := requestID
+		if !validRequestID(correlatedRequestID) {
+			correlatedRequestID = ""
+		}
+		response := codec.NewCorrelatedCommandErrorMessage(
+			protocol.ErrCodeInvalidMsg,
+			"无效的命令或 request_id",
+			correlatedRequestID,
+			msg.Type,
+		)
+		if correlatedRequestID == "" {
+			response.Command = nil
+		}
+		_ = c.SendMessage(response)
+		return true
+	}
+	playerID := c.GetID()
+	cache := c.server.activeCommandCache()
+	lookup, err := cache.begin(playerID, requestID, commandFingerprint(msg))
+	if err != nil {
+		code := protocol.ErrCodeCommandCacheFull
+		if errors.Is(err, errRequestConflict) {
+			code = protocol.ErrCodeRequestConflict
+		}
+		_ = c.SendMessage(codec.NewCorrelatedCommandErrorMessage(code, "", requestID, msg.Type))
+		return true
+	}
+	if len(lookup.responses) > 0 {
+		c.replayCommandResponses(lookup.responses)
+		return true
+	}
+	if lookup.wait != nil {
+		c.initializeLifecycle()
+		select {
+		case <-lookup.wait:
+			c.replayCommandResponses(cache.responsesAfter(lookup.entry))
+		case <-c.done:
+		}
+		return true
+	}
+
+	if limiter := c.server.messageLimiter; limiter != nil {
+		allowed, warning := limiter.AllowMessage(playerID)
 		if warning {
-			c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeRateLimit, "请求过于频繁，请放慢速度"))
+			_ = c.SendMessage(codec.MustNewMessage(protocol.MsgWarning, protocol.WarningPayload{
+				Code: protocol.ErrCodeRateLimit, Message: "请求过于频繁，请放慢速度",
+			}))
 		}
-
-		// 解析消息
-		msg, err := codec.Decode(message)
-		if err != nil {
-			log.Printf("消息解析错误: %v", err)
-			c.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
-			continue
+		if !allowed {
+			log.Printf("客户端 %s (IP: %s) 消息过于频繁", c.GetName(), c.IP)
+			response := codec.NewCorrelatedCommandErrorMessage(
+				protocol.ErrCodeRateLimit, "消息发送过于频繁", requestID, msg.Type,
+			)
+			_ = c.SendMessage(response)
+			cache.finish(lookup.entry, []*protocol.Message{response}, c.GetID(), requestID)
+			if limiter.GetWarningCount(playerID) > 5 {
+				log.Printf("客户端 %s 因多次超速被断开连接", c.GetName())
+				return false
+			}
+			return true
 		}
+	}
 
-		// 交给处理器处理，处理完后归还到池
-		c.server.handler.Handle(c, msg)
-		codec.PutMessage(msg)
+	c.executeCommand(msg, lookup.entry, cache)
+	return true
+}
+
+func (c *Client) executeCommand(msg *protocol.Message, entry *commandCacheEntry, cache *commandCache) {
+	requestID := msg.Command.RequestID
+	c.beginCommandExecution(requestID, msg.Type)
+	finished := false
+	defer func() {
+		if !finished {
+			_ = c.endCommandExecution()
+			cache.abort(entry)
+		}
+	}()
+
+	if c.server.handler == nil {
+		response := codec.NewCorrelatedCommandErrorMessage(
+			protocol.ErrCodeUnknown, "服务器消息处理器不可用", requestID, msg.Type,
+		)
+		_ = c.SendMessage(response)
+		_ = c.endCommandExecution()
+		cache.finish(entry, []*protocol.Message{response}, c.GetID(), requestID)
+		finished = true
+		return
+	}
+	c.server.handler.Handle(c, msg)
+	responses := c.endCommandExecution()
+	if commandResponsesContainError(responses) {
+		cache.finish(entry, responses, c.GetID(), requestID)
+		finished = true
+		return
+	}
+	ack := codec.NewCommandAckMessage(requestID, msg.Type)
+	_ = c.SendMessage(ack)
+	responses = append(responses, ack)
+	cache.finish(entry, responses, c.GetID(), requestID)
+	finished = true
+}
+
+func (c *Client) replayCommandResponses(responses []*protocol.Message) {
+	for _, response := range responses {
+		if response != nil {
+			_ = c.SendMessage(response)
+		}
+	}
+}
+
+func (c *Client) attachLegacyChatCommand(msg *protocol.Message) bool {
+	if msg.Type != protocol.MsgChat || msg.Command != nil {
+		return false
+	}
+	payload, legacy, err := codec.ParseChatPayload(msg)
+	if err != nil || !legacy {
+		return false
+	}
+	seed := payload.MessageID
+	if seed == "" {
+		seed = uuid.NewString()
+	}
+	digest := sha256.Sum256([]byte(seed))
+	msg.Command = &protocol.CommandMeta{RequestID: "legacy-chat:" + hex.EncodeToString(digest[:16])}
+	return true
+}
+
+func isClientCommand(messageType protocol.MessageType) bool {
+	switch messageType {
+	case protocol.MsgReconnect, protocol.MsgPing,
+		protocol.MsgCreateRoom, protocol.MsgJoinRoom, protocol.MsgLeaveRoom,
+		protocol.MsgQuickMatch, protocol.MsgPracticeMatch, protocol.MsgCancelMatch,
+		protocol.MsgReady, protocol.MsgCancelReady,
+		protocol.MsgBid, protocol.MsgPlayCards, protocol.MsgPass,
+		protocol.MsgGetStats, protocol.MsgGetLeaderboard, protocol.MsgGetRoomList,
+		protocol.MsgGetOnlineCount, protocol.MsgGetMaintenanceStatus, protocol.MsgChat:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -205,13 +353,62 @@ func (c *Client) WritePump() {
 func (c *Client) SendMessage(msg *protocol.Message) error {
 	c.initializeLifecycle()
 
-	data, err := encodeClientMessage(msg)
+	outgoing := c.prepareActiveCommandResponse(msg)
+	data, err := encodeClientMessage(outgoing)
 	if err != nil {
 		return err
 	}
 	sendErr := c.enqueueEncodedMessage(data)
 	c.handleSendError(sendErr)
 	return sendErr
+}
+
+func (c *Client) beginCommandExecution(requestID string, command protocol.MessageType) {
+	c.commandMu.Lock()
+	c.activeCommand = &activeCommandExecution{requestID: requestID, command: command}
+	c.commandMu.Unlock()
+}
+
+func (c *Client) endCommandExecution() []*protocol.Message {
+	c.commandMu.Lock()
+	defer c.commandMu.Unlock()
+	if c.activeCommand == nil {
+		return nil
+	}
+	responses := cloneCommandResponses(c.activeCommand.responses)
+	c.activeCommand = nil
+	return responses
+}
+
+func (c *Client) prepareActiveCommandResponse(msg *protocol.Message) *protocol.Message {
+	if msg == nil {
+		return msg
+	}
+	c.commandMu.Lock()
+	defer c.commandMu.Unlock()
+	active := c.activeCommand
+	if active == nil {
+		return msg
+	}
+	if msg.Type == protocol.MsgError {
+		payload, err := codec.ParsePayload[protocol.ErrorPayload](msg)
+		if err != nil || payload.CommandType != active.command {
+			return msg
+		}
+		correlated := codec.CorrelateError(msg, active.requestID, active.command)
+		active.responses = append(active.responses, codec.CloneMessage(correlated))
+		return correlated
+	}
+	if !isCommandResult(active.command, msg.Type) {
+		return msg
+	}
+	correlated := codec.CloneMessage(msg)
+	if correlated.Command == nil {
+		correlated.Command = &protocol.CommandMeta{}
+	}
+	correlated.Command.RequestID = active.requestID
+	active.responses = append(active.responses, codec.CloneMessage(correlated))
+	return correlated
 }
 
 // SendMessageIfRoom enqueues msg only while the physical connection still has
@@ -221,15 +418,16 @@ func (c *Client) SendMessage(msg *protocol.Message) error {
 func (c *Client) SendMessageIfRoom(expectedRoom string, msg *protocol.Message) (bool, error) {
 	c.initializeLifecycle()
 
-	data, err := encodeClientMessage(msg)
-	if err != nil {
-		return false, err
-	}
-
 	c.mu.RLock()
 	if c.RoomID != expectedRoom {
 		c.mu.RUnlock()
 		return false, nil
+	}
+	outgoing := c.prepareActiveCommandResponse(msg)
+	data, err := encodeClientMessage(outgoing)
+	if err != nil {
+		c.mu.RUnlock()
+		return false, err
 	}
 	sendErr := c.enqueueEncodedMessage(data)
 	c.mu.RUnlock()
@@ -247,21 +445,72 @@ func (c *Client) SendMessageIfRoom(expectedRoom string, msg *protocol.Message) (
 func (c *Client) SendMessageIfIdentity(expectedPlayerID, expectedRoom string, msg *protocol.Message) (bool, error) {
 	c.initializeLifecycle()
 
-	data, err := encodeClientMessage(msg)
-	if err != nil {
-		return false, err
-	}
-
 	c.mu.RLock()
 	if c.ID != expectedPlayerID || c.RoomID != expectedRoom {
 		c.mu.RUnlock()
 		return false, nil
+	}
+	outgoing := c.prepareActiveCommandResponse(msg)
+	data, err := encodeClientMessage(outgoing)
+	if err != nil {
+		c.mu.RUnlock()
+		return false, err
 	}
 	sendErr := c.enqueueEncodedMessage(data)
 	c.mu.RUnlock()
 
 	c.handleSendError(sendErr)
 	return sendErr == nil, sendErr
+}
+
+func commandResponsesContainError(responses []*protocol.Message) bool {
+	for _, response := range responses {
+		if response != nil && response.Type == protocol.MsgError {
+			return true
+		}
+	}
+	return false
+}
+
+func isCommandResult(command, response protocol.MessageType) bool {
+	switch command {
+	case protocol.MsgReconnect:
+		return response == protocol.MsgReconnected
+	case protocol.MsgPing:
+		return response == protocol.MsgPong
+	case protocol.MsgCreateRoom:
+		return response == protocol.MsgRoomCreated
+	case protocol.MsgJoinRoom:
+		return response == protocol.MsgRoomJoined
+	case protocol.MsgLeaveRoom:
+		return response == protocol.MsgRoomLeft
+	case protocol.MsgQuickMatch, protocol.MsgPracticeMatch:
+		return response == protocol.MsgMatchQueued
+	case protocol.MsgCancelMatch:
+		return response == protocol.MsgMatchCancelled
+	case protocol.MsgReady, protocol.MsgCancelReady:
+		return response == protocol.MsgPlayerReady
+	case protocol.MsgBid:
+		return response == protocol.MsgBidResult
+	case protocol.MsgPlayCards:
+		return response == protocol.MsgCardPlayed
+	case protocol.MsgPass:
+		return response == protocol.MsgPlayerPass
+	case protocol.MsgGetStats:
+		return response == protocol.MsgStatsResult
+	case protocol.MsgGetLeaderboard:
+		return response == protocol.MsgLeaderboardResult
+	case protocol.MsgGetRoomList:
+		return response == protocol.MsgRoomListResult
+	case protocol.MsgGetOnlineCount:
+		return response == protocol.MsgOnlineCount
+	case protocol.MsgGetMaintenanceStatus:
+		return response == protocol.MsgMaintenancePull
+	case protocol.MsgChat:
+		return response == protocol.MsgChat
+	default:
+		return false
+	}
 }
 
 func encodeClientMessage(msg *protocol.Message) ([]byte, error) {

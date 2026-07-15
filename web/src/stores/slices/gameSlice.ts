@@ -100,12 +100,9 @@ export interface GameReducerState extends GameSlice, RoomSlice {
   drawer: UtilityDrawer;
 }
 
-export type GameCommandAcknowledgement = 'bid' | 'play' | 'pass';
-
 export interface GameReducerResult {
   ignored: boolean;
   patch: Partial<GameSlice & RoomSlice & { selectedCards: Set<string>; drawer: UtilityDrawer }>;
-  acknowledgements: GameCommandAcknowledgement[];
   serverTimestamp?: number;
 }
 
@@ -131,10 +128,9 @@ export function reduceGameMessage(
 
   if (message.type === MsgType.GameStart) {
     const eventPatch = gateGameStart(state, message.event);
-    if (!eventPatch) return { ignored: true, patch: {}, acknowledgements: [] };
+    if (!eventPatch) return { ignored: true, patch: {} };
     return {
       ignored: false,
-      acknowledgements: [],
       serverTimestamp: message.event?.server_time_ms,
       patch: {
         ...initialGameSlice,
@@ -148,7 +144,7 @@ export function reduceGameMessage(
 
   const gate = gateEvent(state, message.event);
   if (!gate.accepted) {
-    return { ignored: true, patch: {}, acknowledgements: [] };
+    return { ignored: true, patch: {} };
   }
 
   const eventPatch = gate.patch;
@@ -204,7 +200,7 @@ function reduceAcceptedGameMessage(
         multiplier: payload.multiplier ?? state.multiplier,
         recentActions: pushAction(state.recentActions, action),
         seatActions: setSeatAction(state.seatActions, action)
-      }, payload.player_id === state.playerId ? ['bid'] : []);
+      });
     }
     case MsgType.Landlord: {
       const payload = message.payload;
@@ -262,7 +258,7 @@ function reduceAcceptedGameMessage(
         recentActions: pushAction(state.recentActions, action),
         seatActions: setSeatAction(state.mustPlay ? {} : state.seatActions, action),
         selectedCards: isMe ? new Set() : state.selectedCards
-      }, isMe ? ['play'] : []);
+      });
     }
     case MsgType.PlayerPass: {
       const payload = message.payload;
@@ -277,7 +273,7 @@ function reduceAcceptedGameMessage(
         // authoritative last non-pass play used for comparison and hints.
         recentActions: pushAction(state.recentActions, action),
         seatActions: setSeatAction(state.seatActions, action)
-      }, payload.player_id === state.playerId ? ['pass'] : []);
+      });
     }
     case MsgType.GameOver: {
       const payload = message.payload;
@@ -295,7 +291,7 @@ function reduceAcceptedGameMessage(
         playerHands: payload.player_hands ?? [],
         settlementSyncError: '',
         drawer: 'none'
-      }, ['bid', 'play', 'pass']);
+      });
     }
     default:
       return null;
@@ -499,11 +495,8 @@ function eventWatermark(event: EventMeta, seenGameStreams: Record<string, number
   };
 }
 
-function accepted(
-  patch: GameReducerResult['patch'],
-  acknowledgements: GameCommandAcknowledgement[] = []
-): Omit<GameReducerResult, 'serverTimestamp'> {
-  return { ignored: false, patch, acknowledgements };
+function accepted(patch: GameReducerResult['patch']): Omit<GameReducerResult, 'serverTimestamp'> {
+  return { ignored: false, patch };
 }
 
 function pushAction(actions: TableAction[], action: TableAction): TableAction[] {

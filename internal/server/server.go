@@ -62,6 +62,8 @@ type Server struct {
 	connectionLimiterOnce sync.Once
 	connectionLimiter     *connectionLimiter
 	slowClientDisconnects atomic.Int64
+	commandCacheOnce      sync.Once
+	commandCache          *commandCache
 
 	// 维护模式
 	maintenanceMode bool
@@ -108,6 +110,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		// 初始化连接控制
 		maxConnections:    cfg.Server.MaxConnections,
 		connectionLimiter: newConnectionLimiter(cfg.Server.MaxConnections),
+		commandCache:      newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL),
 	}
 
 	// 初始化房间管理器
@@ -170,6 +173,22 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)
 
 	return s, nil
+}
+
+func (s *Server) activeCommandCache() *commandCache {
+	s.commandCacheOnce.Do(func() {
+		if s.commandCache == nil {
+			s.commandCache = newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL)
+		}
+	})
+	return s.commandCache
+}
+
+func (s *Server) LegacyChatMessages() int64 {
+	if s == nil || s.handler == nil {
+		return 0
+	}
+	return s.handler.LegacyChatMessages()
 }
 
 // Start 启动服务器

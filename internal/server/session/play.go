@@ -17,12 +17,30 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 }
 
 func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.CardInfo, expectedTurnID int64) error {
+	return gs.handlePlayCardsAt(playerID, cardInfos, "", expectedTurnID)
+}
+
+func (gs *GameSession) HandlePlayCardsAt(playerID string, cardInfos []protocol.CardInfo, expectedGameID string, expectedTurnID int64) error {
+	if expectedGameID == "" {
+		return apperrors.ErrStaleGame
+	}
+	if expectedTurnID <= 0 {
+		return apperrors.ErrStaleTurn
+	}
+	return gs.handlePlayCardsAt(playerID, cardInfos, expectedGameID, expectedTurnID)
+}
+
+func (gs *GameSession) handlePlayCardsAt(playerID string, cardInfos []protocol.CardInfo, expectedGameID string, expectedTurnID int64) error {
 	gs.actionMu.Lock()
 	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
 	if gs.retired {
 		gs.mu.Unlock()
 		return apperrors.ErrGameNotStart
+	}
+	if expectedGameID != "" && gs.gameID != expectedGameID {
+		gs.mu.Unlock()
+		return apperrors.ErrStaleGame
 	}
 
 	if gs.state != GameStatePlaying {
@@ -31,6 +49,9 @@ func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.Car
 	}
 	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
 		gs.mu.Unlock()
+		if expectedGameID != "" {
+			return apperrors.ErrStaleTurn
+		}
 		return apperrors.ErrNotYourTurn
 	}
 
@@ -130,12 +151,30 @@ func (gs *GameSession) HandlePass(playerID string) error {
 }
 
 func (gs *GameSession) handlePass(playerID string, expectedTurnID int64) error {
+	return gs.handlePassAt(playerID, "", expectedTurnID)
+}
+
+func (gs *GameSession) HandlePassAt(playerID, expectedGameID string, expectedTurnID int64) error {
+	if expectedGameID == "" {
+		return apperrors.ErrStaleGame
+	}
+	if expectedTurnID <= 0 {
+		return apperrors.ErrStaleTurn
+	}
+	return gs.handlePassAt(playerID, expectedGameID, expectedTurnID)
+}
+
+func (gs *GameSession) handlePassAt(playerID, expectedGameID string, expectedTurnID int64) error {
 	gs.actionMu.Lock()
 	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
 	if gs.retired {
 		gs.mu.Unlock()
 		return apperrors.ErrGameNotStart
+	}
+	if expectedGameID != "" && gs.gameID != expectedGameID {
+		gs.mu.Unlock()
+		return apperrors.ErrStaleGame
 	}
 
 	if gs.state != GameStatePlaying {
@@ -144,6 +183,9 @@ func (gs *GameSession) handlePass(playerID string, expectedTurnID int64) error {
 	}
 	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
 		gs.mu.Unlock()
+		if expectedGameID != "" {
+			return apperrors.ErrStaleTurn
+		}
 		return apperrors.ErrNotYourTurn
 	}
 

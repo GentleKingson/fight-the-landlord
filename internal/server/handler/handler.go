@@ -3,6 +3,7 @@ package handler
 import (
 	"log"
 	"sync"
+	"sync/atomic"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
@@ -37,7 +38,14 @@ type Handler struct {
 	// gamesLifecycleMu orders exact registration/removal against final
 	// Reconnected and RoomLeft enqueueing. Never call Retire or Matcher while
 	// holding it.
-	gamesLifecycleMu sync.Mutex
+	gamesLifecycleMu   sync.Mutex
+	legacyChatMessages atomic.Int64
+}
+
+// LegacyChatMessages reports migration traffic that still embeds JSON Chat
+// payloads inside the protobuf envelope.
+func (h *Handler) LegacyChatMessages() int64 {
+	return h.legacyChatMessages.Load()
 }
 
 type gameRegistration struct {
@@ -185,7 +193,7 @@ func (h *Handler) initHandlers() {
 		// 游戏操作
 		protocol.MsgBid:       h.handleBid,
 		protocol.MsgPlayCards: h.handlePlayCards,
-		protocol.MsgPass:      func(c types.ClientInterface, _ *protocol.Message) { h.handlePass(c) },
+		protocol.MsgPass:      func(c types.ClientInterface, msg *protocol.Message) { h.handlePass(c, msg) },
 
 		// 信息查询
 		protocol.MsgGetStats:             func(c types.ClientInterface, _ *protocol.Message) { h.handleGetStats(c) },
@@ -206,5 +214,5 @@ func (h *Handler) Handle(client types.ClientInterface, msg *protocol.Message) {
 
 	log.Printf("⚠️  未知消息类型: '%s' (来自玩家: %s, ID: %s)", msg.Type, client.GetName(), client.GetID())
 	log.Printf("    消息详情: Payload长度=%d bytes", len(msg.Payload))
-	client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+	client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, msg.Type))
 }

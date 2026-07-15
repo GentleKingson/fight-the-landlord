@@ -17,7 +17,6 @@ func handleMsgConnected(m model.Model, msg *protocol.Message) tea.Cmd {
 	_ = payloadconv.DecodePayload(msg.Type, msg.Payload, &payload)
 
 	m.SetPlayerInfo(payload.PlayerID, payload.PlayerName)
-	m.Client().ReconnectToken = payload.ReconnectToken
 
 	_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetOnlineCount, nil))
 	_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetMaintenanceStatus, nil))

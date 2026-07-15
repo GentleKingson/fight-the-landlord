@@ -67,10 +67,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lease.activate()
+	negotiated, err := s.negotiateWebSocket(conn)
+	if err != nil {
+		log.Printf("协议握手失败 (IP: %s): %v", clientIP, err)
+		_ = conn.Close()
+		return
+	}
 
 	// 创建客户端
 	client := newClientWithLease(s, conn, lease)
 	client.IP = clientIP // 记录客户端 IP
+	client.clientVersion = negotiated.version
+	client.clientKind = negotiated.kind
+	client.capabilities = append([]string(nil), negotiated.capabilities...)
 	s.registerClient(client)
 
 	// 创建会话

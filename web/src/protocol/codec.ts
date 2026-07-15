@@ -4,6 +4,7 @@ import {
   MESSAGE_TYPE_BY_NAME,
   PAYLOAD_TYPE_BY_NAME,
   protocolRoot,
+  type CommandMeta,
   type EmptyPayload,
   type EventMeta,
   type MessageName,
@@ -41,6 +42,7 @@ export class ProtocolDecodeError extends Error {
 const Envelope = protocolRoot.lookupType('protocol.Message');
 
 const requiredFields: Partial<Record<MessageName, readonly string[]>> = {
+  hello: ['protocol_version', 'client_version', 'capabilities', 'client_kind'],
   reconnect: ['token', 'player_id'],
   ping: ['timestamp'],
   join_room: ['room_code'],
@@ -76,12 +78,17 @@ const requiredFields: Partial<Record<MessageName, readonly string[]>> = {
   room_list_result: ['rooms'],
   maintenance_status: ['maintenance'],
   maintenance: ['maintenance'],
+  negotiated: ['protocol_version', 'server_version', 'capabilities', 'client_kind'],
+  protocol_rejected: ['request_id', 'reason', 'supported_protocol_version'],
+  command_ack: ['request_id', 'command_type'],
+  warning: ['code', 'message'],
   error: ['code', 'message']
 };
 
 export function encodeMessage<Name extends MessageName>(
   type: Name,
-  payload?: EncodablePayload<Name>
+  payload?: EncodablePayload<Name>,
+  command?: DeepPartial<CommandMeta>
 ): Uint8Array<ArrayBufferLike> {
   const numericType = MESSAGE_TYPE_BY_NAME[type];
   if (numericType === undefined) {
@@ -90,7 +97,10 @@ export function encodeMessage<Name extends MessageName>(
 
   try {
     const payloadBytes = encodePayload(type, payload);
-    const envelope = { type: numericType, payload: payloadBytes };
+    if (command && (typeof command.request_id !== 'string' || command.request_id.trim() === '')) {
+      throw new ProtocolEncodeError(`${type} command metadata requires request_id`, type);
+    }
+    const envelope = { type: numericType, payload: payloadBytes, ...(command ? { command } : {}) };
     const envelopeError = Envelope.verify(envelope);
     if (envelopeError) throw new Error(envelopeError);
     return Envelope.encode(Envelope.create(envelope)).finish();
@@ -119,11 +129,47 @@ export function decodeMessage(data: ArrayBuffer | Uint8Array): ProtocolMessage {
   try {
     const payload = decodePayload(type, payloadBytes);
     const event = decodeEvent(envelopeRecord.event, type);
-    return (event ? { type, payload, event } : { type, payload }) as ProtocolMessage;
+    const command = decodeCommand(envelopeRecord.command, type);
+    return {
+      type,
+      payload,
+      ...(event ? { event } : {}),
+      ...(command ? { command } : {})
+    } as ProtocolMessage;
   } catch (error) {
     if (error instanceof ProtocolDecodeError) throw error;
     throw new ProtocolDecodeError(`Failed to decode ${type}: ${errorMessage(error)}`, numericType, { cause: error });
   }
+}
+
+function decodeCommand(value: unknown, messageType: MessageName): CommandMeta | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    throw new ProtocolDecodeError('Invalid command metadata', MESSAGE_TYPE_BY_NAME[messageType]);
+  }
+
+  const CommandType = protocolRoot.lookupType('protocol.CommandMeta');
+  assertSafeInt64Fields(CommandType, value, messageType, 'command');
+  const command = CommandType.toObject(value as unknown as protobuf.Message<UnknownRecord>, {
+    longs: Number,
+    defaults: true,
+    arrays: true,
+    objects: true
+  }) as unknown as CommandMeta;
+  const validationError = CommandType.verify(command);
+  if (validationError) {
+    throw new ProtocolDecodeError(
+      `Invalid command metadata: ${validationError}`,
+      MESSAGE_TYPE_BY_NAME[messageType]
+    );
+  }
+  if (!command.request_id) {
+    throw new ProtocolDecodeError(
+      'Invalid command metadata: request_id is required',
+      MESSAGE_TYPE_BY_NAME[messageType]
+    );
+  }
+  return command;
 }
 
 function decodeEvent(value: unknown, messageType: MessageName): EventMeta | undefined {

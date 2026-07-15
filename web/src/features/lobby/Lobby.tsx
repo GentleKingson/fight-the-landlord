@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { selectChatMessages, useAppStore, useChatStore } from '../../stores/appStore';
 import { Icon } from '../../shared/ui/Icon';
@@ -45,10 +44,10 @@ export function Lobby({ socket }: LobbyProps) {
 
       <nav className="bottom-nav" aria-label="大厅导航">
         <button className={panel === 'home' ? 'is-active' : ''} onClick={() => setLobbyPanel('home')}>大厅</button>
-        <button className={panel === 'leaderboard' ? 'is-active' : ''} onClick={() => { setLobbyPanel('leaderboard'); socket.send(MsgType.GetLeaderboard, { type: 'total', offset: 0, limit: 30 }); }}>
+        <button className={panel === 'leaderboard' ? 'is-active' : ''} onClick={() => { setLobbyPanel('leaderboard'); dispatchCommand(socket, { kind: 'leaderboard', leaderboardType: 'total', offset: 0, limit: 30 }); }}>
           战绩榜
         </button>
-        <button className={panel === 'stats' ? 'is-active' : ''} onClick={() => { setLobbyPanel('stats'); socket.send(MsgType.GetStats); }}>
+        <button className={panel === 'stats' ? 'is-active' : ''} onClick={() => { setLobbyPanel('stats'); dispatchCommand(socket, { kind: 'stats' }); }}>
           我的战绩
         </button>
         <button className={panel === 'chat' ? 'is-active' : ''} onClick={() => setLobbyPanel('chat')}>聊天</button>
@@ -75,7 +74,7 @@ function LobbyHome({ socket }: LobbyProps) {
   }
 
   function refreshRooms() {
-    socket.send(MsgType.GetRoomList);
+    dispatchCommand(socket, { kind: 'room-list' });
   }
 
   function joinListedRoom(roomCode: string) {

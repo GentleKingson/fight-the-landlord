@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Lobby } from '../src/features/lobby/Lobby';
 import { GameTable } from '../src/features/table/GameTable';
-import { MsgType, type ChatPayload } from '../src/protocol/types';
+import { MsgType, WireMessageType, type ChatPayload } from '../src/protocol/types';
 import {
   selectChatMessages,
   useAppStore,
@@ -108,7 +108,7 @@ describe('authoritative chat isolation', () => {
     expect(ids('lobby').at(-1)).toBe('message-80');
   });
 
-  it('acknowledges a pending ID but rejects a non-authoritative event', () => {
+  it('stores an authoritative event without treating its message ID as a command ACK', () => {
     const result = dispatchCommand(socket, createChatCommand('你好', 'lobby'));
     if (!result.ok || result.request.kind !== 'chat') throw new Error('expected chat command');
     const messageId = result.request.messageId;
@@ -122,8 +122,14 @@ describe('authoritative chat isolation', () => {
       }
     }));
 
-    expect(useAppStore.getState().pendingCommands.chat).toBeUndefined();
+    expect(useAppStore.getState().pendingCommands.chat).toBeDefined();
     expect(ids('lobby')).toEqual([]);
+
+    act(() => useAppStore.getState().handleMessage({
+      type: MsgType.CommandAck,
+      payload: { request_id: result.requestId, command_type: WireMessageType.MSG_CHAT }
+    }));
+    expect(useAppStore.getState().pendingCommands.chat).toBeUndefined();
   });
 });
 
@@ -155,7 +161,7 @@ describe('chat views and input behavior', () => {
       content: '输入法消息',
       scope: 'lobby',
       message_id: expect.any(String)
-    }));
+    }), expect.objectContaining({ request_id: expect.any(String) }));
   });
 
   it('switches exact game views without deleting prior buckets and sends game scope', () => {
@@ -187,7 +193,7 @@ describe('chat views and input behavior', () => {
       content: '当前牌局',
       scope: 'game',
       message_id: expect.any(String)
-    }));
+    }), expect.objectContaining({ request_id: expect.any(String) }));
 
     act(() => useAppStore.getState().leaveLocalRoom());
     expect(screen.queryByText('乙局消息')).not.toBeInTheDocument();

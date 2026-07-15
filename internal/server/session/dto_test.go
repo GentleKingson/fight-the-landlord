@@ -149,6 +149,35 @@ func TestGameAndTurnIdentifiersAdvanceMonotonically(t *testing.T) {
 	assert.Empty(t, third.BottomCards)
 }
 
+func TestHandlePlayCardsAtRejectsStaleGameAndTurn(t *testing.T) {
+	t.Parallel()
+
+	gs, sessionManager := newSnapshotTestSession(t)
+	gs.Start()
+	caller := gs.players[gs.currentBidder]
+	require.NoError(t, gs.HandleBid(caller.ID, true))
+	for gs.state == GameStateBidding {
+		bidder := gs.players[gs.currentBidder]
+		require.NoError(t, gs.HandleBid(bidder.ID, false))
+	}
+
+	current := gs.players[gs.currentPlayer]
+	cardInfo := convert.CardToInfo(current.Hand[len(current.Hand)-1])
+	snapshot := gs.BuildGameStateDTO(current.ID, sessionManager)
+	handSize := len(current.Hand)
+
+	err := gs.HandlePlayCardsAt(current.ID, []protocol.CardInfo{cardInfo}, "old-game", snapshot.TurnID)
+	require.ErrorIs(t, err, apperrors.ErrStaleGame)
+	assert.Len(t, current.Hand, handSize)
+
+	err = gs.HandlePlayCardsAt(current.ID, []protocol.CardInfo{cardInfo}, snapshot.GameID, snapshot.TurnID-1)
+	require.ErrorIs(t, err, apperrors.ErrStaleTurn)
+	assert.Len(t, current.Hand, handSize)
+
+	require.NoError(t, gs.HandlePlayCardsAt(current.ID, []protocol.CardInfo{cardInfo}, snapshot.GameID, snapshot.TurnID))
+	assert.Len(t, current.Hand, handSize-1)
+}
+
 func TestBuildGameStateDTOPlayingHasAuthoritativeTurnAndLedger(t *testing.T) {
 	t.Parallel()
 

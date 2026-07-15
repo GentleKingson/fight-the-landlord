@@ -46,6 +46,14 @@ func EncodePayload(msgType protocol.MessageType, payload any) ([]byte, error) {
 // encodeClientRequests 编码客户端请求
 func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Message, bool) {
 	switch msgType {
+	case protocol.MsgHello:
+		p := payload.(protocol.HelloPayload)
+		return &pb.HelloPayload{
+			ProtocolVersion: p.ProtocolVersion,
+			ClientVersion:   p.ClientVersion,
+			Capabilities:    append([]string(nil), p.Capabilities...),
+			ClientKind:      p.ClientKind,
+		}, true
 	case protocol.MsgReconnect:
 		p := payload.(protocol.ReconnectPayload)
 		return &pb.ReconnectPayload{
@@ -111,6 +119,31 @@ func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Mess
 // encodeServerSystemMessages 编码系统相关消息
 func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (proto.Message, bool) {
 	switch msgType {
+	case protocol.MsgNegotiated:
+		p := payload.(protocol.NegotiatedPayload)
+		return &pb.NegotiatedPayload{
+			ProtocolVersion: p.ProtocolVersion,
+			ServerVersion:   p.ServerVersion,
+			Capabilities:    append([]string(nil), p.Capabilities...),
+			ClientKind:      p.ClientKind,
+		}, true
+	case protocol.MsgProtocolRejected:
+		p := payload.(protocol.ProtocolRejectedPayload)
+		return &pb.ProtocolRejectedPayload{
+			RequestId:                p.RequestID,
+			Reason:                   p.Reason,
+			SupportedProtocolVersion: p.SupportedProtocolVersion,
+			MinClientVersion:         p.MinClientVersion,
+		}, true
+	case protocol.MsgCommandAck:
+		p := payload.(protocol.CommandAckPayload)
+		return &pb.CommandAckPayload{
+			RequestId:   p.RequestID,
+			CommandType: msgtype.StringToProtoMessageType(string(p.CommandType)),
+		}, true
+	case protocol.MsgWarning:
+		p := payload.(protocol.WarningPayload)
+		return &pb.WarningPayload{Code: int64(p.Code), Message: p.Message}, true
 	case protocol.MsgConnected:
 		p := payload.(protocol.ConnectedPayload)
 		return &pb.ConnectedPayload{
@@ -182,6 +215,7 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 			Code:        int64(p.Code),
 			Message:     p.Message,
 			CommandType: msgtype.StringToProtoMessageType(string(p.CommandType)),
+			RequestId:   p.RequestID,
 		}, true
 	}
 	return nil, false

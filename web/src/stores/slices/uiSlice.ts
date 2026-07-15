@@ -13,7 +13,10 @@ export type CommandKind =
   | 'play'
   | 'pass'
   | 'leave-room'
-  | 'chat';
+  | 'chat'
+  | 'stats'
+  | 'leaderboard'
+  | 'room-list';
 
 export type CommandRequest =
   | { kind: 'create-room' }
@@ -27,12 +30,16 @@ export type CommandRequest =
   | { kind: 'play'; cards: CardInfo[] }
   | { kind: 'pass' }
   | { kind: 'leave-room' }
-  | { kind: 'chat'; content: string; scope: string; messageId: string };
+  | { kind: 'chat'; content: string; scope: string; messageId: string }
+  | { kind: 'stats' }
+  | { kind: 'leaderboard'; leaderboardType: string; offset: number; limit: number }
+  | { kind: 'room-list' };
 
 export type BusinessErrorCategory = 'validation' | 'rate-limit' | 'maintenance' | 'not-in-room' | 'timeout' | 'network';
 
 export interface PendingCommand {
   kind: CommandKind;
+  requestId: string;
   request: CommandRequest;
   startedAt: number;
   timeoutAt: number;
