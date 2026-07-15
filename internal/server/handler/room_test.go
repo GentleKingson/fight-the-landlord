@@ -36,10 +36,11 @@ func (c *synchronizedClient) SetRoom(code string) {
 	c.roomCode = code
 	c.mu.Unlock()
 }
-func (c *synchronizedClient) SendMessage(message *protocol.Message) {
+func (c *synchronizedClient) SendMessage(message *protocol.Message) error {
 	c.mu.Lock()
 	c.messages = append(c.messages, message)
 	c.mu.Unlock()
+	return nil
 }
 func (c *synchronizedClient) Close()      {}
 func (c *synchronizedClient) IsBot() bool { return false }

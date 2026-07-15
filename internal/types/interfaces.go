@@ -21,7 +21,7 @@ type ClientInterface interface {
 	GetName() string
 	GetRoom() string
 	SetRoom(code string)
-	SendMessage(msg *protocol.Message)
+	SendMessage(msg *protocol.Message) error
 	Close()
 	IsBot() bool
 }

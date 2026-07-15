@@ -24,16 +24,21 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 连接数限制检查
-	select {
-	case s.semaphore <- struct{}{}:
-		// 成功获取信号量，连接建立后释放
-		defer func() { <-s.semaphore }()
-	default:
+	// Reserve one physical-connection lease before Upgrade. The handler owns
+	// the lease until both pumps have been installed; afterwards WritePump
+	// releases it only when the WebSocket is actually closed.
+	lease, acquired := s.activeConnectionLimiter().tryAcquire()
+	if !acquired {
 		log.Printf("🚫 达到最大连接数限制 (%d), IP: %s", s.maxConnections, clientIP)
 		http.Error(w, "Server Full", http.StatusServiceUnavailable)
 		return
 	}
+	leaseTransferred := false
+	defer func() {
+		if !leaseTransferred {
+			lease.release()
+		}
+	}()
 
 	// IP 过滤检查
 	if !s.ipFilter.IsAllowed(clientIP) {
@@ -61,9 +66,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("WebSocket 升级失败: %v", err)
 		return
 	}
+	lease.activate()
 
 	// 创建客户端
-	client := NewClient(s, conn)
+	client := newClientWithLease(s, conn, lease)
 	client.IP = clientIP // 记录客户端 IP
 	s.registerClient(client)
 
@@ -73,17 +79,24 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	session := s.sessionManager.CreateSession(playerID, playerName)
 
 	// 发送连接成功消息（包含重连令牌）
-	client.SendMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
+	if err := client.SendMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
 		PlayerID:       playerID,
 		PlayerName:     playerName,
 		ReconnectToken: session.ReconnectToken,
-	}))
+	})); err != nil {
+		log.Printf("发送连接确认失败: %v", err)
+		s.unregisterClient(client)
+		s.sessionManager.DeleteSession(playerID)
+		_ = conn.Close()
+		return
+	}
 
 	log.Printf("✅ 玩家 %s (%s) 已连接", playerName, playerID)
 
 	// 启动客户端读写协程
-	go client.ReadPump()
+	leaseTransferred = true
 	go client.WritePump()
+	go client.ReadPump()
 }
 
 // handleHealth 健康检查接口

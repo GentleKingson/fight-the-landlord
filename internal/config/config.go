@@ -152,7 +152,11 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// Seed values whose explicit zero has domain meaning before decoding. YAML
+	// then preserves an omitted field as the default while allowing
+	// max_connections: 0 to mean unlimited.
 	var cfg Config
+	cfg.Server.MaxConnections = defaultMaxConnections
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
@@ -272,7 +276,6 @@ func setDefaults(cfg *Config) {
 	// Server
 	setDefaultStr(&cfg.Server.Host, defaultHost)
 	setDefaultInt(&cfg.Server.Port, defaultPort)
-	setDefaultInt(&cfg.Server.MaxConnections, defaultMaxConnections)
 
 	// Redis
 	setDefaultStr(&cfg.Redis.Addr, defaultRedisAddr)
@@ -312,6 +315,7 @@ func Default() *Config {
 
 	// 使用 setDefaults 设置的默认值
 	cfg := &Config{}
+	cfg.Server.MaxConnections = defaultMaxConnections
 	setDefaults(cfg)
 	return cfg
 }

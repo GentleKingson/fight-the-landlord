@@ -292,11 +292,11 @@ type turnObservingClient struct {
 	onTurn func(*protocol.Message)
 }
 
-func (client *turnObservingClient) SendMessage(message *protocol.Message) {
+func (client *turnObservingClient) SendMessage(message *protocol.Message) error {
 	if message.Type == protocol.MsgBidTurn || message.Type == protocol.MsgPlayTurn {
 		client.onTurn(message)
 	}
-	client.SimpleClient.SendMessage(message)
+	return client.SimpleClient.SendMessage(message)
 }
 
 func TestTurnDeadlineExistsBeforeTurnBroadcast(t *testing.T) {

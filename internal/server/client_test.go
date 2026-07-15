@@ -1,15 +1,19 @@
 package server
 
 import (
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 )
@@ -145,14 +149,214 @@ func TestClient_Close(t *testing.T) {
 
 	// First close
 	client.Close()
-	assert.True(t, client.closed)
+	assert.True(t, client.isClosed())
 
 	// Second close (should be safe)
 	assert.NotPanics(t, func() {
 		client.Close()
 	})
 
-	// Check channel closed
-	_, ok := <-client.send
-	assert.False(t, ok)
+	select {
+	case <-client.done:
+	default:
+		t.Fatal("client done signal was not closed")
+	}
+
+	// Producers never own or close the writer queue. Keeping this channel open
+	// removes the send/close race; SendMessage observes done instead.
+	client.send <- []byte("still open")
+	assert.Equal(t, []byte("still open"), <-client.send)
+}
+
+func TestClient_SendMessageAndCloseAreConcurrentSafe(t *testing.T) {
+	const (
+		clientCount = 64
+		sendCount   = 20_000
+		senders     = 64
+	)
+	clients := make([]*Client, clientCount)
+	for i := range clients {
+		clients[i] = &Client{send: make(chan []byte, 1)}
+		clients[i].send <- []byte("occupy the queue")
+	}
+	message := &protocol.Message{Type: protocol.MsgPing}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var unexpected atomic.Int64
+	wg.Add(senders + clientCount)
+	for worker := range senders {
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := worker; i < sendCount; i += senders {
+				err := clients[i%clientCount].SendMessage(message)
+				if !errors.Is(err, ErrClientClosed) && !errors.Is(err, ErrClientSendBufferFull) {
+					unexpected.Add(1)
+				}
+			}
+		}()
+	}
+	for _, client := range clients {
+		go func(client *Client) {
+			defer wg.Done()
+			<-start
+			for range 32 {
+				client.Close()
+			}
+		}(client)
+	}
+
+	close(start)
+	wg.Wait()
+	assert.Zero(t, unexpected.Load())
+}
+
+func TestClient_FullSendBufferDisconnectsAndCountsOnce(t *testing.T) {
+	server := &Server{}
+	client := &Client{server: server, send: make(chan []byte, 1)}
+	client.send <- []byte("occupy the queue")
+	message := &protocol.Message{Type: protocol.MsgPing}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var unexpected atomic.Int64
+	wg.Add(100)
+	for range 100 {
+		go func() {
+			defer wg.Done()
+			<-start
+			err := client.SendMessage(message)
+			if !errors.Is(err, ErrClientSendBufferFull) && !errors.Is(err, ErrClientClosed) {
+				unexpected.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	assert.Zero(t, unexpected.Load())
+	assert.True(t, client.isClosed())
+	assert.ErrorIs(t, client.SendMessage(message), ErrClientClosed)
+	assert.EqualValues(t, 1, server.slowClientDisconnects.Load())
+}
+
+func TestServer_BroadcastAndCloseAreConcurrentSafe(t *testing.T) {
+	const clientCount = 16
+	server := &Server{clients: make(map[string]*Client, clientCount)}
+	clients := make([]*Client, 0, clientCount)
+	for range clientCount {
+		client := &Client{server: server, send: make(chan []byte, 1)}
+		client.send <- []byte("occupy the queue")
+		server.registerClient(client)
+		clients = append(clients, client)
+	}
+
+	message := &protocol.Message{Type: protocol.MsgPing}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 1_000 {
+			server.Broadcast(message)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 1_000 {
+			for _, client := range clients {
+				client.Close()
+			}
+		}
+	}()
+	close(start)
+	wg.Wait()
+}
+
+func TestServer_ShutdownAndSendAreConcurrentSafe(t *testing.T) {
+	server := &Server{
+		config:  &config.Config{},
+		redis:   redis.NewClient(&redis.Options{}),
+		clients: make(map[string]*Client),
+	}
+	client := &Client{server: server, send: make(chan []byte, 20_000)}
+	server.registerClient(client)
+	message := &protocol.Message{Type: protocol.MsgPing}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 20_000 {
+			err := client.SendMessage(message)
+			if err != nil && !errors.Is(err, ErrClientClosed) {
+				t.Errorf("unexpected send error: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		server.Shutdown()
+	}()
+	close(start)
+	wg.Wait()
+	assert.True(t, client.isClosed())
+}
+
+func TestServer_ReconnectReplacementAndSendAreConcurrentSafe(t *testing.T) {
+	server := &Server{clients: make(map[string]*Client)}
+	previous := &Client{
+		ID:   "restored-id",
+		Name: "Restored Player",
+		send: make(chan []byte, 20_000),
+	}
+	previous.server = server
+	server.registerClient(previous)
+	replacement := NewClient(server, nil)
+	temporaryID := replacement.GetID()
+	server.registerClient(replacement)
+	message := &protocol.Message{Type: protocol.MsgPing}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var rebindErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 20_000 {
+			err := previous.SendMessage(message)
+			if err != nil && !errors.Is(err, ErrClientClosed) {
+				t.Errorf("unexpected send error: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		var replaced interface{}
+		replaced, rebindErr = server.RebindClient(
+			temporaryID,
+			"restored-id",
+			"Restored Player",
+			"",
+			replacement,
+		)
+		if rebindErr == nil {
+			assert.Same(t, previous, replaced)
+			previous.Close()
+		}
+	}()
+	close(start)
+	wg.Wait()
+	require.NoError(t, rebindErr)
+	assert.Equal(t, replacement, server.GetClientByID("restored-id"))
 }

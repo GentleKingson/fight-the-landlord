@@ -20,23 +20,27 @@ func (s *Server) monitorStats() {
 	defer ticker.Stop()
 
 	var lastOnline, lastGoroutines, lastActiveConns int
+	var lastSlowClientDisconnects int64
 
 	for range ticker.C {
 		onlineCount := s.GetOnlineCount()
 		goroutines := runtime.NumGoroutine()
-		activeConns := len(s.semaphore)
+		activeConns := s.activeConnectionLimiter().activeCount()
+		slowClientDisconnects := s.slowClientDisconnects.Load()
 
-		if onlineCount == lastOnline && goroutines == lastGoroutines && activeConns == lastActiveConns {
+		if onlineCount == lastOnline && goroutines == lastGoroutines && activeConns == lastActiveConns && slowClientDisconnects == lastSlowClientDisconnects {
 			continue
 		}
 
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		log.Printf("📊 [监控] 在线: %d | Goroutines: %d | 活跃连接: %d/%d | 内存: %.2f MB",
+		log.Printf("📊 [监控] 在线: %d | Goroutines: %d | 活跃连接: %d/%d | 慢客户端断开: %d | 内存: %.2f MB",
 			onlineCount, goroutines, activeConns, s.maxConnections,
+			slowClientDisconnects,
 			float64(m.Alloc)/1024/1024)
 
 		lastOnline, lastGoroutines, lastActiveConns = onlineCount, goroutines, activeConns
+		lastSlowClientDisconnects = slowClientDisconnects
 	}
 }
 

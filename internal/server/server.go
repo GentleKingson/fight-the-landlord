@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -57,8 +58,10 @@ type Server struct {
 	ipFilter       *IPFilter
 
 	// 连接控制
-	maxConnections int
-	semaphore      chan struct{} // 信号量控制并发连接数
+	maxConnections        int
+	connectionLimiterOnce sync.Once
+	connectionLimiter     *connectionLimiter
+	slowClientDisconnects atomic.Int64
 
 	// 维护模式
 	maintenanceMode bool
@@ -103,8 +106,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		),
 		ipFilter: NewIPFilter(),
 		// 初始化连接控制
-		maxConnections: cfg.Server.MaxConnections,
-		semaphore:      make(chan struct{}, cfg.Server.MaxConnections),
+		maxConnections:    cfg.Server.MaxConnections,
+		connectionLimiter: newConnectionLimiter(cfg.Server.MaxConnections),
 	}
 
 	// 初始化房间管理器

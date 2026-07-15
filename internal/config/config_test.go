@@ -114,6 +114,31 @@ func TestLoad_AppliesDefaults(t *testing.T) {
 	assert.Equal(t, []string{"*"}, cfg.Security.AllowedOrigins)
 }
 
+func TestLoad_PreservesExplicitUnlimitedMaxConnections(t *testing.T) {
+	t.Setenv("SERVER_MAX_CONNECTIONS", "")
+
+	configPath := filepath.Join(t.TempDir(), "unlimited.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`
+server:
+  max_connections: 0
+`), 0o600))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	assert.Zero(t, cfg.Server.MaxConnections)
+}
+
+func TestLoad_EnvironmentCanDisableMaxConnections(t *testing.T) {
+	t.Setenv("SERVER_MAX_CONNECTIONS", "0")
+
+	configPath := filepath.Join(t.TempDir(), "default-limit.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	assert.Zero(t, cfg.Server.MaxConnections)
+}
+
 func TestDefault(t *testing.T) {
 	// Note: Not parallel because Default() reads from filesystem
 

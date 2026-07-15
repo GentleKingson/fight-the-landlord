@@ -1,9 +1,12 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +21,11 @@ const (
 	pongWait       = 60 * time.Second    // 读取超时（pong 等待时间）
 	pingPeriod     = (pongWait * 9) / 10 // ping 发送间隔（必须小于 pongWait）
 	maxMessageSize = 4096                // 消息最大大小
+)
+
+var (
+	ErrClientClosed         = errors.New("client connection is closed")
+	ErrClientSendBufferFull = errors.New("client send buffer is full")
 )
 
 // 昵称词库
@@ -54,27 +62,40 @@ type Client struct {
 	server *Server
 	conn   *websocket.Conn
 	send   chan []byte
+	done   chan struct{}
+	lease  *connectionLease
 
-	mu     sync.RWMutex
-	closed bool
+	mu            sync.RWMutex
+	lifecycleMu   sync.RWMutex
+	lifecycleOnce sync.Once
+	closeOnce     sync.Once
+	slowCloseOnce sync.Once
+	closed        atomic.Bool
 }
 
 // NewClient 创建新客户端
 func NewClient(s *Server, conn *websocket.Conn) *Client {
-	return &Client{
+	return newClientWithLease(s, conn, nil)
+}
+
+func newClientWithLease(s *Server, conn *websocket.Conn, lease *connectionLease) *Client {
+	client := &Client{
 		ID:     uuid.New().String(),
 		Name:   GenerateNickname(),
 		server: s,
 		conn:   conn,
 		send:   make(chan []byte, 256),
+		done:   make(chan struct{}),
+		lease:  lease,
 	}
+	return client
 }
 
 // ReadPump 从 WebSocket 读取消息
 func (c *Client) ReadPump() {
 	defer func() {
+		c.Close()
 		c.handleDisconnect()
-		_ = c.conn.Close()
 	}()
 
 	c.conn.SetReadLimit(maxMessageSize)
@@ -127,27 +148,45 @@ func (c *Client) ReadPump() {
 
 // WritePump 向 WebSocket 写入消息
 func (c *Client) WritePump() {
+	c.initializeLifecycle()
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		_ = c.conn.Close()
+		c.Close()
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
+		c.lease.release()
 	}()
+	if c.conn == nil {
+		return
+	}
 
 	for {
 		select {
-		case message, ok := <-c.send:
+		case <-c.done:
 			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				// 通道已关闭
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
+			_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+			return
+		default:
+		}
+
+		select {
+		case <-c.done:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+			return
+		case message := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 
 			w, err := c.conn.NextWriter(websocket.BinaryMessage)
 			if err != nil {
 				return
 			}
-			_, _ = w.Write(message)
+			if _, err := w.Write(message); err != nil {
+				_ = w.Close()
+				return
+			}
 
 			if err := w.Close(); err != nil {
 				return
@@ -163,27 +202,46 @@ func (c *Client) WritePump() {
 }
 
 // SendMessage 发送消息给客户端
-func (c *Client) SendMessage(msg *protocol.Message) {
-	c.mu.RLock()
-	if c.closed {
-		c.mu.RUnlock()
-		return
-	}
-	c.mu.RUnlock()
+func (c *Client) SendMessage(msg *protocol.Message) error {
+	c.initializeLifecycle()
 
 	data, err := codec.Encode(msg)
 	if err != nil {
 		log.Printf("消息编码错误: %v", err)
-		return
+		return fmt.Errorf("encode client message: %w", err)
 	}
 
-	select {
-	case c.send <- data:
-	default:
-		// 发送缓冲区已满，关闭连接
-		log.Printf("客户端 %s 发送缓冲区已满", c.GetID())
-		c.Close()
+	c.lifecycleMu.RLock()
+	if c.closed.Load() {
+		c.lifecycleMu.RUnlock()
+		return ErrClientClosed
 	}
+
+	var sendErr error
+	select {
+	case <-c.done:
+		sendErr = ErrClientClosed
+	case c.send <- data:
+		sendErr = nil
+	default:
+		sendErr = ErrClientSendBufferFull
+	}
+	c.lifecycleMu.RUnlock()
+
+	if errors.Is(sendErr, ErrClientSendBufferFull) {
+		c.disconnectSlowClient()
+	}
+	return sendErr
+}
+
+func (c *Client) disconnectSlowClient() {
+	c.slowCloseOnce.Do(func() {
+		log.Printf("客户端 %s 发送缓冲区已满，断开慢连接", c.GetID())
+		if c.server != nil {
+			c.server.slowClientDisconnects.Add(1)
+		}
+		c.Close()
+	})
 }
 
 // handleDisconnect 处理断开连接
@@ -217,13 +275,28 @@ func (c *Client) handleDisconnect() {
 
 // Close 关闭客户端连接
 func (c *Client) Close() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.initializeLifecycle()
+	c.closeOnce.Do(func() {
+		c.lifecycleMu.Lock()
+		defer c.lifecycleMu.Unlock()
+		c.closed.Store(true)
+		close(c.done)
+	})
+}
 
-	if !c.closed {
-		c.closed = true
-		close(c.send)
-	}
+func (c *Client) initializeLifecycle() {
+	c.lifecycleOnce.Do(func() {
+		if c.send == nil {
+			c.send = make(chan []byte, 256)
+		}
+		if c.done == nil {
+			c.done = make(chan struct{})
+		}
+	})
+}
+
+func (c *Client) isClosed() bool {
+	return c.closed.Load()
 }
 
 // SetRoom 设置客户端所在房间

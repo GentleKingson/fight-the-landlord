@@ -32,8 +32,9 @@ func (m *MockClient) SetRoom(roomCode string) {
 	m.Called(roomCode)
 }
 
-func (m *MockClient) SendMessage(msg *protocol.Message) {
+func (m *MockClient) SendMessage(msg *protocol.Message) error {
 	m.Called(msg)
+	return nil
 }
 
 func (m *MockClient) Close() {
@@ -59,13 +60,16 @@ func NewSimpleClient(id, name string) *SimpleClient {
 	}
 }
 
-func (m *SimpleClient) GetID() string                     { return m.ID }
-func (m *SimpleClient) GetName() string                   { return m.Name }
-func (m *SimpleClient) GetRoom() string                   { return m.RoomCode }
-func (m *SimpleClient) SetRoom(code string)               { m.RoomCode = code }
-func (m *SimpleClient) SendMessage(msg *protocol.Message) { m.Messages = append(m.Messages, msg) }
-func (m *SimpleClient) Close()                            {}
-func (m *SimpleClient) IsBot() bool                       { return false }
+func (m *SimpleClient) GetID() string       { return m.ID }
+func (m *SimpleClient) GetName() string     { return m.Name }
+func (m *SimpleClient) GetRoom() string     { return m.RoomCode }
+func (m *SimpleClient) SetRoom(code string) { m.RoomCode = code }
+func (m *SimpleClient) SendMessage(msg *protocol.Message) error {
+	m.Messages = append(m.Messages, msg)
+	return nil
+}
+func (m *SimpleClient) Close()      {}
+func (m *SimpleClient) IsBot() bool { return false }
 
 // SentMessages 返回已发送的消息列表（用于测试断言）
 func (m *SimpleClient) SentMessages() []*protocol.Message {

@@ -108,12 +108,12 @@ func (b *BotClient) Close() {
 
 func (b *BotClient) IsBot() bool { return true }
 
-func (b *BotClient) SendMessage(msg *protocol.Message) {
+func (b *BotClient) SendMessage(msg *protocol.Message) error {
 	b.closedMu.RLock()
 	closed := b.closed
 	b.closedMu.RUnlock()
 	if closed {
-		return
+		return fmt.Errorf("bot client is closed")
 	}
 
 	switch msg.Type {
@@ -134,6 +134,7 @@ func (b *BotClient) SendMessage(msg *protocol.Message) {
 	case protocol.MsgPlayTurn:
 		go b.handlePlayTurn(msg)
 	}
+	return nil
 }
 
 // --- 消息处理 ---
