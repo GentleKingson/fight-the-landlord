@@ -192,10 +192,15 @@ func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
 
 	// 给所有玩家发送匹配成功消息和房间信息。
 	for _, client := range players {
+		playerInfo, ok := room.GetPlayerInfo(client.GetID())
+		if !ok {
+			log.Printf("匹配房间 %s 缺少玩家 %s", room.Code, client.GetID())
+			continue
+		}
 		// 发送加入房间成功消息
 		client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
 			RoomCode: room.Code,
-			Player:   room.GetPlayerInfo(client.GetID()),
+			Player:   playerInfo,
 			Players:  room.GetAllPlayersInfo(),
 		}))
 	}
@@ -204,9 +209,9 @@ func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
 	room.SetAllPlayersReady()
 
 	// 广播所有玩家准备状态
-	for _, player := range room.Players {
+	for _, player := range room.SnapshotPlayers() {
 		room.Broadcast(codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
-			PlayerID: player.Client.GetID(),
+			PlayerID: player.ID,
 			Ready:    true,
 		}))
 	}
@@ -236,7 +241,13 @@ func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
 
 	// 保存房间状态
 	if m.redisStore != nil && m.redisStore.IsReady() {
-		go func() { _ = m.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
+		code := room.Code
+		data := room.ToRoomData()
+		go func() {
+			if err := m.redisStore.SaveRoom(context.Background(), code, data); err != nil {
+				log.Printf("保存匹配房间 %s 到 Redis 失败: %v", code, err)
+			}
+		}()
 	}
 }
 

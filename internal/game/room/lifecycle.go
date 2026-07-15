@@ -15,8 +15,10 @@ import (
 func (r *Room) SetAllPlayersReady() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, player := range r.Players {
-		player.Ready = true
+	for _, player := range r.players {
+		if player != nil {
+			player.Ready = true
+		}
 	}
 }
 
@@ -27,13 +29,13 @@ func (r *Room) ResetAfterGame() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.State = RoomStateWaiting
+	r.state = RoomStateWaiting
 	r.CreatedAt = time.Now()
-	for _, player := range r.Players {
+	for _, player := range r.players {
 		if player == nil {
 			continue
 		}
-		player.Ready = player.Client != nil && player.Client.IsBot()
+		player.Ready = player.IsBot
 		player.IsLandlord = false
 	}
 }
@@ -45,49 +47,48 @@ func (rm *RoomManager) NotifyPlayerOffline(client types.ClientInterface) {
 		return
 	}
 
-	rm.mu.RLock()
+	rm.mu.Lock()
 	room, exists := rm.rooms[roomCode]
-	rm.mu.RUnlock()
 	if !exists {
-		return
-	}
-
-	room.mu.Lock()
-
-	// 标记当前玩家为离线
-	if player, exists := room.Players[client.GetID()]; exists {
-		player.Client = nil
-	}
-
-	// 检查所有玩家是否都离线
-	allOffline := true
-	for _, player := range room.Players {
-		if player.Client != nil {
-			allOffline = false
-			// 通知其他在线玩家
-			player.Client.SendMessage(codec.MustNewMessage(protocol.MsgPlayerOffline, protocol.PlayerOfflinePayload{
-				PlayerID:   client.GetID(),
-				PlayerName: client.GetName(),
-				Timeout:    rm.gameConfig.OfflineWaitTimeout, // 从配置读取
-			}))
-		}
-	}
-
-	// 如果所有玩家都离线，清理房间
-	if allOffline {
-		log.Printf("🧹 房间 %s 所有玩家已断开连接，清理房间", roomCode)
-		room.State = RoomStateEnded
-		room.mu.Unlock()
-
-		// 删除房间
-		rm.mu.Lock()
-		delete(rm.rooms, roomCode)
 		rm.mu.Unlock()
 		return
 	}
 
-	// 如果游戏进行中，通知 GameSession 暂停该玩家的计时器（由外部调用者处理）
+	room.mu.Lock()
+	player, exists := room.players[client.GetID()]
+	if !exists || player == nil || player.Client != client {
+		room.mu.Unlock()
+		rm.mu.Unlock()
+		return
+	}
+	player.Client = nil
+
+	allOffline := true
+	for _, player := range room.players {
+		if player != nil && player.Client != nil {
+			allOffline = false
+		}
+	}
+	recipients := room.snapshotRecipientsLocked("")
+
+	if allOffline {
+		log.Printf("🧹 房间 %s 所有玩家已断开连接，清理房间", roomCode)
+		room.state = RoomStateEnded
+		delete(rm.rooms, roomCode)
+	}
 	room.mu.Unlock()
+	rm.mu.Unlock()
+
+	if allOffline {
+		rm.deleteRoomAsync(roomCode)
+		return
+	}
+
+	sendToRecipients(recipients, codec.MustNewMessage(protocol.MsgPlayerOffline, protocol.PlayerOfflinePayload{
+		PlayerID:   client.GetID(),
+		PlayerName: client.GetName(),
+		Timeout:    rm.gameConfig.OfflineWaitTimeout,
+	}))
 
 	log.Printf("📴 玩家 %s 在房间 %s 中掉线", client.GetName(), roomCode)
 }
@@ -100,40 +101,36 @@ func (rm *RoomManager) ReconnectPlayer(oldPlayerID, roomCode string, newClient t
 	if newClient.GetID() != oldPlayerID {
 		return apperrors.ErrNotInRoom
 	}
+	playerName, isBot := newClient.GetName(), newClient.IsBot()
 
 	rm.mu.RLock()
 	room, exists := rm.rooms[roomCode]
-	rm.mu.RUnlock()
 	if !exists {
+		rm.mu.RUnlock()
 		return apperrors.ErrRoomNotFound
 	}
 
 	room.mu.Lock()
-
-	player, exists := room.Players[oldPlayerID]
+	player, exists := room.players[oldPlayerID]
 	if !exists || player == nil {
 		room.mu.Unlock()
+		rm.mu.RUnlock()
 		return apperrors.ErrNotInRoom
 	}
 
-	// 更新客户端引用
-	player.Client = newClient
+	player.Name = playerName
+	player.IsBot = isBot
 	newClient.SetRoom(roomCode)
-
-	// 通知其他玩家该玩家已上线
-	for id, p := range room.Players {
-		if id != oldPlayerID && p != nil && p.Client != nil {
-			p.Client.SendMessage(codec.MustNewMessage(protocol.MsgPlayerOnline, protocol.PlayerOnlinePayload{
-				PlayerID:   oldPlayerID,
-				PlayerName: newClient.GetName(),
-			}))
-		}
-	}
-
-	// 如果游戏进行中，通知 GameSession 恢复该玩家的计时器（由外部调用者处理）
+	player.Client = newClient
+	recipients := room.snapshotRecipientsLocked(oldPlayerID)
 	room.mu.Unlock()
+	rm.mu.RUnlock()
+	sendToRecipients(recipients, codec.MustNewMessage(protocol.MsgPlayerOnline, protocol.PlayerOnlinePayload{
+		PlayerID:   oldPlayerID,
+		PlayerName: playerName,
+	}))
 
-	log.Printf("📶 玩家 %s 重连到房间 %s", newClient.GetName(), roomCode)
+	log.Printf("📶 玩家 %s 重连到房间 %s", playerName, roomCode)
 
 	return nil
 }
@@ -165,32 +162,35 @@ func (rm *RoomManager) cleanupLoop() {
 // cleanup 清理超时房间
 func (rm *RoomManager) cleanup() {
 	rm.mu.Lock()
-	defer rm.mu.Unlock()
-
 	now := time.Now()
+	type expiredRoom struct {
+		code       string
+		recipients []types.ClientInterface
+	}
+	expired := make([]expiredRoom, 0)
 
 	for code, room := range rm.rooms {
-		room.mu.RLock()
-		// 只清理等待状态且超时的房间
-		if room.State == RoomStateWaiting && now.Sub(room.CreatedAt) > rm.roomTimeout {
-			room.mu.RUnlock()
-			// 通知所有玩家房间已关闭
-			room.Broadcast(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))
-			// 清理玩家状态
-			for _, p := range room.Players {
-				p.Client.SetRoom("")
+		room.mu.Lock()
+		if room.state == RoomStateWaiting && now.Sub(room.CreatedAt) > rm.roomTimeout {
+			room.state = RoomStateEnded
+			for _, player := range room.players {
+				if player != nil && player.Client != nil {
+					player.Client.SetRoom("")
+				}
 			}
+			expired = append(expired, expiredRoom{
+				code:       code,
+				recipients: room.snapshotRecipientsLocked(""),
+			})
 			delete(rm.rooms, code)
-			log.Printf("🏠 房间 %s 超时已清理", code)
-		} else {
-			room.mu.RUnlock()
 		}
+		room.mu.Unlock()
 	}
-}
+	rm.mu.Unlock()
 
-// SerializeForRedis 为Redis序列化准备数据（提供只读访问）
-func (r *Room) SerializeForRedis(serialize func()) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	serialize()
+	for _, removed := range expired {
+		sendToRecipients(removed.recipients, codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))
+		rm.deleteRoomAsync(removed.code)
+		log.Printf("🏠 房间 %s 超时已清理", removed.code)
+	}
 }

@@ -29,10 +29,10 @@ func newSnapshotTestSession(t *testing.T) (*GameSession, *SessionManager) {
 		testutil.NewSimpleClient("p3", "Player3"),
 	}
 	gameRoom := room.NewMockRoom("SNAPSHOT", clients[0])
-	gameRoom.Players["p2"] = &room.RoomPlayer{Client: clients[1], Seat: 1, Ready: true}
-	gameRoom.Players["p3"] = &room.RoomPlayer{Client: clients[2], Seat: 2, Ready: true}
-	gameRoom.Players["p1"].Ready = true
-	gameRoom.PlayerOrder = []string{"p1", "p2", "p3"}
+	gameRoom.AddPlayerForTest(clients[1], 1, true)
+	gameRoom.AddPlayerForTest(clients[2], 2, true)
+	require.True(t, gameRoom.SetPlayerReadyForTest("p1", true))
+	gameRoom.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	sessionManager := NewSessionManager()
 	for _, client := range clients {
@@ -243,9 +243,12 @@ func TestBuildGameStateDTOEndedClearsTurnAndKeepsFinalPlay(t *testing.T) {
 	repeatedSnapshot := gs.BuildGameStateDTO(winner.ID, sessionManager)
 	assert.Equal(t, "ended", snapshot.Phase)
 	assert.Equal(t, snapshot.SnapshotVersion, repeatedSnapshot.SnapshotVersion)
-	assert.Equal(t, room.RoomStateWaiting, gs.room.State)
-	assert.Equal(t, gs.room.Code, gs.room.Players[winner.ID].Client.GetRoom())
-	winnerClient := gs.room.Players[winner.ID].Client.(*testutil.SimpleClient)
+	assert.Equal(t, room.RoomStateWaiting, gs.room.State())
+	winnerRecipient, ok := gs.room.PrivateRecipient(winner.ID)
+	require.True(t, ok)
+	assert.Equal(t, gs.room.Code, winnerRecipient.GetRoom())
+	winnerClient, ok := winnerRecipient.(*testutil.SimpleClient)
+	require.True(t, ok)
 	require.NotEmpty(t, winnerClient.Messages)
 	gameOverMessage := winnerClient.Messages[len(winnerClient.Messages)-1]
 	assert.Equal(t, protocol.MsgGameOver, gameOverMessage.Type)
@@ -308,9 +311,9 @@ func TestTurnDeadlineExistsBeforeTurnBroadcast(t *testing.T) {
 		{SimpleClient: testutil.NewSimpleClient("p3", "Player3")},
 	}
 	gameRoom := room.NewMockRoom("DEADLINE", clients[0])
-	gameRoom.Players["p2"] = &room.RoomPlayer{Client: clients[1], Seat: 1}
-	gameRoom.Players["p3"] = &room.RoomPlayer{Client: clients[2], Seat: 2}
-	gameRoom.PlayerOrder = []string{"p1", "p2", "p3"}
+	gameRoom.AddPlayerForTest(clients[1], 1, false)
+	gameRoom.AddPlayerForTest(clients[2], 2, false)
+	gameRoom.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 	gs := NewGameSession(gameRoom, storage.NewLeaderboardManager(nil), config.GameConfig{BidTimeout: 30, TurnTimeout: 40})
 	t.Cleanup(gs.StopAllTimers)
 
@@ -340,7 +343,10 @@ func TestAuthoritativeGameEventsAdvanceMonotonically(t *testing.T) {
 	gs, sessionManager := newSnapshotTestSession(t)
 	gs.Start()
 
-	client := gs.room.Players["p1"].Client.(*testutil.SimpleClient)
+	clientRecipient, ok := gs.room.PrivateRecipient("p1")
+	require.True(t, ok)
+	client, ok := clientRecipient.(*testutil.SimpleClient)
+	require.True(t, ok)
 	require.GreaterOrEqual(t, len(client.Messages), 3)
 	assert.Equal(t, protocol.MsgGameStart, client.Messages[0].Type)
 	assert.Equal(t, protocol.MsgDealCards, client.Messages[1].Type)
@@ -377,7 +383,10 @@ func TestAuthoritativeGameEventsAdvanceMonotonically(t *testing.T) {
 	var nonLandlordClient *testutil.SimpleClient
 	for _, player := range gs.players {
 		if !player.IsLandlord {
-			nonLandlordClient = gs.room.Players[player.ID].Client.(*testutil.SimpleClient)
+			recipient, ok := gs.room.PrivateRecipient(player.ID)
+			require.True(t, ok)
+			nonLandlordClient, ok = recipient.(*testutil.SimpleClient)
+			require.True(t, ok)
 			break
 		}
 	}

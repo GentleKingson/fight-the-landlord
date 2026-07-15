@@ -175,5 +175,6 @@ func TestHandler_LeaveRoomAcknowledgesCallerAndNotifiesPeer(t *testing.T) {
 	peerNotice, err := codec.ParsePayload[protocol.PlayerLeftPayload](peer.Messages[0])
 	require.NoError(t, err)
 	assert.Equal(t, host.ID, peerNotice.PlayerID)
-	assert.NotContains(t, created.Players, host.ID)
+	_, exists := created.PlayerForTest(host.ID)
+	assert.False(t, exists)
 }

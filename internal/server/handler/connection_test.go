@@ -93,8 +93,12 @@ func TestHandleReconnectRestoresIdentityRoomAndReadyCommand(t *testing.T) {
 	require.Equal(t, rotatedSession.ReconnectToken, response.ReconnectToken)
 
 	h.handleReady(provisionalClient, true)
-	require.True(t, gameRoom.Players["player-1"].Ready)
-	require.Same(t, provisionalClient, gameRoom.Players["player-1"].Client)
+	player, ok := gameRoom.PlayerForTest("player-1")
+	require.True(t, ok)
+	require.True(t, player.Ready)
+	recipient, ok := gameRoom.PrivateRecipient("player-1")
+	require.True(t, ok)
+	require.Same(t, provisionalClient, recipient)
 	server.AssertExpectations(t)
 }
 

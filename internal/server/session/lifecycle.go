@@ -2,7 +2,6 @@ package session
 
 import (
 	"cmp"
-	"context"
 	"log"
 	"math/rand/v2"
 	"slices"
@@ -15,10 +14,13 @@ import (
 
 // Start 开始游戏
 func (gs *GameSession) Start() {
+	gs.actionMu.Lock()
+	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
-	defer gs.mu.Unlock()
-
 	gs.startBiddingRound()
+	work := gs.takePendingWorkLocked()
+	gs.mu.Unlock()
+	gs.dispatchPendingWork(work)
 }
 
 // maxRedeals 最大流局次数；达到后下一局随机强制指定地主，避免无限流局
@@ -30,7 +32,7 @@ func (gs *GameSession) startBiddingRound() {
 
 	// 进入叫地主阶段
 	gs.state = GameStateBidding
-	gs.room.State = RoomStateBidding
+	gs.room.SetState(RoomStateBidding)
 
 	// 随机选择第一个叫地主的玩家
 	gs.currentBidder = rand.IntN(3)
@@ -61,10 +63,8 @@ func (gs *GameSession) dealNewRound() {
 	for _, p := range gs.players {
 		p.Hand = nil
 		p.IsLandlord = false
-		if rp := gs.room.Players[p.ID]; rp != nil {
-			rp.IsLandlord = false
-		}
 	}
+	gs.room.SetLandlord("")
 
 	// 创建并洗牌
 	gs.deck = card.NewDeck()
@@ -113,16 +113,14 @@ func (gs *GameSession) deal() {
 	// GameStart belongs to the authoritative game stream. Emitting it here,
 	// after gameID exists and before private hands are sent, gives clients one
 	// ordered reset point for both initial deals and redeals.
-	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgGameStart, protocol.GameStartPayload{
+	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgGameStart, protocol.GameStartPayload{
 		Players: gs.room.GetAllPlayersInfo(),
 	}))
 
 	// 发牌是一次权威状态变更；三个玩家收到同一水位的私有投影。
 	event := gs.nextEventMetaLocked()
 	for _, p := range gs.players {
-		rp := gs.room.Players[p.ID]
-		client := rp.Client
-		client.SendMessage(newGameEventMessageWithMeta(protocol.MsgDealCards, protocol.DealCardsPayload{
+		gs.queuePrivateLocked(p.ID, newGameEventMessageWithMeta(protocol.MsgDealCards, protocol.DealCardsPayload{
 			Cards:       convert.CardsToInfos(p.Hand),
 			BottomCards: make([]protocol.CardInfo, 3), // 暂时不显示
 		}, event))
@@ -133,7 +131,7 @@ func (gs *GameSession) deal() {
 func (gs *GameSession) endGame(winner *GamePlayer) {
 	gs.stopTimer()
 	gs.state = GameStateEnded
-	gs.room.State = RoomStateEnded
+	gs.room.SetState(RoomStateEnded)
 
 	// 计算最终倍数与各玩家得分
 	multiplier := gs.finalMultiplier(winner)
@@ -153,7 +151,7 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	// Keep the room ended until every client has observed GameOver. A Ready
 	// command delivered synchronously by a client callback must not be able to
 	// replace this session before the terminal event is broadcast.
-	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgGameOver, protocol.GameOverPayload{
+	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgGameOver, protocol.GameOverPayload{
 		WinnerID:    winner.ID,
 		WinnerName:  winner.Name,
 		IsLandlord:  winner.IsLandlord,
@@ -162,13 +160,13 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 		Scores:      scores,
 	}))
 
-	// Preserve membership and the completed GameSession for reconnect, then
-	// reopen the room for a fresh ready-up cycle. This post-event mutation gets
-	// its own snapshot watermark even though it has no game-stream wire event.
+	// Preserve membership and the completed GameSession for reconnect. The room
+	// is reopened only after GameOver delivery has completed, without holding
+	// GameSession.mu or Room.mu during network I/O.
 	for _, p := range gs.players {
 		p.Ready = p.IsBot
 	}
-	gs.room.ResetAfterGame()
+	gs.pendingRoomReset = true
 	gs.markStateChangedLocked()
 
 	role := "农民"
@@ -178,8 +176,7 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	log.Printf("🎮 游戏结束！房间 %s，获胜者: %s (%s)，倍数: %d",
 		gs.room.Code, winner.Name, role, multiplier)
 
-	// 记录游戏结果到排行榜
-	gs.recordGameResults(winner)
+	gs.queueGameResultsLocked(winner)
 }
 
 // finalMultiplier 计算本局最终倍数：底倍 × 炸弹/王炸 × 春天/反春天
@@ -229,19 +226,16 @@ func (gs *GameSession) computeScores(winner *GamePlayer, mult int) []protocol.Pl
 	return scores
 }
 
-// recordGameResults 记录游戏结果到排行榜
-func (gs *GameSession) recordGameResults(winner *GamePlayer) {
-	ctx := context.Background()
-	leaderboard := gs.leaderboard
-	if leaderboard == nil || !leaderboard.IsReady() {
-		return
-	}
-
+func (gs *GameSession) queueGameResultsLocked(winner *GamePlayer) {
 	// 计算获胜方
 	landlordWins := winner.IsLandlord
 
+	roomPlayers := gs.room.SnapshotPlayers()
+	roomNames := make(map[string]string, len(roomPlayers))
+	for _, player := range roomPlayers {
+		roomNames[player.ID] = player.Name
+	}
 	for _, p := range gs.players {
-		rp := gs.room.Players[p.ID]
 		if p.IsBot {
 			continue // Bot 不计入排行榜
 		}
@@ -255,13 +249,15 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 
 		// 获取玩家名称
 		playerName := p.Name
-		if rp != nil && rp.Client != nil {
-			playerName = rp.Client.GetName()
+		if currentName := roomNames[p.ID]; currentName != "" {
+			playerName = currentName
 		}
 
-		// 记录结果
-		if err := leaderboard.RecordGameResult(ctx, p.ID, playerName, p.IsLandlord, isWinner); err != nil {
-			log.Printf("记录游戏结果失败: %v", err)
-		}
+		gs.pendingResults = append(gs.pendingResults, pendingGameResult{
+			playerID:   p.ID,
+			playerName: playerName,
+			isLandlord: p.IsLandlord,
+			isWinner:   isWinner,
+		})
 	}
 }

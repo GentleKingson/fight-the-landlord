@@ -76,6 +76,9 @@ type GameSession struct {
 	landlordPlays     int // 地主实际出牌次数（用于反春天判断）
 	farmerPlays       int // 农民实际出牌次数（用于春天判断）
 	settledMultiplier int // 游戏结束后的最终倍数（含春天/反春天）
+	pendingDeliveries []pendingDelivery
+	pendingResults    []pendingGameResult
+	pendingRoomReset  bool
 
 	// 出牌相关
 	currentPlayer     int             // 当前出牌玩家索引
@@ -90,31 +93,29 @@ type GameSession struct {
 	turnDeadline     time.Time     // 当前回合的服务端绝对截止时间
 	timerMu          sync.Mutex
 
-	mu sync.RWMutex
+	// actionMu preserves commit/delivery order without holding mu during client
+	// delivery. Reentrant state reads remain possible while messages are sent.
+	actionMu sync.Mutex
+	mu       sync.RWMutex
 }
 
 // NewGameSession 创建游戏会话
 func NewGameSession(r *room.Room, lb *storage.LeaderboardManager, gameCfg config.GameConfig) *GameSession {
-	playerOrder := r.PlayerOrder
-	players := make([]*GamePlayer, len(playerOrder))
-	for i, id := range playerOrder {
-		rp := r.Players[id]
-		name := id
-		ready := false
-		isBot := false
-		if rp != nil {
-			ready = rp.Ready
-			if rp.Client != nil {
-				name = rp.Client.GetName()
-				isBot = rp.Client.IsBot()
-			}
-		}
+	return NewGameSessionWithPlayers(r, r.SnapshotPlayers(), lb, gameCfg)
+}
+
+// NewGameSessionWithPlayers builds a session from the membership snapshot
+// committed with the room's Ready transition. Membership may change after the
+// room lock is released, but it cannot shrink the starting game roster.
+func NewGameSessionWithPlayers(r *room.Room, roomPlayers []room.PlayerSnapshot, lb *storage.LeaderboardManager, gameCfg config.GameConfig) *GameSession {
+	players := make([]*GamePlayer, len(roomPlayers))
+	for i, rp := range roomPlayers {
 		players[i] = &GamePlayer{
-			ID:    id,
-			Name:  name,
-			Seat:  i,
-			Ready: ready,
-			IsBot: isBot,
+			ID:    rp.ID,
+			Name:  rp.Name,
+			Seat:  rp.Seat,
+			Ready: rp.Ready,
+			IsBot: rp.IsBot,
 		}
 	}
 

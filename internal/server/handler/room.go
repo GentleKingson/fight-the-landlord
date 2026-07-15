@@ -19,9 +19,8 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 		return
 	}
 
-	// 如果已在房间中，先离开
-	if client.GetRoom() != "" {
-		h.roomManager.LeaveRoom(client)
+	if !h.leaveRoomBeforeCommand(client, protocol.MsgCreateRoom) {
+		return
 	}
 
 	room, err := h.roomManager.CreateRoom(client)
@@ -34,10 +33,15 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "创建房间失败", protocol.MsgCreateRoom))
 		return
 	}
+	player, ok := room.GetPlayerInfo(client.GetID())
+	if !ok {
+		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "房间成员状态不同步", protocol.MsgCreateRoom))
+		return
+	}
 
 	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomCreated, protocol.RoomCreatedPayload{
 		RoomCode: room.Code,
-		Player:   room.GetPlayerInfo(client.GetID()),
+		Player:   player,
 	}))
 }
 
@@ -56,9 +60,8 @@ func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Mes
 		return
 	}
 
-	// 如果已在房间中，先离开
-	if client.GetRoom() != "" {
-		h.roomManager.LeaveRoom(client)
+	if !h.leaveRoomBeforeCommand(client, protocol.MsgJoinRoom) {
+		return
 	}
 
 	room, err := h.roomManager.JoinRoom(client, payload.RoomCode)
@@ -76,10 +79,15 @@ func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Mes
 		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "加入房间失败", protocol.MsgJoinRoom))
 		return
 	}
+	player, ok := room.GetPlayerInfo(client.GetID())
+	if !ok {
+		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "房间成员状态不同步", protocol.MsgJoinRoom))
+		return
+	}
 
 	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
 		RoomCode: room.Code,
-		Player:   room.GetPlayerInfo(client.GetID()),
+		Player:   player,
 		Players:  room.GetAllPlayersInfo(),
 	}))
 }
@@ -101,6 +109,21 @@ func (h *Handler) handleLeaveRoom(client types.ClientInterface) {
 	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomLeft, protocol.RoomLeftPayload{RoomCode: roomCode}))
 }
 
+func (h *Handler) leaveRoomBeforeCommand(client types.ClientInterface, command protocol.MessageType) bool {
+	if client.GetRoom() == "" {
+		return true
+	}
+	if h.roomManager != nil && h.roomManager.LeaveRoom(client) {
+		return true
+	}
+	client.SendMessage(codec.NewCommandErrorMessageWithText(
+		protocol.ErrCodeGameStarted,
+		"无法离开当前房间",
+		command,
+	))
+	return false
+}
+
 // handleQuickMatch 处理快速匹配
 func (h *Handler) handleQuickMatch(client types.ClientInterface) {
 	// 维护模式检查
@@ -110,9 +133,8 @@ func (h *Handler) handleQuickMatch(client types.ClientInterface) {
 		return
 	}
 
-	// 如果已在房间中，先离开
-	if client.GetRoom() != "" {
-		h.roomManager.LeaveRoom(client)
+	if !h.leaveRoomBeforeCommand(client, protocol.MsgQuickMatch) {
+		return
 	}
 
 	if h.matcher == nil {
@@ -137,8 +159,8 @@ func (h *Handler) handlePracticeMatch(client types.ClientInterface) {
 		return
 	}
 
-	if client.GetRoom() != "" {
-		h.roomManager.LeaveRoom(client)
+	if !h.leaveRoomBeforeCommand(client, protocol.MsgPracticeMatch) {
+		return
 	}
 
 	if h.matcher == nil {

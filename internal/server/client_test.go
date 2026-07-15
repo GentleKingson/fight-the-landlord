@@ -137,7 +137,32 @@ func TestClient_StaleDisconnectDoesNotClobberReboundConnection(t *testing.T) {
 
 	assert.True(t, sessionManager.IsOnline(restored.PlayerID))
 	assert.Equal(t, rebound, server.GetClientByID(restored.PlayerID))
-	assert.Same(t, rebound, gameRoom.Players[restored.PlayerID].Client)
+	recipient, ok := gameRoom.PrivateRecipient(restored.PlayerID)
+	require.True(t, ok)
+	assert.Same(t, rebound, recipient)
+}
+
+func TestClient_StaleLeaveDoesNotClobberReboundSessionRoom(t *testing.T) {
+	sessionManager := session.NewSessionManager()
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 10})
+	server := &Server{sessionManager: sessionManager, roomManager: roomManager}
+	previous := NewClient(server, nil)
+	previous.rebindIdentity("restored-id", "Restored Player", "")
+	playerSession := sessionManager.CreateSession(previous.GetID(), previous.GetName())
+	firstRoom, err := roomManager.CreateRoom(previous)
+	require.NoError(t, err)
+
+	rebound := NewClient(server, nil)
+	rebound.rebindIdentity(previous.GetID(), previous.GetName(), firstRoom.Code)
+	require.NoError(t, roomManager.ReconnectPlayer(previous.GetID(), firstRoom.Code, rebound))
+	require.False(t, roomManager.LeaveRoom(previous))
+	assert.Equal(t, firstRoom.Code, playerSession.RoomCode)
+
+	require.True(t, roomManager.LeaveRoom(rebound))
+	secondRoom, err := roomManager.CreateRoom(rebound)
+	require.NoError(t, err)
+	require.False(t, roomManager.LeaveRoom(previous))
+	assert.Equal(t, secondRoom.Code, playerSession.RoomCode)
 }
 
 func TestClient_Close(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 func TestGameSession_CurrentGameContext(t *testing.T) {
 	client := testutil.NewSimpleClient("p1", "Player1")
 	gameRoom := room.NewMockRoom("ROOM-A", client)
-	gameRoom.PlayerOrder = []string{client.GetID()}
+	gameRoom.SetPlayerOrderForTest([]string{client.GetID()})
 	game := NewGameSession(gameRoom, nil, config.GameConfig{})
 
 	gameID, state, member := game.CurrentGameContext(client.GetID())

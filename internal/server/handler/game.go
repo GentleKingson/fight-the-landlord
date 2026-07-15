@@ -37,6 +37,10 @@ func (h *Handler) handleBid(client types.ClientInterface, msg *protocol.Message)
 		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgBid))
 		return
 	}
+	if !room.IsCurrentClient(client) {
+		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgBid))
+		return
+	}
 
 	gameSession := h.GetGameSession(room.Code)
 	if gameSession == nil {
@@ -67,6 +71,10 @@ func (h *Handler) handlePlayCards(client types.ClientInterface, msg *protocol.Me
 		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPlayCards))
 		return
 	}
+	if !room.IsCurrentClient(client) {
+		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPlayCards))
+		return
+	}
 
 	gameSession := h.GetGameSession(room.Code)
 	if gameSession == nil {
@@ -88,6 +96,10 @@ func (h *Handler) handlePass(client types.ClientInterface) {
 
 	room := h.roomManager.GetRoom(client.GetRoom())
 	if room == nil {
+		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPass))
+		return
+	}
+	if !room.IsCurrentClient(client) {
 		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPass))
 		return
 	}

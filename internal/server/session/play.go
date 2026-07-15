@@ -17,18 +17,22 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 }
 
 func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.CardInfo, expectedTurnID int64) error {
+	gs.actionMu.Lock()
+	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
-	defer gs.mu.Unlock()
 
 	if gs.state != GameStatePlaying {
+		gs.mu.Unlock()
 		return apperrors.ErrGameNotStart
 	}
 	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
+		gs.mu.Unlock()
 		return apperrors.ErrNotYourTurn
 	}
 
 	currentPlayer := gs.players[gs.currentPlayer]
 	if currentPlayer.ID != playerID {
+		gs.mu.Unlock()
 		return apperrors.ErrNotYourTurn
 	}
 
@@ -37,18 +41,21 @@ func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.Car
 
 	// 验证牌是否在手中
 	if !gs.validateCardsInHand(currentPlayer, cards) {
+		gs.mu.Unlock()
 		return apperrors.ErrInvalidCards
 	}
 
 	// 解析牌型
 	handToPlay, err := rule.ParseHand(cards)
 	if err != nil {
+		gs.mu.Unlock()
 		return apperrors.ErrInvalidCards
 	}
 
 	// 检查是否能打过上家
 	isNewRound := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
 	if !isNewRound && !rule.CanBeat(handToPlay, gs.lastPlayedHand) {
+		gs.mu.Unlock()
 		return apperrors.ErrCannotBeat
 	}
 
@@ -86,7 +93,7 @@ func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.Car
 	gs.playedCards[gs.currentPlayer] = append(gs.playedCards[gs.currentPlayer], sortedCards...)
 
 	// 广播出牌信息
-	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
+	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
 		PlayerID:   playerID,
 		PlayerName: currentPlayer.Name,
 		Cards:      convert.CardsToInfos(sortedCards), // 使用排序后的牌
@@ -97,6 +104,9 @@ func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.Car
 	// 检查是否获胜
 	if len(currentPlayer.Hand) == 0 {
 		gs.endGame(currentPlayer)
+		work := gs.takePendingWorkLocked()
+		gs.mu.Unlock()
+		gs.dispatchPendingWork(work)
 		return nil
 	}
 
@@ -104,6 +114,9 @@ func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.Car
 	gs.currentPlayer = (gs.currentPlayer + 1) % 3
 	gs.notifyPlayTurn()
 
+	work := gs.takePendingWorkLocked()
+	gs.mu.Unlock()
+	gs.dispatchPendingWork(work)
 	return nil
 }
 
@@ -113,24 +126,29 @@ func (gs *GameSession) HandlePass(playerID string) error {
 }
 
 func (gs *GameSession) handlePass(playerID string, expectedTurnID int64) error {
+	gs.actionMu.Lock()
+	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
-	defer gs.mu.Unlock()
 
 	if gs.state != GameStatePlaying {
+		gs.mu.Unlock()
 		return apperrors.ErrGameNotStart
 	}
 	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
+		gs.mu.Unlock()
 		return apperrors.ErrNotYourTurn
 	}
 
 	currentPlayer := gs.players[gs.currentPlayer]
 	if currentPlayer.ID != playerID {
+		gs.mu.Unlock()
 		return apperrors.ErrNotYourTurn
 	}
 
 	// 检查是否必须出牌
 	mustPlay := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
 	if mustPlay {
+		gs.mu.Unlock()
 		return apperrors.ErrMustPlay
 	}
 
@@ -140,7 +158,7 @@ func (gs *GameSession) handlePass(playerID string, expectedTurnID int64) error {
 	gs.consecutivePasses++
 
 	// 广播不出
-	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
+	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
 		PlayerID:   playerID,
 		PlayerName: currentPlayer.Name,
 	}))
@@ -156,6 +174,9 @@ func (gs *GameSession) handlePass(playerID string, expectedTurnID int64) error {
 	gs.currentPlayer = (gs.currentPlayer + 1) % 3
 	gs.notifyPlayTurn()
 
+	work := gs.takePendingWorkLocked()
+	gs.mu.Unlock()
+	gs.dispatchPendingWork(work)
 	return nil
 }
 
@@ -208,7 +229,7 @@ func (gs *GameSession) notifyPlayTurn() {
 
 	gs.turnID++
 	gs.startPlayTimer()
-	gs.room.Broadcast(gs.newGameEventMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
 		PlayerID: player.ID,
 		Timeout:  gs.gameConfig.TurnTimeout,
 		MustPlay: mustPlay,

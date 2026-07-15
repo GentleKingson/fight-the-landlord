@@ -10,14 +10,13 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
 
-func TestRoomManager_LeaveRoomClearsStaleClientRoom(t *testing.T) {
+func TestRoomManager_LeaveRoomDoesNotMutateUnownedRoomIdentity(t *testing.T) {
 	rm := NewRoomManager(nil, config.GameConfig{RoomTimeout: 10})
 	client := testutil.NewSimpleClient("p1", "Player1")
 	client.SetRoom("missing")
 
-	assert.True(t, rm.LeaveRoom(client))
-	assert.Empty(t, client.GetRoom())
 	assert.False(t, rm.LeaveRoom(client))
+	assert.Equal(t, "missing", client.GetRoom())
 }
 
 func TestRoomManager_LeaveLastPlayerWithoutRedis(t *testing.T) {

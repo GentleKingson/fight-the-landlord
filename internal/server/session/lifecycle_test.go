@@ -17,9 +17,9 @@ func TestStartGame_DealCards(t *testing.T) {
 
 	// Setup room with 3 players
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	// Create game session
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
@@ -29,7 +29,7 @@ func TestStartGame_DealCards(t *testing.T) {
 
 	// Verify state
 	assert.Equal(t, GameStateBidding, gs.state)
-	assert.Equal(t, room.RoomStateBidding, r.State)
+	assert.Equal(t, room.RoomStateBidding, r.State())
 
 	// Verify each player has 17 cards
 	for i, p := range gs.players {
@@ -52,9 +52,9 @@ func TestStartGame_CardsAreSorted(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -73,9 +73,9 @@ func TestStartGame_BidderSelected(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -90,12 +90,12 @@ func TestEndGame_WinnerAnnounced(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
-	for _, player := range r.Players {
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
+	for _, player := range r.SnapshotPlayers() {
 		player.Client.SetRoom(r.Code)
-		player.Ready = true
+		require.True(t, r.SetPlayerReadyForTest(player.ID, true))
 	}
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
@@ -106,12 +106,16 @@ func TestEndGame_WinnerAnnounced(t *testing.T) {
 	winner.IsLandlord = true
 
 	// End game
+	gs.mu.Lock()
 	gs.endGame(winner)
+	work := gs.takePendingWorkLocked()
+	gs.mu.Unlock()
+	gs.dispatchPendingWork(work)
 
 	// Verify state
 	assert.Equal(t, GameStateEnded, gs.state)
-	assert.Equal(t, room.RoomStateWaiting, r.State)
-	for _, player := range r.Players {
+	assert.Equal(t, room.RoomStateWaiting, r.State())
+	for _, player := range r.SnapshotPlayers() {
 		assert.False(t, player.Ready)
 		assert.False(t, player.IsLandlord)
 		if player.Client != nil {
@@ -127,9 +131,9 @@ func TestEndedRoomCanReadyUpIntoFreshSession(t *testing.T) {
 		testutil.NewSimpleClient("p3", "Player3"),
 	}
 	r := room.NewMockRoom("REPLAY", clients[0])
-	r.Players["p2"] = &room.RoomPlayer{Client: clients[1], Seat: 1, Ready: true}
-	r.Players["p3"] = &room.RoomPlayer{Client: clients[2], Seat: 2, Ready: true}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(clients[1], 1, true)
+	r.AddPlayerForTest(clients[2], 2, true)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 	for _, client := range clients {
 		client.SetRoom(r.Code)
 	}
@@ -137,14 +141,18 @@ func TestEndedRoomCanReadyUpIntoFreshSession(t *testing.T) {
 	gameConfig := config.GameConfig{TurnTimeout: 30, BidTimeout: 15}
 	oldSession := NewGameSession(r, storage.NewLeaderboardManager(nil), gameConfig)
 	oldSession.Start()
+	oldSession.mu.Lock()
 	oldSession.endGame(oldSession.players[0])
+	work := oldSession.takePendingWorkLocked()
+	oldSession.mu.Unlock()
+	oldSession.dispatchPendingWork(work)
 	t.Cleanup(oldSession.StopAllTimers)
 
 	manager := room.NewRoomManager(nil, gameConfig)
 	manager.AddRoomForTest(r)
 	var replacement *GameSession
-	manager.SetOnGameStart(func(gameRoom *room.Room) {
-		replacement = NewGameSession(gameRoom, storage.NewLeaderboardManager(nil), gameConfig)
+	manager.SetOnGameStart(func(gameRoom *room.Room, players []room.PlayerSnapshot) {
+		replacement = NewGameSessionWithPlayers(gameRoom, players, storage.NewLeaderboardManager(nil), gameConfig)
 		replacement.Start()
 	})
 
@@ -155,7 +163,7 @@ func TestEndedRoomCanReadyUpIntoFreshSession(t *testing.T) {
 	t.Cleanup(replacement.StopAllTimers)
 	assert.NotSame(t, oldSession, replacement)
 	assert.Equal(t, GameStateBidding, replacement.state)
-	assert.Equal(t, room.RoomStateBidding, r.State)
+	assert.Equal(t, room.RoomStateBidding, r.State())
 	for _, client := range clients {
 		assert.Equal(t, r.Code, client.GetRoom())
 	}
@@ -166,9 +174,9 @@ func TestNewGameSession_Initialization(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	// Create session
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
@@ -181,9 +189,11 @@ func TestNewGameSession_Initialization(t *testing.T) {
 	assert.Equal(t, 1, gs.bidMultiplier)
 
 	// Verify players are in correct seats
+	roomPlayers := r.SnapshotPlayers()
+	require.Len(t, roomPlayers, len(gs.players))
 	for i, p := range gs.players {
 		assert.Equal(t, i, p.Seat)
-		assert.Equal(t, r.PlayerOrder[i], p.ID)
+		assert.Equal(t, roomPlayers[i].ID, p.ID)
 	}
 }
 
@@ -192,9 +202,9 @@ func TestGameSession_PlayerOfflineHandling(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 

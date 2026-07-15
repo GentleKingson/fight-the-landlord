@@ -214,6 +214,29 @@ func TestHandler_HandleChat_RoomRejectsSpoofedMembership(t *testing.T) {
 	assert.Empty(t, member.Messages)
 }
 
+func TestHandler_HandleChat_RoomRejectsReplacedConnection(t *testing.T) {
+	original := testutil.NewSimpleClient("p1", "Original")
+	replacement := testutil.NewSimpleClient("p1", "Replacement")
+	peer := testutil.NewSimpleClient("p2", "Peer")
+	original.SetRoom("ROOM-A")
+	peer.SetRoom("ROOM-A")
+	gameRoom := roomWithClients("ROOM-A", original, peer)
+	rm := gameroom.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	rm.AddRoomForTest(gameRoom)
+	require.NoError(t, rm.ReconnectPlayer("p1", gameRoom.Code, replacement))
+	replacement.Messages = nil
+	peer.Messages = nil
+	h := NewHandler(HandlerDeps{RoomManager: rm})
+
+	h.handleChat(original, chatMessage(protocol.ChatPayload{
+		Content: "stale", Scope: "room", MessageID: "m1",
+	}))
+
+	requireChatError(t, original, protocol.ErrCodeNotInRoom)
+	assert.Empty(t, replacement.Messages)
+	assert.Empty(t, peer.Messages)
+}
+
 func TestHandler_HandleChat_RoomRequiresRoomService(t *testing.T) {
 	client := testutil.NewSimpleClient("p1", "Player1")
 	client.SetRoom("ROOM-A")
@@ -275,8 +298,7 @@ func TestHandler_HandleChat_GameRequiresSessionMembership(t *testing.T) {
 	room, game, clients := runningGameChatFixture(t)
 	intruder := testutil.NewSimpleClient("intruder", "Intruder")
 	intruder.SetRoom(room.Code)
-	room.Players[intruder.GetID()] = &gameroom.RoomPlayer{Client: intruder, Seat: 3}
-	room.PlayerOrder = append(room.PlayerOrder, intruder.GetID())
+	room.AddPlayerForTest(intruder, 3, false)
 	rm := gameroom.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
 	rm.AddRoomForTest(room)
 	h := NewHandler(HandlerDeps{RoomManager: rm})
@@ -317,11 +339,12 @@ func requireChatPayload(t *testing.T, msg *protocol.Message) *protocol.ChatPaylo
 
 func roomWithClients(code string, clients ...*testutil.SimpleClient) *gameroom.Room {
 	room := gameroom.NewMockRoom(code, nil)
-	room.PlayerOrder = make([]string, 0, len(clients))
+	playerOrder := make([]string, 0, len(clients))
 	for seat, client := range clients {
-		room.Players[client.GetID()] = &gameroom.RoomPlayer{Client: client, Seat: seat}
-		room.PlayerOrder = append(room.PlayerOrder, client.GetID())
+		room.AddPlayerForTest(client, seat, false)
+		playerOrder = append(playerOrder, client.GetID())
 	}
+	room.SetPlayerOrderForTest(playerOrder)
 	return room
 }
 
@@ -336,8 +359,8 @@ func runningGameChatFixture(t *testing.T) (*gameroom.Room, *session.GameSession,
 		client.SetRoom("GAME-A")
 	}
 	room := roomWithClients("GAME-A", clients...)
-	for _, player := range room.Players {
-		player.Ready = true
+	for _, client := range clients {
+		require.True(t, room.SetPlayerReadyForTest(client.GetID(), true))
 	}
 	game := session.NewGameSession(room, nil, config.GameConfig{BidTimeout: 300, TurnTimeout: 300})
 	game.Start()

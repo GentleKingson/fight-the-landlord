@@ -149,10 +149,10 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	})
 
 	// 设置房间游戏开始回调
-	s.roomManager.SetOnGameStart(func(r *room.Room) {
-		gs := session.NewGameSession(r, s.leaderboard, s.config.Game)
-		for _, player := range r.Players {
-			if player == nil || player.Client == nil {
+	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot) {
+		gs := session.NewGameSessionWithPlayers(r, players, s.leaderboard, s.config.Game)
+		for _, player := range players {
+			if player.Client == nil {
 				continue
 			}
 			if botClient, ok := player.Client.(*bot.BotClient); ok {

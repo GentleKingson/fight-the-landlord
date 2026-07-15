@@ -22,9 +22,9 @@ func TestHandleBid_Success(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -54,9 +54,9 @@ func TestHandleBid_Grab_DoublesMultiplier(t *testing.T) {
 	t.Parallel()
 
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -86,9 +86,9 @@ func TestHandleBid_AllGrab_EndsAfterOneRound(t *testing.T) {
 	t.Parallel()
 
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -119,9 +119,9 @@ func TestHandleBid_NotYourTurn(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -137,9 +137,9 @@ func TestHandleBid_GameNotStarted(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	// Don't start the game
@@ -153,9 +153,9 @@ func TestHandleBid_AllPass_Redeal(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -182,9 +182,9 @@ func TestHandlePlayCards_Success(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -221,9 +221,9 @@ func TestHandlePlayCards_NotYourTurn(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -243,9 +243,9 @@ func TestHandlePlayCards_InvalidCards(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -272,9 +272,9 @@ func TestHandlePass_Success(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -299,9 +299,9 @@ func TestHandlePass_MustPlay(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -322,9 +322,9 @@ func TestHandlePass_TwoPassesNewRound(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
@@ -351,9 +351,9 @@ func TestValidateCardsInHand(t *testing.T) {
 
 	// Setup
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 
@@ -416,9 +416,9 @@ func TestFinalMultiplierAndScores(t *testing.T) {
 
 	newSession := func() *GameSession {
 		r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-		r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-		r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-		r.PlayerOrder = []string{"p1", "p2", "p3"}
+		r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+		r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+		r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 		gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 		gs.players[0].IsLandlord = true // p1 是地主
 		return gs
@@ -480,9 +480,9 @@ func TestHandleBid_MaxRedeals_ForceLandlord(t *testing.T) {
 	t.Parallel()
 
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()

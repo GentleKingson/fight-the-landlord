@@ -107,7 +107,7 @@ func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message
 		payload.GameID = gameID
 	}
 
-	if !room.BroadcastFromMember(client.GetID(), codec.MustNewMessage(protocol.MsgChat, payload)) {
+	if !room.BroadcastFromMember(client, codec.MustNewMessage(protocol.MsgChat, payload)) {
 		sendChatError(client, protocol.ErrCodeNotInRoom, "您不是该房间的成员")
 	}
 }

@@ -11,20 +11,19 @@ func (r *Room) ToRoomData() *storage.RoomData {
 
 	data := &storage.RoomData{
 		Code:        r.Code,
-		State:       int(r.State),
-		Players:     make([]storage.PlayerData, 0, len(r.Players)),
-		PlayerOrder: r.PlayerOrder,
+		State:       int(r.state),
+		Players:     make([]storage.PlayerData, 0, len(r.players)),
+		PlayerOrder: append([]string(nil), r.playerOrder...),
 		CreatedAt:   r.CreatedAt.Unix(),
 	}
 
-	for _, player := range r.Players {
-		// 跳过已离线的玩家（Client 为 nil）
-		if player.Client == nil {
+	for _, player := range r.players {
+		if player == nil {
 			continue
 		}
 		data.Players = append(data.Players, storage.PlayerData{
-			ID:         player.Client.GetID(),
-			Name:       player.Client.GetName(),
+			ID:         player.ID,
+			Name:       player.Name,
 			Seat:       player.Seat,
 			Ready:      player.Ready,
 			IsLandlord: player.IsLandlord,

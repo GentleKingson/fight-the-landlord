@@ -111,7 +111,7 @@ func TestReconnectPlayer_Success(t *testing.T) {
 	rm.mu.RUnlock()
 
 	r.mu.RLock()
-	player := r.Players[newClient.GetID()]
+	player := r.players[newClient.GetID()]
 	r.mu.RUnlock()
 
 	assert.Equal(t, newClient, player.Client)
@@ -173,7 +173,7 @@ func TestReconnectPlayer_RejectsProvisionalIdentity(t *testing.T) {
 
 	err = rm.ReconnectPlayer(oldClient.GetID(), gameRoom.Code, provisionalClient)
 	assert.ErrorIs(t, err, apperrors.ErrNotInRoom)
-	assert.Same(t, oldClient, gameRoom.Players[oldClient.GetID()].Client)
+	assert.Same(t, oldClient, gameRoom.players[oldClient.GetID()].Client)
 }
 
 func TestReconnectPlayer_NotInAnyRoom(t *testing.T) {
@@ -260,7 +260,7 @@ func TestCleanup_DoesNotRemovePlayingRooms(t *testing.T) {
 
 	// Change state to playing
 	room.mu.Lock()
-	room.State = RoomStatePlaying
+	room.state = RoomStatePlaying
 	room.mu.Unlock()
 
 	// Wait for timeout
@@ -291,7 +291,7 @@ func TestSetAllPlayersReady(t *testing.T) {
 
 	// Initially not ready
 	room.mu.RLock()
-	for _, p := range room.Players {
+	for _, p := range room.players {
 		assert.False(t, p.Ready)
 	}
 	room.mu.RUnlock()
@@ -301,7 +301,7 @@ func TestSetAllPlayersReady(t *testing.T) {
 
 	// Verify all ready
 	room.mu.RLock()
-	for _, p := range room.Players {
+	for _, p := range room.players {
 		assert.True(t, p.Ready)
 	}
 	room.mu.RUnlock()

@@ -155,39 +155,53 @@ func (gs *GameSession) turnDeadlineMS() int64 {
 	return gs.turnDeadline.UnixMilli()
 }
 
-// SerializeForRedis 为Redis序列化准备数据（提供只读访问）
-func (gs *GameSession) SerializeForRedis(serialize func()) {
-	gs.mu.RLock()
-	defer gs.mu.RUnlock()
-	serialize()
-}
-
 // GetStateForSerialization 获取state用于序列化
 func (gs *GameSession) GetStateForSerialization() GameState {
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
 	return gs.state
 }
 
 // GetCurrentPlayerForSerialization 获取currentPlayer用于序列化
 func (gs *GameSession) GetCurrentPlayerForSerialization() int {
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
 	return gs.currentPlayer
 }
 
 // GetCurrentBidderForSerialization 获取当前叫/抢地主玩家索引
 func (gs *GameSession) GetCurrentBidderForSerialization() int {
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
 	return gs.currentBidder
 }
 
 // GetHighestBidderForSerialization 获取当前暂定地主索引用于序列化
 func (gs *GameSession) GetHighestBidderForSerialization() int {
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
 	return gs.landlordCandidate
 }
 
 // GetPlayersForSerialization 获取players用于序列化
 func (gs *GameSession) GetPlayersForSerialization() []*GamePlayer {
-	return gs.players
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
+	players := make([]*GamePlayer, len(gs.players))
+	for index, player := range gs.players {
+		if player == nil {
+			continue
+		}
+		copyPlayer := *player
+		copyPlayer.Hand = append([]card.Card(nil), player.Hand...)
+		players[index] = &copyPlayer
+	}
+	return players
 }
 
 // GetBottomCardsForSerialization 获取bottomCards用于序列化
 func (gs *GameSession) GetBottomCardsForSerialization() []card.Card {
-	return gs.bottomCards
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
+	return append([]card.Card(nil), gs.bottomCards...)
 }

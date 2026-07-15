@@ -17,16 +17,13 @@ import (
 // Helper to create a room with a running game session and mock clients
 func setupGameRoom(t *testing.T) (*r.Room, *session.GameSession, []*testutil.MockClient) {
 	t.Helper()
-	room := &r.Room{
-		Code:        "123",
-		Players:     make(map[string]*r.RoomPlayer),
-		PlayerOrder: []string{"p1", "p2", "p3"},
-	}
+	room := r.NewMockRoom("123", nil)
+	playerOrder := []string{"p1", "p2", "p3"}
 
 	clients := make([]*testutil.MockClient, 3)
 	for i := range 3 {
 		c := new(testutil.MockClient)
-		id := room.PlayerOrder[i]
+		id := playerOrder[i]
 		c.On("GetID").Return(id)
 		c.On("GetName").Return("Player" + id)
 		c.On("GetRoom").Return("123")
@@ -35,13 +32,10 @@ func setupGameRoom(t *testing.T) (*r.Room, *session.GameSession, []*testutil.Moc
 		c.On("Close").Maybe()
 		c.On("SendMessage", mock.Anything).Maybe()
 
-		room.Players[id] = &r.RoomPlayer{
-			Client: c,
-			Seat:   i,
-			Ready:  true,
-		}
+		room.AddPlayerForTest(c, i, true)
 		clients[i] = c
 	}
+	room.SetPlayerOrderForTest(playerOrder)
 
 	// Create and start session
 	gs := session.NewGameSession(room, nil, config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
@@ -85,7 +79,7 @@ func driveBiddingToPlay(t *testing.T, h *Handler, room *r.Room, gs *session.Game
 	}
 
 	sendBid := func(bidderIdx int, bid bool) {
-		id := room.PlayerOrder[bidderIdx]
+		id := room.SnapshotPlayers()[bidderIdx].ID
 		payloadBytes, _ := payloadconv.EncodePayload(protocol.MsgBid, protocol.BidPayload{Bid: bid})
 		h.handleBid(clientByID[id], &protocol.Message{Type: protocol.MsgBid, Payload: payloadBytes})
 	}
@@ -126,7 +120,7 @@ func TestHandler_HandlePlayCards_Success(t *testing.T) {
 
 	// Identify Landlord Client
 	landlordIdx := gs.GetCurrentPlayerForSerialization()
-	landlordID := room.PlayerOrder[landlordIdx]
+	landlordID := room.SnapshotPlayers()[landlordIdx].ID
 
 	var landlordClient *testutil.MockClient
 	for _, c := range clients {
@@ -152,6 +146,7 @@ func TestHandler_HandlePlayCards_Success(t *testing.T) {
 
 	h.handlePlayCards(landlordClient, msg)
 
-	// Verify hand size decreased
-	assert.Equal(t, 19, len(landlordPlayer.Hand))
+	// Verify hand size decreased in a fresh synchronized snapshot.
+	updatedLandlord := gs.GetPlayersForSerialization()[landlordIdx]
+	assert.Equal(t, 19, len(updatedLandlord.Hand))
 }
