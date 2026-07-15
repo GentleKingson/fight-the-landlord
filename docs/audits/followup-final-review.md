@@ -6,7 +6,7 @@
 
 修复分支：`codex/web-client-remediation-followup`
 
-最终实现验证提交：`11267bc`
+最终实现验证提交：`6731bb3`
 
 本报告不沿用旧 `final-review.md` 的通过结论。Phase 0 的原始基线记录在
 `followup-baseline.md`；以下状态来自本分支实现、定向测试和 2026-07-15
@@ -27,6 +27,13 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 并上传 race/coverage、SBOM、trace/screenshot/video/Compose 日志证据。
 因此本报告建议合并；剩余项均为不阻塞本次合并的外部部署与长时压测风险。
 
+独立审查随后发现两个此前遗漏的运行时阻断项：重连快照入队失败后 token rotation
+未回滚，以及 `activeCommand` 可能按消息类型误捕获并发广播。`6731bb3` 将重连恢复
+补成 Room、client registry/identity、session token 三层回滚事务，并把直接命令结果
+与领域事件改为显式发送路径。原 token 注入失败后重试、Chat 和 Ready 并发关联/
+幂等重放测试均已通过；临时分支 CI trigger、Actions 版本回退和根目录审计报告也已
+同步清理。
+
 ## 问题状态
 
 | ID | 状态 | 实现与测试证据 |
@@ -36,6 +43,8 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 | P0-03 Room 并发所有权 | 完成 | 成员、顺序和状态改为 Room 安全 API；锁内复制、锁外发送；GameSession 不再直接读写成员 map；离线私信和 cleanup nil 路径有测试。 |
 | P0-04 Matcher 事务 | 完成 | `QueueEntry` + generation/deadline/state/cancel；queued/inflight/commit/rollback 受控；临时房间原子发布，逐步失败完整回滚。 |
 | P0-05 Redis 暴露 | 完成 | 默认 Compose 无 Redis host binding；debug profile 仅回环地址；生产密码注入；脚本和最终容器 inspect 双重验证。 |
+| P0-06 重连快照失败原子性 | 完成 | `Reconnected` 入队失败会回滚 Room 绑定、client registry/identity 和 token rotation；原 token 可再次恢复同一 player、room 与权威快照。 |
+| P0-07 命令响应因果隔离 | 完成 | 只有显式 `SendCommandResult` 携带 request ID 并进入缓存；大厅/房间广播按发起者和其他接收者分别投递；Chat、Ready 交叠事件不再污染缓存。 |
 | P1-01 结算重连 | 完成 | canonical proto 增加 settlement；ended 快照保存完整胜者、倍数、分数和剩余手牌；刷新、三方重连、第二局及缺失 settlement 错误 UI 均覆盖。 |
 | P1-02 协议兼容 | 完成 | Hello 强制协商 protocol/client version、capabilities、client kind；不兼容/过低版本握手拒绝；旧 Chat fixture 有受控兼容与计数。 |
 | P1-03 request ID 和幂等 | 完成 | 所有命令 dispatcher 统一带 `request_id`；叫地主、出牌和不出额外带 `expected_game_id`/`expected_turn_id`；ack/error 关联；服务端 TTL/容量有界缓存复用首次结果并拒绝冲突重放。 |
@@ -45,6 +54,7 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 | P1-07 GameSession 注销 | 完成 | Room removal exact-once 通知 Handler；games、timer、Redis、Bot 和 Matcher 关联统一退休；并发删除和长期循环不持续增长。 |
 | P1-08 配置验证 | 完成 | `Config.Validate()` 覆盖端口、连接、timeout、Redis、URL、semver、Origin、proxy CIDR、rate limit；非法 env 返回错误，生产启动不回退。 |
 | P1-09 生产镜像 E2E | 完成 | 最终 Docker 镜像直接由 Compose 启动，无 Vite/`go run`；Chromium 完整部署/故障/两局流程，Firefox/WebKit 真实连接和选牌；本地和远端均 11/11。 |
+| P1-10 CI 合并清理 | 完成 | 仅保留 `push: main`、`pull_request: main`、`workflow_dispatch`；checkout/cache/codecov 恢复主线 v7/v6/v7；actionlint 通过。 |
 
 ## P2 状态
 
@@ -72,6 +82,7 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 | 7：非法 env 静默；manager/ticker/Web 状态集合可能无界 | Config.Validate、runtime Close、Web LRU/畸形帧、Chat 清理、规则 benchmark。 | race、244 Web 单测、benchmark 均通过。长时间生产 soak 仍未执行。 | `66efe3d` |
 | 8：旧 CI 运行 Vite/`go run`，curl 冒烟不能证明发布镜像浏览器和故障路径 | production Playwright 配置、deployment/full-game/fault/cross-browser specs、`production-e2e` job、race/coverage/trace/video/log/SBOM artifacts。初始脚本不存在和旧服务断言先失败。 | 本地最终镜像 11/11；15 screenshots、9 traces、17 videos；远端完整 job 和严格 Compose cleanup 通过。 | `c6157f0` |
 | 8 远端门禁：workflow 未登记，存量 Go lint 阻塞 race，旧 setup-protoc 不兼容 Node 24 | 修复分支 push 触发与手动运行；消除 93 个 lint 问题而不隐藏错误；恢复 `"cancelled"` wire 兼容；改为 SHA-256 校验的 protoc 3.13.0 官方资产。 | `golangci-lint` 0 issues；全量 race 与生产 E2E 复测通过；手动运行 `29413404382` 全绿。 | `5e55079`, `6ad793d`, `11267bc` |
+| 9 独立审查：重连失败消费 token；广播按类型误入命令缓存 | Room/client/session 三层 rollback；显式 command-result/event sender；发起者专属 Chat/Ready/game event 关联；并发缓存回放和原 token 重试测试；CI/审计文件清理。 | 定向 Go 包、golangci-lint、Web 全门禁、mock E2E、最终镜像 11/11 和 actionlint 通过。 | `6731bb3` |
 
 ## 提交清单
 
@@ -89,6 +100,21 @@ gofmt/proto/race/coverage、Web proto/typecheck/ESLint/unit/benchmark/build/mock
 | `5e55079` | `ci: exercise the complete follow-up branch workflow` |
 | `6ad793d` | `fix(ci): satisfy the full Go quality gate` |
 | `11267bc` | `fix(ci): install a pinned protoc toolchain` |
+| `6731bb3` | `fix(server): close post-audit merge blockers` |
+
+### 独立审查后的本地复测
+
+| 实际执行命令 | 结果 |
+| --- | --- |
+| `go test ./internal/server ./internal/server/handler ./internal/server/session ./internal/game/room ./internal/game/match -count=1`（Go 1.26.1 容器） | 全部通过；包含原 token 故障重试、registry rollback、Chat/Ready 因果隔离与缓存回放。 |
+| `golangci-lint run --build-tags=ci`（v2.11.1 容器） | `0 issues.` |
+| Web `proto:check`、typecheck、ESLint、Vitest、Vite build | 全部通过；18 files、244/244 tests，94 modules build。 |
+| `vitest bench --run tests/rules.bench.ts` | 通过；完整响应枚举 p99 10.9866ms，Hint p99 11.2488ms。 |
+| `playwright test` | 沙箱内 Chromium 因 macOS Mach port 权限拒绝启动；同一代码在沙箱外复测 15/15 通过。 |
+| `actionlint .github/workflows/test.yml` | 通过，无输出。 |
+| `docker build --build-arg VERSION=ci --tag fight-the-landlord:ci .` | 通过；manifest list `sha256:bdab6b6728471e05e13313ff6d1c81c0cf51aa729f44a3428f703743bce385f8`。 |
+| 最终镜像 `playwright test --config playwright.production.config.ts` | 11/11 通过（2.4m）；Chromium 部署/故障/双牌局，Firefox/WebKit 真实连接与选牌均通过。 |
+| `docker compose ... down --timeout 90 --volumes --remove-orphans` | 通过；测试 server、Redis、network 和 volume 全部删除。 |
 
 ## 最终实际命令与关键原始输出
 
