@@ -98,22 +98,40 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 初始化 Redis 客户端
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
+	rdb, err := connectRedis(cfg)
+	if err != nil {
+		return nil, err
+	}
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background()) //nolint:gosec // Server.Shutdown owns runtimeCancel.
+	s := newServerRuntime(cfg, rdb, ipResolver, runtimeCtx, runtimeCancel)
+	s.initializeGameRuntime(cfg)
 
-	// 测试 Redis 连接
+	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 聊天限制=%d/s, 最大连接数=%d",
+		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)
+	log.Printf("🔒 WebSocket Origin 白名单: %s", strings.Join(cfg.Security.AllowedOrigins, ", "))
+	return s, nil
+}
+
+func connectRedis(cfg *config.Config) (*redis.Client, error) {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB,
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		_ = rdb.Close()
 		return nil, fmt.Errorf("redis 连接失败: %w", err)
 	}
-	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	return rdb, nil
+}
 
+func newServerRuntime(
+	cfg *config.Config,
+	rdb *redis.Client,
+	ipResolver *ClientIPResolver,
+	runtimeCtx context.Context,
+	runtimeCancel context.CancelFunc,
+) *Server {
 	s := &Server{
 		config:         cfg,
 		redis:          rdb,
@@ -145,25 +163,14 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		runtimeCancel:     runtimeCancel,
 	}
 	s.readinessCheck = func(ctx context.Context) error { return rdb.Ping(ctx).Err() }
+	return s
+}
 
-	// 初始化房间管理器
-	s.roomManager = room.NewRoomManagerWithContext(runtimeCtx, s.redisStore, cfg.Game)
-
-	// 初始化机器人 (未启用时为 nil）
-	var botEngine bot.DecisionEngine
-	if cfg.BOT.Enabled {
-		if cfg.BOT.DouZeroEnabled {
-			botEngine = bot.NewDouZeroEngine(cfg.BOT.DouZeroURL)
-			log.Printf("🎮 DouZero 引擎已启用（服务地址: %s，等待超时: %ds）", cfg.BOT.DouZeroURL, cfg.BOT.BotFillTimeout)
-		} else {
-			botEngine = bot.NewHeuristicEngine()
-			log.Printf("🤖 规则启发式机器人已启用（等待超时: %ds）", cfg.BOT.BotFillTimeout)
-		}
-	}
-
-	// 初始化匹配器
+func (s *Server) initializeGameRuntime(cfg *config.Config) {
+	s.roomManager = room.NewRoomManagerWithContext(s.runtimeCtx, s.redisStore, cfg.Game)
+	botEngine := configuredBotEngine(cfg)
 	s.matcher = match.NewMatcher(match.MatcherDeps{
-		Context:             runtimeCtx,
+		Context:             s.runtimeCtx,
 		RoomManager:         s.roomManager,
 		RedisStore:          s.redisStore,
 		Leaderboard:         s.leaderboard,
@@ -175,8 +182,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 			return s.handler.SetGameSession(roomCode, gs)
 		},
 	})
-
-	// 初始化消息处理器
 	s.handler = handler.NewHandler(handler.HandlerDeps{
 		Server:         s,
 		RoomManager:    s.roomManager,
@@ -185,8 +190,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		Leaderboard:    s.leaderboard,
 		SessionManager: s.sessionManager,
 	})
-
-	// 设置房间游戏开始回调
 	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot) {
 		gs := session.NewGameSessionWithPlayers(r, players, s.leaderboard, s.config.Game)
 		if !s.handler.SetGameSession(r.Code, gs) {
@@ -202,12 +205,18 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		}
 		gs.Start()
 	})
+}
 
-	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 聊天限制=%d/s, 最大连接数=%d",
-		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)
-	log.Printf("🔒 WebSocket Origin 白名单: %s", strings.Join(cfg.Security.AllowedOrigins, ", "))
-
-	return s, nil
+func configuredBotEngine(cfg *config.Config) bot.DecisionEngine {
+	if !cfg.BOT.Enabled {
+		return nil
+	}
+	if cfg.BOT.DouZeroEnabled {
+		log.Printf("🎮 DouZero 引擎已启用（服务地址: %s，等待超时: %ds）", cfg.BOT.DouZeroURL, cfg.BOT.BotFillTimeout)
+		return bot.NewDouZeroEngine(cfg.BOT.DouZeroURL)
+	}
+	log.Printf("🤖 规则启发式机器人已启用（等待超时: %ds）", cfg.BOT.BotFillTimeout)
+	return bot.NewHeuristicEngine()
 }
 
 func (s *Server) activeCommandCache() *commandCache {

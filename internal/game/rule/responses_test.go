@@ -76,6 +76,8 @@ func TestListLegalResponses_StrictWingSemantics(t *testing.T) {
 	t.Parallel()
 
 	t.Run("paired single wings are not a plane with singles", func(t *testing.T) {
+		t.Parallel()
+
 		opponent := mustParseRuleHand(t, ranks(
 			card.Rank3, card.Rank3, card.Rank3,
 			card.Rank4, card.Rank4, card.Rank4,
@@ -93,6 +95,8 @@ func TestListLegalResponses_StrictWingSemantics(t *testing.T) {
 	})
 
 	t.Run("another bomb cannot be split into two pair wings", func(t *testing.T) {
+		t.Parallel()
+
 		opponent := mustParseRuleHand(t, ranks(
 			card.Rank3, card.Rank3, card.Rank3, card.Rank3,
 			card.Rank4, card.Rank4, card.Rank5, card.Rank5,
@@ -109,6 +113,8 @@ func TestListLegalResponses_StrictWingSemantics(t *testing.T) {
 	})
 
 	t.Run("a single kicker may be split from another trio", func(t *testing.T) {
+		t.Parallel()
+
 		opponent := mustParseRuleHand(t, ranks(card.Rank3, card.Rank3, card.Rank3, card.RankA))
 		playerHand := testRuleCards(
 			card.Rank4, card.Rank4, card.Rank4,

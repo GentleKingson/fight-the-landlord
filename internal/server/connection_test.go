@@ -21,7 +21,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 )
 
-func newWebSocketLimitTestServer(t *testing.T, maxConnections int) (*Server, string) {
+func newWebSocketLimitTestServer(t *testing.T, maxConnections int) (server *Server, websocketURL string) {
 	t.Helper()
 
 	s := &Server{
@@ -151,7 +151,10 @@ func TestHandleWebSocket_ZeroMeansUnlimited(t *testing.T) {
 
 func TestHandleWebSocketRejectsIncompatibleProtocolBeforeRegistration(t *testing.T) {
 	s, url := newWebSocketLimitTestServer(t, 1)
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	conn, handshakeResponse, err := websocket.DefaultDialer.Dial(url, nil)
+	if handshakeResponse != nil {
+		defer handshakeResponse.Body.Close()
+	}
 	require.NoError(t, err)
 	response := writeHelloAndReadResponse(t, conn, "hello-incompatible", "0", "dev", protocol.ClientKindWeb)
 	require.Equal(t, protocol.MsgProtocolRejected, response.Type)
@@ -172,7 +175,10 @@ func TestHandleWebSocketRejectsIncompatibleProtocolBeforeRegistration(t *testing
 func TestHandleWebSocketRejectsClientBelowMinimumVersion(t *testing.T) {
 	s, url := newWebSocketLimitTestServer(t, 1)
 	s.config = &config.Config{Server: config.ServerConfig{MinClientVersion: "v2.0.0"}}
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	conn, handshakeResponse, err := websocket.DefaultDialer.Dial(url, nil)
+	if handshakeResponse != nil {
+		defer handshakeResponse.Body.Close()
+	}
 	require.NoError(t, err)
 	response := writeHelloAndReadResponse(t, conn, "hello-old-client", protocol.ProtocolVersion, "v1.9.9", protocol.ClientKindTUI)
 	require.Equal(t, protocol.MsgProtocolRejected, response.Type)
@@ -186,7 +192,10 @@ func TestHandleWebSocketRejectsClientBelowMinimumVersion(t *testing.T) {
 func TestHandleWebSocketComparesMinimumVersionUsingSemverPrecedence(t *testing.T) {
 	s, url := newWebSocketLimitTestServer(t, 1)
 	s.config = &config.Config{Server: config.ServerConfig{MinClientVersion: "v1.2.3+server.7"}}
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	conn, handshakeResponse, err := websocket.DefaultDialer.Dial(url, nil)
+	if handshakeResponse != nil {
+		defer handshakeResponse.Body.Close()
+	}
 	require.NoError(t, err)
 	response := writeHelloAndReadResponse(
 		t,
@@ -205,7 +214,10 @@ func TestHandleWebSocketComparesMinimumVersionUsingSemverPrecedence(t *testing.T
 
 func TestHandleWebSocketRequiresHelloAsFirstMessage(t *testing.T) {
 	s, url := newWebSocketLimitTestServer(t, 1)
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	conn, handshakeResponse, err := websocket.DefaultDialer.Dial(url, nil)
+	if handshakeResponse != nil {
+		defer handshakeResponse.Body.Close()
+	}
 	require.NoError(t, err)
 	ping := commandTestMessage("not-a-hello", 1)
 	data, err := codec.Encode(ping)

@@ -18,6 +18,17 @@ type responseCandidate struct {
 	rankVector []card.Rank
 }
 
+type responseSearch struct {
+	groups           []responseRankGroup
+	selectedCounts   []int
+	allowedLengths   map[int]struct{}
+	suffixCardCounts []int
+	opponentHand     ParsedHand
+	maxLength        int
+	isLead           bool
+	responses        []responseCandidate
+}
+
 // ListLegalResponses returns every legal logical response in deterministic
 // order. Suits do not affect hand strength, so equivalent suit-only variants
 // of the same rank multiset are represented by one concrete card selection.
@@ -32,59 +43,22 @@ func ListLegalResponses(playerHand []card.Card, opponentHand ParsedHand) [][]car
 	}
 
 	groups := groupResponseCardsByRank(playerHand)
-	selectedCounts := make([]int, len(groups))
 	allowedLengths := responseLengths(opponentHand, isLead)
 	maxLength := len(playerHand)
 	if !isLead {
 		maxLength = largestResponseLength(allowedLengths)
 	}
-	suffixCardCounts := responseSuffixCardCounts(groups)
-
-	responses := make([]responseCandidate, 0)
-	var visit func(groupIndex, selectedTotal int)
-	visit = func(groupIndex, selectedTotal int) {
-		if selectedTotal > maxLength {
-			return
-		}
-		if !isLead && !canReachResponseLength(allowedLengths, selectedTotal, suffixCardCounts[groupIndex]) {
-			return
-		}
-
-		if groupIndex == len(groups) {
-			if selectedTotal == 0 {
-				return
-			}
-			if !isLead {
-				if _, ok := allowedLengths[selectedTotal]; !ok {
-					return
-				}
-			}
-
-			candidateCards, rankVector := materializeResponse(groups, selectedCounts)
-			parsedHand, err := ParseHand(candidateCards)
-			if err != nil {
-				return
-			}
-			if !isLead && !CanBeat(parsedHand, opponentHand) {
-				return
-			}
-			responses = append(responses, responseCandidate{
-				cards:      candidateCards,
-				parsed:     parsedHand,
-				rankVector: rankVector,
-			})
-			return
-		}
-
-		available := len(groups[groupIndex].cards)
-		for count := 0; count <= available && selectedTotal+count <= maxLength; count++ {
-			selectedCounts[groupIndex] = count
-			visit(groupIndex+1, selectedTotal+count)
-		}
-		selectedCounts[groupIndex] = 0
+	search := responseSearch{
+		groups:           groups,
+		selectedCounts:   make([]int, len(groups)),
+		allowedLengths:   allowedLengths,
+		suffixCardCounts: responseSuffixCardCounts(groups),
+		opponentHand:     opponentHand,
+		maxLength:        maxLength,
+		isLead:           isLead,
 	}
-
-	visit(0, 0)
+	search.visit(0, 0)
+	responses := search.responses
 	slices.SortFunc(responses, func(left, right responseCandidate) int {
 		return compareResponseCandidates(left, right, opponentHand, isLead)
 	})
@@ -94,6 +68,58 @@ func ListLegalResponses(playerHand []card.Card, opponentHand ParsedHand) [][]car
 		result[i] = response.cards
 	}
 	return result
+}
+
+func (s *responseSearch) visit(groupIndex, selectedTotal int) {
+	if selectedTotal > s.maxLength {
+		return
+	}
+	if !s.isLead && !canReachResponseLength(
+		s.allowedLengths,
+		selectedTotal,
+		s.suffixCardCounts[groupIndex],
+	) {
+		return
+	}
+	if groupIndex == len(s.groups) {
+		s.appendCandidate(selectedTotal)
+		return
+	}
+
+	available := len(s.groups[groupIndex].cards)
+	for count := 0; count <= available && selectedTotal+count <= s.maxLength; count++ {
+		s.selectedCounts[groupIndex] = count
+		s.visit(groupIndex+1, selectedTotal+count)
+	}
+	s.selectedCounts[groupIndex] = 0
+}
+
+func (s *responseSearch) appendCandidate(selectedTotal int) {
+	if selectedTotal == 0 {
+		return
+	}
+	if !s.isLead && !isAllowedResponseLength(s.allowedLengths, selectedTotal) {
+		return
+	}
+
+	candidateCards, rankVector := materializeResponse(s.groups, s.selectedCounts)
+	parsedHand, err := ParseHand(candidateCards)
+	if err != nil {
+		return
+	}
+	if !s.isLead && !CanBeat(parsedHand, s.opponentHand) {
+		return
+	}
+	s.responses = append(s.responses, responseCandidate{
+		cards:      candidateCards,
+		parsed:     parsedHand,
+		rankVector: rankVector,
+	})
+}
+
+func isAllowedResponseLength(lengths map[int]struct{}, selectedTotal int) bool {
+	_, ok := lengths[selectedTotal]
+	return ok
 }
 
 func groupResponseCardsByRank(playerHand []card.Card) []responseRankGroup {
@@ -234,19 +260,26 @@ func compareResponseCandidates(left, right responseCandidate, opponentHand Parse
 
 func responsePriority(hand, opponentHand ParsedHand, isLead bool) int {
 	if !isLead {
-		switch {
-		case hand.Type == opponentHand.Type:
-			return 0
-		case hand.Type == Bomb:
-			return 1
-		case hand.Type == Rocket:
-			return 2
-		default:
-			return 3
-		}
+		return beatingResponsePriority(hand.Type, opponentHand.Type)
 	}
+	return leadResponsePriority(hand.Type)
+}
 
-	switch hand.Type {
+func beatingResponsePriority(handType, opponentType HandType) int {
+	switch handType {
+	case opponentType:
+		return 0
+	case Bomb:
+		return 1
+	case Rocket:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func leadResponsePriority(handType HandType) int {
+	switch handType {
 	case Single:
 		return 0
 	case Pair:

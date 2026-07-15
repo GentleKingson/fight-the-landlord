@@ -20,6 +20,7 @@ func TestSPAHandlerServesIndexAndFallback(t *testing.T) {
 	handler := newTestSPAHandler(t)
 	for _, requestPath := range []string{"/", "/room/836219", "/game/table/"} {
 		t.Run(requestPath, func(t *testing.T) {
+			t.Parallel()
 			req := httptest.NewRequest(http.MethodGet, requestPath, http.NoBody)
 			w := httptest.NewRecorder()
 
@@ -63,6 +64,7 @@ func TestSPAHandlerDoesNotFallbackForMissingFiles(t *testing.T) {
 	handler := newTestSPAHandler(t)
 	for _, requestPath := range []string{"/assets/missing.js", "/favicon.ico", "/../secret.txt"} {
 		t.Run(requestPath, func(t *testing.T) {
+			t.Parallel()
 			req := httptest.NewRequest(http.MethodGet, requestPath, http.NoBody)
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)

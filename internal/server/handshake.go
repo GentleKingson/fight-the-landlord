@@ -103,14 +103,32 @@ func (s *Server) validateHello(hello protocol.HelloPayload) string {
 	if clientVersion == "" || len(clientVersion) > maxClientVersionLength {
 		return "client_version 无效"
 	}
-	if hello.ClientKind != protocol.ClientKindWeb && hello.ClientKind != protocol.ClientKindTUI && hello.ClientKind != protocol.ClientKindBot {
+	if !validClientKind(hello.ClientKind) {
 		return "client_kind 无效"
 	}
-	if len(hello.Capabilities) > maxCapabilities {
+	if reason := validateCapabilities(hello.Capabilities); reason != "" {
+		return reason
+	}
+	minimum := ""
+	if s != nil && s.config != nil {
+		minimum = strings.TrimSpace(s.config.Server.MinClientVersion)
+	}
+	if minimum != "" && !compatibleClientVersion(clientVersion, minimum, Version) {
+		return fmt.Sprintf("客户端版本过低：需要至少 %s", minimum)
+	}
+	return ""
+}
+
+func validClientKind(kind string) bool {
+	return kind == protocol.ClientKindWeb || kind == protocol.ClientKindTUI || kind == protocol.ClientKindBot
+}
+
+func validateCapabilities(values []string) string {
+	if len(values) > maxCapabilities {
 		return "capabilities 数量超过限制"
 	}
-	capabilities := make(map[string]struct{}, len(hello.Capabilities))
-	for _, capability := range hello.Capabilities {
+	capabilities := make(map[string]struct{}, len(values))
+	for _, capability := range values {
 		if capability == "" || len(capability) > maxCapabilityLength {
 			return "capability 无效"
 		}
@@ -123,13 +141,6 @@ func (s *Server) validateHello(hello protocol.HelloPayload) string {
 		if _, ok := capabilities[required]; !ok {
 			return fmt.Sprintf("缺少必需 capability：%s", required)
 		}
-	}
-	minimum := ""
-	if s != nil && s.config != nil {
-		minimum = strings.TrimSpace(s.config.Server.MinClientVersion)
-	}
-	if minimum != "" && !compatibleClientVersion(clientVersion, minimum, Version) {
-		return fmt.Sprintf("客户端版本过低：需要至少 %s", minimum)
 	}
 	return ""
 }

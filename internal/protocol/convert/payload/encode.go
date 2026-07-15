@@ -186,23 +186,7 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 			Maintenance: p.Maintenance,
 		}, true
 	case protocol.MsgStatsResult:
-		p := payload.(protocol.StatsResultPayload)
-		return &pb.StatsResultPayload{
-			PlayerId:      p.PlayerID,
-			PlayerName:    p.PlayerName,
-			TotalGames:    int64(p.TotalGames),
-			Wins:          int64(p.Wins),
-			Losses:        int64(p.Losses),
-			WinRate:       p.WinRate,
-			LandlordGames: int64(p.LandlordGames),
-			LandlordWins:  int64(p.LandlordWins),
-			FarmerGames:   int64(p.FarmerGames),
-			FarmerWins:    int64(p.FarmerWins),
-			Score:         int64(p.Score),
-			Rank:          int64(p.Rank),
-			CurrentStreak: int64(p.CurrentStreak),
-			MaxWinStreak:  int64(p.MaxWinStreak),
-		}, true
+		return encodeStatsResultPayload(payload.(protocol.StatsResultPayload)), true
 	case protocol.MsgLeaderboardResult:
 		p := payload.(protocol.LeaderboardResultPayload)
 		return &pb.LeaderboardResultPayload{
@@ -219,6 +203,25 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 		}, true
 	}
 	return nil, false
+}
+
+func encodeStatsResultPayload(payload protocol.StatsResultPayload) *pb.StatsResultPayload {
+	return &pb.StatsResultPayload{
+		PlayerId:      payload.PlayerID,
+		PlayerName:    payload.PlayerName,
+		TotalGames:    int64(payload.TotalGames),
+		Wins:          int64(payload.Wins),
+		Losses:        int64(payload.Losses),
+		WinRate:       payload.WinRate,
+		LandlordGames: int64(payload.LandlordGames),
+		LandlordWins:  int64(payload.LandlordWins),
+		FarmerGames:   int64(payload.FarmerGames),
+		FarmerWins:    int64(payload.FarmerWins),
+		Score:         int64(payload.Score),
+		Rank:          int64(payload.Rank),
+		CurrentStreak: int64(payload.CurrentStreak),
+		MaxWinStreak:  int64(payload.MaxWinStreak),
+	}
 }
 
 // encodeServerRoomMessages 编码房间及玩家状态消息

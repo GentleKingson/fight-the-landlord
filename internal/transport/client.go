@@ -164,53 +164,71 @@ func (c *Client) negotiate(conn *websocket.Conn) error {
 	}
 	defer codec.PutMessage(response)
 
-	responseRequestID := ""
-	if response.Command != nil {
-		responseRequestID = response.Command.RequestID
-	}
-	switch response.Type {
-	case protocol.MsgProtocolRejected:
-		if responseRequestID != requestID {
-			return fmt.Errorf("protocol rejection request_id mismatch")
-		}
-		payload, parseErr := codec.ParsePayload[protocol.ProtocolRejectedPayload](response)
-		if parseErr != nil {
-			return fmt.Errorf("decode protocol rejection: %w", parseErr)
-		}
-		if payload.RequestID != requestID {
-			return fmt.Errorf("protocol rejection payload request_id mismatch")
-		}
-		return &ProtocolRejectedError{
-			Reason:                   payload.Reason,
-			SupportedProtocolVersion: payload.SupportedProtocolVersion,
-			MinClientVersion:         payload.MinClientVersion,
-		}
-	case protocol.MsgNegotiated:
-		if responseRequestID != requestID {
-			return fmt.Errorf("protocol negotiation request_id mismatch")
-		}
-		payload, parseErr := codec.ParsePayload[protocol.NegotiatedPayload](response)
-		if parseErr != nil {
-			return fmt.Errorf("decode protocol negotiation payload: %w", parseErr)
-		}
-		if payload.ProtocolVersion != protocol.ProtocolVersion {
-			return fmt.Errorf("server negotiated protocol %q, want %q", payload.ProtocolVersion, protocol.ProtocolVersion)
-		}
-		if payload.ClientKind != protocol.ClientKindTUI {
-			return fmt.Errorf("server negotiated client kind %q, want %q", payload.ClientKind, protocol.ClientKindTUI)
-		}
-		for _, capability := range protocol.RequiredCapabilities {
-			if !slices.Contains(payload.Capabilities, capability) {
-				return fmt.Errorf("server negotiation omitted capability %q", capability)
-			}
-		}
-	default:
-		return fmt.Errorf("unexpected protocol negotiation response %q", response.Type)
+	if err := validateNegotiationResponse(response, requestID); err != nil {
+		return err
 	}
 
 	_ = conn.SetReadDeadline(time.Time{})
 	_ = conn.SetWriteDeadline(time.Time{})
 	return nil
+}
+
+func validateNegotiationResponse(response *protocol.Message, requestID string) error {
+	switch response.Type {
+	case protocol.MsgProtocolRejected:
+		return decodeProtocolRejection(response, requestID)
+	case protocol.MsgNegotiated:
+		return validateNegotiatedPayload(response, requestID)
+	default:
+		return fmt.Errorf("unexpected protocol negotiation response %q", response.Type)
+	}
+}
+
+func decodeProtocolRejection(response *protocol.Message, requestID string) error {
+	if commandRequestID(response) != requestID {
+		return fmt.Errorf("protocol rejection request_id mismatch")
+	}
+	payload, err := codec.ParsePayload[protocol.ProtocolRejectedPayload](response)
+	if err != nil {
+		return fmt.Errorf("decode protocol rejection: %w", err)
+	}
+	if payload.RequestID != requestID {
+		return fmt.Errorf("protocol rejection payload request_id mismatch")
+	}
+	return &ProtocolRejectedError{
+		Reason:                   payload.Reason,
+		SupportedProtocolVersion: payload.SupportedProtocolVersion,
+		MinClientVersion:         payload.MinClientVersion,
+	}
+}
+
+func validateNegotiatedPayload(response *protocol.Message, requestID string) error {
+	if commandRequestID(response) != requestID {
+		return fmt.Errorf("protocol negotiation request_id mismatch")
+	}
+	payload, err := codec.ParsePayload[protocol.NegotiatedPayload](response)
+	if err != nil {
+		return fmt.Errorf("decode protocol negotiation payload: %w", err)
+	}
+	if payload.ProtocolVersion != protocol.ProtocolVersion {
+		return fmt.Errorf("server negotiated protocol %q, want %q", payload.ProtocolVersion, protocol.ProtocolVersion)
+	}
+	if payload.ClientKind != protocol.ClientKindTUI {
+		return fmt.Errorf("server negotiated client kind %q, want %q", payload.ClientKind, protocol.ClientKindTUI)
+	}
+	for _, capability := range protocol.RequiredCapabilities {
+		if !slices.Contains(payload.Capabilities, capability) {
+			return fmt.Errorf("server negotiation omitted capability %q", capability)
+		}
+	}
+	return nil
+}
+
+func commandRequestID(message *protocol.Message) string {
+	if message.Command == nil {
+		return ""
+	}
+	return message.Command.RequestID
 }
 
 // SendMessage 发送消息

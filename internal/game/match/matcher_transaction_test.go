@@ -28,6 +28,7 @@ var errInjectedMatchAssembly = errors.New("injected match room assembly failure"
 // QueueEntry must not retain a stale client pointer as its identity.
 func TestQueueEntryCarriesAuthoritativeState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	entry := QueueEntry{
 		PlayerID:         "player-1",
 		ClientGeneration: 7,
@@ -77,8 +78,8 @@ func TestMatcherServerSideTimeoutExpiresFrozenClient(t *testing.T) {
 
 	// The client performs no cancel action and never advances a client-side
 	// clock. The server timer must still retire the queue entry.
-	cancelled := client.waitForMessage(t, protocol.MsgMatchCancelled)
-	cancelPayload, err := codec.ParsePayload[protocol.MatchCancelledPayload](cancelled)
+	canceled := client.waitForMessage(t, protocol.MsgMatchCancelled)
+	cancelPayload, err := codec.ParsePayload[protocol.MatchCancelledPayload](canceled)
 	require.NoError(t, err)
 	require.NotEmpty(t, cancelPayload.Reason)
 	require.Zero(t, matcher.GetQueueLength())
@@ -427,8 +428,8 @@ func TestMatcherInflightDeadlineRollsBackAllParticipants(t *testing.T) {
 	assembly := waitValue(t, assemblyReady, "room assembly")
 	require.Equal(t, 1, waitValue(t, assembly.joinStarted, "second-player Join"))
 	for _, client := range clients {
-		cancelled := client.waitForMessage(t, protocol.MsgMatchCancelled)
-		payload, err := codec.ParsePayload[protocol.MatchCancelledPayload](cancelled)
+		canceled := client.waitForMessage(t, protocol.MsgMatchCancelled)
+		payload, err := codec.ParsePayload[protocol.MatchCancelledPayload](canceled)
 		require.NoError(t, err)
 		require.Equal(t, "timeout", payload.Reason)
 	}
@@ -481,7 +482,7 @@ func TestMatcherDefaultRoomTransactionCommitsCompleteRoster(t *testing.T) {
 	require.Len(t, committed.SnapshotPlayers(), 3)
 	require.Equal(t, room.RoomStateBidding, committed.State())
 	for _, client := range clients {
-		require.False(t, matcher.RemoveFromQueue(client), "committed matches cannot be cancelled")
+		require.False(t, matcher.RemoveFromQueue(client), "committed matches cannot be canceled")
 	}
 }
 

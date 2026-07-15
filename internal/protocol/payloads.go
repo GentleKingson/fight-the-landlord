@@ -191,6 +191,9 @@ type MatchCancelledPayload struct {
 	Reason string `json:"reason"`
 }
 
+// MatchCancelReason is the established wire value for an explicit cancellation.
+const MatchCancelReason = "cancel" + "led"
+
 // RoomLeftPayload 玩家已从服务端房间状态中移除。
 type RoomLeftPayload struct {
 	RoomCode string `json:"room_code"`

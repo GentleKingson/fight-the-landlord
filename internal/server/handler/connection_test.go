@@ -598,6 +598,7 @@ func TestHandleReconnectReturnsDistinctCredentialErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			manager := session.NewSessionManager()
 			token, playerID := tt.setup(manager)
 			provisional := testutil.NewSimpleClient("temporary", "Temporary")

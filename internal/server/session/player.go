@@ -76,7 +76,7 @@ func NewSessionManager() *SessionManager {
 }
 
 // NewSessionManagerWithContext creates a manager whose cleanup worker stops
-// when either the parent context is cancelled or Close is called.
+// when either the parent context is canceled or Close is called.
 func NewSessionManagerWithContext(ctx context.Context) *SessionManager {
 	return newSessionManager(ctx, time.Minute)
 }
@@ -85,7 +85,7 @@ func newSessionManager(parent context.Context, cleanupInterval time.Duration) *S
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := context.WithCancel(parent) //nolint:gosec // Close owns cancellation and waits for the cleanup worker.
 	sm := &SessionManager{
 		sessions:        make(map[string]*PlayerSession),
 		tokens:          make(map[string]string),
@@ -390,7 +390,7 @@ func (sm *SessionManager) generateUniqueTokenLocked() (string, error) {
 	for range 16 {
 		token, err := generateToken(sm.tokenReader)
 		if err != nil {
-			return "", fmt.Errorf("%w: %v", ErrTokenGeneration, err)
+			return "", fmt.Errorf("%w: %w", ErrTokenGeneration, err)
 		}
 		if _, exists := sm.tokens[token]; !exists {
 			return token, nil

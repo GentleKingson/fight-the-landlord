@@ -26,9 +26,11 @@ func TestCommitTracksPublishedRoomAndRemovalCleansExactAssociations(t *testing.T
 	roomManager.AddRoomForTest(oldRoom)
 
 	attemptCtx, attemptCancel := context.WithCancel(context.Background())
+	t.Cleanup(attemptCancel)
 	attempt := &matchAttempt{id: 1, ctx: attemptCtx, cancel: attemptCancel, room: oldRoom}
 	for index, playerID := range []string{"p1", "p2", "p3"} {
 		entryCtx, entryCancel := context.WithCancel(context.Background())
+		t.Cleanup(entryCancel)
 		entry := &QueueEntry{
 			PlayerID: playerID,
 			State:    QueueStateInflight,
@@ -65,9 +67,11 @@ func TestCommitRejectsRoomThatLostExactManagerOwnership(t *testing.T) {
 	roomManager.AddRoomForTest(replacement)
 
 	attemptCtx, attemptCancel := context.WithCancel(context.Background())
+	t.Cleanup(attemptCancel)
 	attempt := &matchAttempt{id: 9, ctx: attemptCtx, cancel: attemptCancel, room: staleRoom}
 	for _, playerID := range []string{"p1", "p2", "p3"} {
 		entryCtx, entryCancel := context.WithCancel(context.Background())
+		t.Cleanup(entryCancel)
 		entry := &QueueEntry{
 			PlayerID: playerID,
 			State:    QueueStateInflight,
@@ -359,9 +363,11 @@ func TestRoomRemovalCancelsButReservesInflightEntriesForWorkerCleanup(t *testing
 	gameRoom := room.NewMockRoom("inflight", nil)
 
 	attemptCtx, attemptCancel := context.WithCancel(context.Background())
+	t.Cleanup(attemptCancel)
 	attempt := &matchAttempt{id: 7, ctx: attemptCtx, cancel: attemptCancel, room: gameRoom}
 	for _, playerID := range []string{"p1", "p2", "p3"} {
 		entryCtx, entryCancel := context.WithCancel(context.Background())
+		t.Cleanup(entryCancel)
 		entry := &QueueEntry{
 			PlayerID: playerID,
 			State:    QueueStateInflight,

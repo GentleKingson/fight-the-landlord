@@ -391,7 +391,7 @@ func validTestConfig() *Config {
 }
 
 func overflowDurationValue(unit time.Duration) int {
-	maximum := int64(math.MaxInt64 / int64(unit))
+	maximum := int64(math.MaxInt64 / unit)
 	if int64(math.MaxInt) <= maximum {
 		// The platform int cannot express an overflowing positive value.
 		return -1

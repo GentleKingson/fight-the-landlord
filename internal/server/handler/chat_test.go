@@ -448,7 +448,7 @@ type stubChatLimiter struct {
 	calls   int
 }
 
-func (l *stubChatLimiter) AllowChat(string) (bool, string) {
+func (l *stubChatLimiter) AllowChat(string) (allowed bool, reason string) {
 	l.calls++
 	return l.allowed, l.reason
 }

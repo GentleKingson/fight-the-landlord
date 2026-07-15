@@ -60,18 +60,25 @@ func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message
 	payload.MessageID = fmt.Sprintf("srv:%d:%d", now.UnixNano(), h.chatMessageSequence.Add(1))
 
 	if payload.Scope == "lobby" {
-		if client.GetRoom() != "" {
-			sendChatError(client, protocol.ErrCodeInvalidMsg, "房间中的玩家不能发送大厅消息")
-			return
-		}
-		if h.server == nil {
-			sendChatError(client, protocol.ErrCodeUnknown, "大厅聊天服务暂不可用")
-			return
-		}
-		h.server.BroadcastToLobby(codec.MustNewMessage(protocol.MsgChat, payload))
+		h.broadcastLobbyChat(client, payload)
 		return
 	}
+	h.broadcastRoomChat(client, payload)
+}
 
+func (h *Handler) broadcastLobbyChat(client types.ClientInterface, payload *protocol.ChatPayload) {
+	if client.GetRoom() != "" {
+		sendChatError(client, protocol.ErrCodeInvalidMsg, "房间中的玩家不能发送大厅消息")
+		return
+	}
+	if h.server == nil {
+		sendChatError(client, protocol.ErrCodeUnknown, "大厅聊天服务暂不可用")
+		return
+	}
+	h.server.BroadcastToLobby(codec.MustNewMessage(protocol.MsgChat, payload))
+}
+
+func (h *Handler) broadcastRoomChat(client types.ClientInterface, payload *protocol.ChatPayload) {
 	roomID := client.GetRoom()
 	if roomID == "" {
 		sendChatError(client, protocol.ErrCodeNotInRoom, "不在房间中，无法发送此消息")
@@ -83,52 +90,56 @@ func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message
 		return
 	}
 
-	room := h.roomManager.GetRoom(roomID)
-	if room == nil {
+	gameRoom := h.roomManager.GetRoom(roomID)
+	if gameRoom == nil {
 		sendChatError(client, protocol.ErrCodeRoomNotFound, protocol.ErrorMessages[protocol.ErrCodeRoomNotFound])
 		return
 	}
 
-	payload.RoomCode = room.Code
+	payload.RoomCode = gameRoom.Code
 	if payload.Scope == "game" {
-		gameSession := h.GetGameSession(room.Code)
-		if gameSession == nil {
-			sendChatError(client, protocol.ErrCodeGameNotStart, protocol.ErrorMessages[protocol.ErrCodeGameNotStart])
-			return
-		}
-
-		gameID, state, member := gameSession.CurrentGameContext(client.GetID())
-		if !member {
-			sendChatError(client, protocol.ErrCodeNotInRoom, "您不是当前牌局的成员")
-			return
-		}
-		switch state {
-		case session.GameStateBidding, session.GameStatePlaying, session.GameStateEnded:
-			// Game chat remains available on the result screen until the next deal.
-		default:
-			sendChatError(client, protocol.ErrCodeGameNotStart, protocol.ErrorMessages[protocol.ErrCodeGameNotStart])
-			return
-		}
-		if gameID == "" {
-			sendChatError(client, protocol.ErrCodeGameNotStart, protocol.ErrorMessages[protocol.ErrCodeGameNotStart])
+		gameID, ok := h.authorizeGameChat(client, gameRoom.Code)
+		if !ok {
 			return
 		}
 		payload.GameID = gameID
 	}
 
-	if !room.BroadcastFromMember(client, codec.MustNewMessage(protocol.MsgChat, payload)) {
+	if !gameRoom.BroadcastFromMember(client, codec.MustNewMessage(protocol.MsgChat, payload)) {
 		sendChatError(client, protocol.ErrCodeNotInRoom, "您不是该房间的成员")
 	}
 }
 
-func validateChatPayload(payload *protocol.ChatPayload) (string, string) {
+func (h *Handler) authorizeGameChat(client types.ClientInterface, roomCode string) (string, bool) {
+	gameSession := h.GetGameSession(roomCode)
+	if gameSession == nil {
+		sendChatError(client, protocol.ErrCodeGameNotStart, protocol.ErrorMessages[protocol.ErrCodeGameNotStart])
+		return "", false
+	}
+	gameID, state, member := gameSession.CurrentGameContext(client.GetID())
+	if !member {
+		sendChatError(client, protocol.ErrCodeNotInRoom, "您不是当前牌局的成员")
+		return "", false
+	}
+	if state != session.GameStateBidding && state != session.GameStatePlaying && state != session.GameStateEnded {
+		sendChatError(client, protocol.ErrCodeGameNotStart, protocol.ErrorMessages[protocol.ErrCodeGameNotStart])
+		return "", false
+	}
+	if gameID == "" {
+		sendChatError(client, protocol.ErrCodeGameNotStart, protocol.ErrorMessages[protocol.ErrCodeGameNotStart])
+		return "", false
+	}
+	return gameID, true
+}
+
+func validateChatPayload(payload *protocol.ChatPayload) (content, errText string) {
 	if payload.Scope != "lobby" && payload.Scope != "room" && payload.Scope != "game" {
 		return "", "聊天范围必须是 lobby、room 或 game"
 	}
 	if !utf8.ValidString(payload.Content) {
 		return "", "聊天内容必须是有效的 UTF-8 文本"
 	}
-	content := strings.TrimSpace(stripDangerousChatRunes(payload.Content))
+	content = strings.TrimSpace(stripDangerousChatRunes(payload.Content))
 	if content == "" {
 		return "", "聊天内容不能为空"
 	}
@@ -163,7 +174,7 @@ func isBidirectionalControl(r rune) bool {
 }
 
 func validChatMessageID(messageID string) bool {
-	if len(messageID) == 0 || len(messageID) > maxChatMessageIDLen {
+	if messageID == "" || len(messageID) > maxChatMessageIDLen {
 		return false
 	}
 	for i := range len(messageID) {
@@ -178,5 +189,5 @@ func validChatMessageID(messageID string) bool {
 }
 
 func sendChatError(client types.ClientInterface, code int, text string) {
-	client.SendMessage(codec.NewCommandErrorMessageWithText(code, text, protocol.MsgChat))
+	sendMessage(client, codec.NewCommandErrorMessageWithText(code, text, protocol.MsgChat))
 }

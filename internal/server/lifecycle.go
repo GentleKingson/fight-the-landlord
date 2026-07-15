@@ -184,67 +184,87 @@ func (s *Server) Shutdown() {
 	if s == nil {
 		return
 	}
-	s.shutdownOnce.Do(func() {
-		s.shuttingDown.Store(true)
-		s.clientPumpsMu.Lock()
-		s.clientPumpsClosed = true
-		s.clientPumpsMu.Unlock()
-		s.stopHTTPServer()
-		if s.runtimeCancel != nil {
-			s.runtimeCancel()
-		}
+	s.shutdownOnce.Do(s.shutdown)
+}
 
-		// Stop authoritative queue deadlines, bot-fill work, and room assembly
-		// before closing the clients and backing services they may reference.
-		if s.matcher != nil {
-			if err := s.matcher.Close(); err != nil {
-				log.Printf("关闭匹配器失败: %v", err)
-			}
-		}
+func (s *Server) shutdown() {
+	s.shuttingDown.Store(true)
+	s.stopClientPumps()
+	s.stopHTTPServer()
+	if s.runtimeCancel != nil {
+		s.runtimeCancel()
+	}
 
-		if s.config != nil {
-			time.Sleep(s.config.Game.RoomCleanupDelayDuration())
-		}
+	// Stop authoritative queue deadlines, bot-fill work, and room assembly
+	// before closing the clients and backing services they may reference.
+	s.closeMatcher()
+	if s.config != nil {
+		time.Sleep(s.config.Game.RoomCleanupDelayDuration())
+	}
 
-		// Copy connection handles under the map lock; Client.Close must not run
-		// while Server client ownership is held.
-		s.clientsMu.RLock()
-		clients := make([]*Client, 0, len(s.clients))
-		for _, client := range s.clients {
-			clients = append(clients, client)
-		}
-		s.clientsMu.RUnlock()
-		for _, client := range clients {
-			client.Close()
-		}
-		s.clientPumpsWG.Wait()
+	for _, client := range s.connectionSnapshot() {
+		client.Close()
+	}
+	s.clientPumpsWG.Wait()
 
-		if s.roomManager != nil {
-			if err := s.roomManager.Close(); err != nil {
-				log.Printf("关闭房间管理器失败: %v", err)
-			}
-		}
-		if s.sessionManager != nil {
-			if err := s.sessionManager.Close(); err != nil {
-				log.Printf("关闭会话管理器失败: %v", err)
-			}
-		}
-		if s.rateLimiter != nil {
-			if err := s.rateLimiter.Close(); err != nil {
-				log.Printf("关闭速率限制器失败: %v", err)
-			}
-		}
-		s.monitorWG.Wait()
+	s.closeRuntimeManagers()
+	s.monitorWG.Wait()
+	s.closeRedis()
+	log.Println("服务器已关闭")
+}
 
-		// Redis remains available until room persistence workers have exited.
-		if s.redis != nil {
-			if err := s.redis.Close(); err != nil {
-				log.Printf("关闭 Redis 失败: %v", err)
-			}
-		}
+func (s *Server) stopClientPumps() {
+	s.clientPumpsMu.Lock()
+	s.clientPumpsClosed = true
+	s.clientPumpsMu.Unlock()
+}
 
-		log.Println("服务器已关闭")
-	})
+func (s *Server) closeMatcher() {
+	if s.matcher == nil {
+		return
+	}
+	if err := s.matcher.Close(); err != nil {
+		log.Printf("关闭匹配器失败: %v", err)
+	}
+}
+
+func (s *Server) connectionSnapshot() []*Client {
+	// Client.Close must not run while Server client ownership is held.
+	s.clientsMu.RLock()
+	clients := make([]*Client, 0, len(s.clients))
+	for _, client := range s.clients {
+		clients = append(clients, client)
+	}
+	s.clientsMu.RUnlock()
+	return clients
+}
+
+func (s *Server) closeRuntimeManagers() {
+	if s.roomManager != nil {
+		if err := s.roomManager.Close(); err != nil {
+			log.Printf("关闭房间管理器失败: %v", err)
+		}
+	}
+	if s.sessionManager != nil {
+		if err := s.sessionManager.Close(); err != nil {
+			log.Printf("关闭会话管理器失败: %v", err)
+		}
+	}
+	if s.rateLimiter != nil {
+		if err := s.rateLimiter.Close(); err != nil {
+			log.Printf("关闭速率限制器失败: %v", err)
+		}
+	}
+}
+
+func (s *Server) closeRedis() {
+	// Redis remains available until room persistence workers have exited.
+	if s.redis == nil {
+		return
+	}
+	if err := s.redis.Close(); err != nil {
+		log.Printf("关闭 Redis 失败: %v", err)
+	}
 }
 
 func (s *Server) stopHTTPServer() {

@@ -84,6 +84,8 @@ func TestRetiredSessionRejectsLateActionsAndTimerCallbacks(t *testing.T) {
 	t.Parallel()
 
 	t.Run("bid timer", func(t *testing.T) {
+		t.Parallel()
+
 		gs := newRetirementTestSession(t, "RETIRED-BID")
 		gs.Start()
 		playerID := gs.players[gs.currentBidder].ID
@@ -96,6 +98,8 @@ func TestRetiredSessionRejectsLateActionsAndTimerCallbacks(t *testing.T) {
 	})
 
 	t.Run("play timer", func(t *testing.T) {
+		t.Parallel()
+
 		gs := newRetirementTestSession(t, "RETIRED-PLAY")
 		playingCard := card.Card{Suit: card.Spade, Rank: card.Rank3, Color: card.Black}
 		gs.mu.Lock()
@@ -116,6 +120,8 @@ func TestRetiredSessionRejectsLateActionsAndTimerCallbacks(t *testing.T) {
 	})
 
 	t.Run("late pass", func(t *testing.T) {
+		t.Parallel()
+
 		gs := newRetirementTestSession(t, "RETIRED-PASS")
 		gs.mu.Lock()
 		gs.state = GameStatePlaying
@@ -139,6 +145,8 @@ func TestRetirePreventsStalePresenceCallbacksFromRearmingTimers(t *testing.T) {
 	t.Parallel()
 
 	t.Run("offline after retirement", func(t *testing.T) {
+		t.Parallel()
+
 		gs := newRetirementTestSession(t, "RETIRED-OFFLINE")
 		gs.Start()
 		player := gs.players[gs.currentBidder]
@@ -154,6 +162,8 @@ func TestRetirePreventsStalePresenceCallbacksFromRearmingTimers(t *testing.T) {
 	})
 
 	t.Run("online after retirement", func(t *testing.T) {
+		t.Parallel()
+
 		gs := newRetirementTestSession(t, "RETIRED-ONLINE")
 		gs.Start()
 		player := gs.players[gs.currentBidder]

@@ -215,5 +215,11 @@ func (h *Handler) Handle(client types.ClientInterface, msg *protocol.Message) {
 
 	log.Printf("⚠️  未知消息类型: '%s' (来自玩家: %s, ID: %s)", msg.Type, client.GetName(), client.GetID())
 	log.Printf("    消息详情: Payload长度=%d bytes", len(msg.Payload))
-	client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, msg.Type))
+	sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, msg.Type))
+}
+
+func sendMessage(client types.ClientInterface, message *protocol.Message) {
+	if err := client.SendMessage(message); err != nil {
+		log.Printf("发送消息 %s 给玩家 %s 失败: %v", message.Type, client.GetID(), err)
+	}
 }

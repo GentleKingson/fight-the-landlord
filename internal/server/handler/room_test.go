@@ -112,9 +112,9 @@ func TestHandler_QuickMatchCanBeCancelled(t *testing.T) {
 	h.handleCancelMatch(client)
 	require.Len(t, client.Messages, 2)
 	assert.Equal(t, protocol.MsgMatchCancelled, client.Messages[1].Type)
-	cancelled, err := codec.ParsePayload[protocol.MatchCancelledPayload](client.Messages[1])
+	canceled, err := codec.ParsePayload[protocol.MatchCancelledPayload](client.Messages[1])
 	require.NoError(t, err)
-	assert.Equal(t, "cancelled", cancelled.Reason)
+	assert.Equal(t, protocol.MatchCancelReason, canceled.Reason)
 	assert.Equal(t, 0, matcher.GetQueueLength())
 }
 
@@ -200,7 +200,7 @@ func TestHandler_CancelMatchCancelsInflightPracticeTransaction(t *testing.T) {
 		break
 	}
 	require.NotNil(t, cancellation)
-	assert.Equal(t, "cancelled", cancellation.Reason)
+	assert.Equal(t, protocol.MatchCancelReason, cancellation.Reason)
 }
 
 func TestHandler_QuickMatchDuplicateIsRejected(t *testing.T) {

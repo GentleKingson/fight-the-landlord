@@ -39,7 +39,7 @@ func TestGoEncodingMatchesWebGoldenInput(t *testing.T) {
 	want := marshalFixtures(t, fixtures)
 
 	if os.Getenv("UPDATE_PROTOCOL_FIXTURES") == "1" {
-		require.NoError(t, os.WriteFile(fixturePath, want, 0o644))
+		require.NoError(t, os.WriteFile(fixturePath, want, 0o600))
 		return
 	}
 

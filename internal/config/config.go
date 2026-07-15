@@ -350,19 +350,38 @@ func (c *Config) Validate() error {
 	if c == nil {
 		return fmt.Errorf("config must not be nil")
 	}
+	environment, err := validateServerConfig(c.Server)
+	if err != nil {
+		return err
+	}
+	if err := validateConfiguredDurations(c); err != nil {
+		return err
+	}
+	if err := validateDependencies(c, environment); err != nil {
+		return err
+	}
+	if err := validateSecurityConfig(c.Security, environment); err != nil {
+		return err
+	}
+	return validatePositiveLimits(c.Security)
+}
 
-	environment := strings.ToLower(strings.TrimSpace(c.Server.Environment))
+func validateServerConfig(server ServerConfig) (string, error) {
+	environment := strings.ToLower(strings.TrimSpace(server.Environment))
 	if environment != "development" && environment != "production" && environment != "test" {
-		return fmt.Errorf("server.environment must be development, production, or test")
+		return "", fmt.Errorf("server.environment must be development, production, or test")
 	}
-	if strings.TrimSpace(c.Server.Host) == "" || c.Server.Host != strings.TrimSpace(c.Server.Host) {
-		return fmt.Errorf("server.host must not be empty")
+	if strings.TrimSpace(server.Host) == "" || server.Host != strings.TrimSpace(server.Host) {
+		return "", fmt.Errorf("server.host must not be empty")
 	}
-	if c.Server.Port < 1 || c.Server.Port > 65535 {
-		return fmt.Errorf("server.port must be between 1 and 65535")
+	if server.Port < 1 || server.Port > 65535 {
+		return "", fmt.Errorf("server.port must be between 1 and 65535")
 	}
 	// MaxConnections <= 0 intentionally means unlimited.
+	return environment, nil
+}
 
+func validateConfiguredDurations(c *Config) error {
 	durations := []struct {
 		name  string
 		value int
@@ -385,7 +404,10 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
+	return nil
+}
 
+func validateDependencies(c *Config, environment string) error {
 	if err := validateRedisAddress(c.Redis.Addr); err != nil {
 		return fmt.Errorf("redis.addr: %w", err)
 	}
@@ -401,11 +423,14 @@ func (c *Config) Validate() error {
 	if c.Server.MinClientVersion != "" && !isSemanticVersion(c.Server.MinClientVersion) {
 		return fmt.Errorf("server.min_client_version must be a semantic version")
 	}
+	return nil
+}
 
-	if len(c.Security.AllowedOrigins) == 0 {
+func validateSecurityConfig(security SecurityConfig, environment string) error {
+	if len(security.AllowedOrigins) == 0 {
 		return fmt.Errorf("security.allowed_origins must not be empty")
 	}
-	for _, origin := range c.Security.AllowedOrigins {
+	for _, origin := range security.AllowedOrigins {
 		if origin == "*" {
 			if environment == "production" {
 				return fmt.Errorf("security.allowed_origins must not contain wildcard in production")
@@ -416,21 +441,24 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("security.allowed_origins: %w", err)
 		}
 	}
-	for _, cidr := range c.Security.TrustedProxyCIDRs {
+	for _, cidr := range security.TrustedProxyCIDRs {
 		if _, err := netip.ParsePrefix(cidr); err != nil {
 			return fmt.Errorf("security.trusted_proxy_cidrs contains invalid CIDR %q: %w", cidr, err)
 		}
 	}
+	return nil
+}
 
+func validatePositiveLimits(security SecurityConfig) error {
 	positiveLimits := []struct {
 		name  string
 		value int
 	}{
-		{name: "security.rate_limit.max_per_second", value: c.Security.RateLimit.MaxPerSecond},
-		{name: "security.rate_limit.max_per_minute", value: c.Security.RateLimit.MaxPerMinute},
-		{name: "security.message_limit.max_per_second", value: c.Security.MessageLimit.MaxPerSecond},
-		{name: "security.chat_limit.max_per_second", value: c.Security.ChatLimit.MaxPerSecond},
-		{name: "security.chat_limit.max_per_minute", value: c.Security.ChatLimit.MaxPerMinute},
+		{name: "security.rate_limit.max_per_second", value: security.RateLimit.MaxPerSecond},
+		{name: "security.rate_limit.max_per_minute", value: security.RateLimit.MaxPerMinute},
+		{name: "security.message_limit.max_per_second", value: security.MessageLimit.MaxPerSecond},
+		{name: "security.chat_limit.max_per_second", value: security.ChatLimit.MaxPerSecond},
+		{name: "security.chat_limit.max_per_minute", value: security.ChatLimit.MaxPerMinute},
 	}
 	for _, limit := range positiveLimits {
 		if limit.value <= 0 {

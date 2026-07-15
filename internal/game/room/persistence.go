@@ -88,7 +88,10 @@ func (rm *RoomManager) enqueueRoomDelete(code string, identity *Room) {
 	operation := rm.deleteOperation()
 	rm.enqueuePersistenceDelete(code, func() {
 		if operation != nil {
-			ctx, cancel := rm.deletionContext()
+			// Saves obey lifecycle cancellation immediately. Deletes are
+			// different: a room has already been unpublished, so it gets one
+			// bounded cleanup attempt even when shutdown races with Redis I/O.
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(rm.persistenceContext()), shutdownDeleteTimeout)
 			defer cancel()
 			if err := operation(ctx, code); err != nil {
 				log.Printf("从 Redis 删除房间 %s 失败: %v", code, err)
@@ -96,14 +99,6 @@ func (rm *RoomManager) enqueueRoomDelete(code string, identity *Room) {
 		}
 		rm.finishRoomRetirement(code, identity)
 	})
-}
-
-func (rm *RoomManager) deletionContext() (context.Context, context.CancelFunc) {
-	// Saves obey lifecycle cancellation immediately. Deletes are different: a
-	// room has already been unpublished, so it gets one bounded cleanup attempt
-	// even when shutdown races with Redis I/O. WithoutCancel retains context
-	// values while the timeout still guarantees that Close can finish.
-	return context.WithTimeout(context.WithoutCancel(rm.persistenceContext()), shutdownDeleteTimeout)
 }
 
 func (rm *RoomManager) finishRoomRetirement(code string, identity *Room) {

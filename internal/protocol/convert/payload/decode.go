@@ -34,6 +34,13 @@ func DecodePayload(msgType protocol.MessageType, data []byte, target any) error 
 // decodeClientPayload 解码客户端发送的消息
 // 返回 (是否处理了该消息类型, 错误)
 func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
+	if ok, err := decodeClientConnectionPayload(msgType, data, target); ok {
+		return true, err
+	}
+	return decodeClientCommandPayload(msgType, data, target)
+}
+
+func decodeClientConnectionPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
 	switch msgType {
 	case protocol.MsgHello:
 		var pbMsg pb.HelloPayload
@@ -66,6 +73,30 @@ func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) 
 			Timestamp: pbMsg.Timestamp,
 		}
 		return true, nil
+	case protocol.MsgChat:
+		var pbMsg pb.ChatPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.ChatPayload) = protocol.ChatPayload{
+			SenderID:   pbMsg.SenderId,
+			SenderName: pbMsg.SenderName,
+			Content:    pbMsg.Content,
+			Scope:      pbMsg.Scope,
+			Time:       pbMsg.Time,
+			IsSystem:   pbMsg.IsSystem,
+			MessageID:  pbMsg.MessageId,
+			RoomCode:   pbMsg.RoomCode,
+			GameID:     pbMsg.GameId,
+			ServerTime: pbMsg.ServerTime,
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func decodeClientCommandPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
+	switch msgType {
 	case protocol.MsgJoinRoom:
 		var pbMsg pb.JoinRoomPayload
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
@@ -102,24 +133,6 @@ func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) 
 			Type:   pbMsg.Type,
 			Offset: int(pbMsg.Offset),
 			Limit:  int(pbMsg.Limit),
-		}
-		return true, nil
-	case protocol.MsgChat:
-		var pbMsg pb.ChatPayload
-		if err := proto.Unmarshal(data, &pbMsg); err != nil {
-			return true, err
-		}
-		*target.(*protocol.ChatPayload) = protocol.ChatPayload{
-			SenderID:   pbMsg.SenderId,
-			SenderName: pbMsg.SenderName,
-			Content:    pbMsg.Content,
-			Scope:      pbMsg.Scope,
-			Time:       pbMsg.Time,
-			IsSystem:   pbMsg.IsSystem,
-			MessageID:  pbMsg.MessageId,
-			RoomCode:   pbMsg.RoomCode,
-			GameID:     pbMsg.GameId,
-			ServerTime: pbMsg.ServerTime,
 		}
 		return true, nil
 	}
@@ -166,6 +179,13 @@ func decodeServerPayload(msgType protocol.MessageType, data []byte, target any) 
 
 // decodeConnectionMessages 解码连接相关消息
 func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target any) (bool, error) {
+	if ok, err := decodeNegotiationMessages(msgType, data, target); ok {
+		return true, err
+	}
+	return decodeSessionMessages(msgType, data, target)
+}
+
+func decodeNegotiationMessages(msgType protocol.MessageType, data []byte, target any) (bool, error) {
 	switch msgType {
 	case protocol.MsgNegotiated:
 		var pbMsg pb.NegotiatedPayload
@@ -208,6 +228,12 @@ func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target 
 		}
 		*target.(*protocol.WarningPayload) = protocol.WarningPayload{Code: int(pbMsg.Code), Message: pbMsg.Message}
 		return true, nil
+	}
+	return false, nil
+}
+
+func decodeSessionMessages(msgType protocol.MessageType, data []byte, target any) (bool, error) {
+	switch msgType {
 	case protocol.MsgConnected:
 		var pbMsg pb.ConnectedPayload
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {

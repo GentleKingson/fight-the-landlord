@@ -480,13 +480,14 @@ func TestAuthoritativeGameEventsAdvanceMonotonically(t *testing.T) {
 
 	var nonLandlordClient *testutil.SimpleClient
 	for _, player := range gs.players {
-		if !player.IsLandlord {
-			recipient, ok := gs.room.PrivateRecipient(player.ID)
-			require.True(t, ok)
-			nonLandlordClient, ok = recipient.(*testutil.SimpleClient)
-			require.True(t, ok)
-			break
+		if player.IsLandlord {
+			continue
 		}
+		recipient, ok := gs.room.PrivateRecipient(player.ID)
+		require.True(t, ok)
+		nonLandlordClient, ok = recipient.(*testutil.SimpleClient)
+		require.True(t, ok)
+		break
 	}
 	require.NotNil(t, nonLandlordClient)
 	assertContainsEventVersionGap(t, nonLandlordClient.Messages)

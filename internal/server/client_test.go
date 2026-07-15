@@ -509,6 +509,7 @@ func TestServerShutdownCancelsAndWaitsForOwnedRuntimeWorkers(t *testing.T) {
 	t.Parallel()
 
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	t.Cleanup(runtimeCancel)
 	cfg := config.Default()
 	cfg.Game.RoomCleanupDelay = 0
 	roomManager := room.NewRoomManagerWithContext(runtimeCtx, nil, cfg.Game)

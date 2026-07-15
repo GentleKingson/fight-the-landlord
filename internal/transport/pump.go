@@ -110,7 +110,7 @@ func (c *Client) processMessage(msg *protocol.Message) {
 	}
 }
 
-func (c *Client) handleInternalMessage(msg *protocol.Message) (bool, bool) {
+func (c *Client) handleInternalMessage(msg *protocol.Message) (reconnected, suppress bool) {
 	if msg.Event != nil && msg.Event.GameID != "" {
 		c.setGameContext(msg.Event.GameID, msg.Event.TurnID)
 	}

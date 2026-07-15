@@ -193,30 +193,47 @@ func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
 		return true
 	}
 
-	if limiter := c.server.messageLimiter; limiter != nil {
-		allowed, warning := limiter.AllowMessage(playerID)
-		if warning {
-			_ = c.SendMessage(codec.MustNewMessage(protocol.MsgWarning, protocol.WarningPayload{
-				Code: protocol.ErrCodeRateLimit, Message: "请求过于频繁，请放慢速度",
-			}))
-		}
-		if !allowed {
-			log.Printf("客户端 %s (IP: %s) 消息过于频繁", c.GetName(), c.IP)
-			response := codec.NewCorrelatedCommandErrorMessage(
-				protocol.ErrCodeRateLimit, "消息发送过于频繁", requestID, msg.Type,
-			)
-			_ = c.SendMessage(response)
-			cache.finish(lookup.entry, []*protocol.Message{response}, c.GetID(), requestID)
-			if limiter.GetWarningCount(playerID) > 5 {
-				log.Printf("客户端 %s 因多次超速被断开连接", c.GetName())
-				return false
-			}
-			return true
-		}
+	allowed, keepConnection := c.checkMessageRateLimit(playerID, requestID, msg.Type, cache, lookup.entry)
+	if !allowed {
+		return keepConnection
 	}
 
 	c.executeCommand(msg, lookup.entry, cache)
 	return true
+}
+
+func (c *Client) checkMessageRateLimit(
+	playerID string,
+	requestID string,
+	messageType protocol.MessageType,
+	cache *commandCache,
+	entry *commandCacheEntry,
+) (allowed, keepConnection bool) {
+	limiter := c.server.messageLimiter
+	if limiter == nil {
+		return true, true
+	}
+	allowed, warning := limiter.AllowMessage(playerID)
+	if warning {
+		_ = c.SendMessage(codec.MustNewMessage(protocol.MsgWarning, protocol.WarningPayload{
+			Code: protocol.ErrCodeRateLimit, Message: "请求过于频繁，请放慢速度",
+		}))
+	}
+	if allowed {
+		return true, true
+	}
+
+	log.Printf("客户端 %s (IP: %s) 消息过于频繁", c.GetName(), c.IP)
+	response := codec.NewCorrelatedCommandErrorMessage(
+		protocol.ErrCodeRateLimit, "消息发送过于频繁", requestID, messageType,
+	)
+	_ = c.SendMessage(response)
+	cache.finish(entry, []*protocol.Message{response}, c.GetID(), requestID)
+	if limiter.GetWarningCount(playerID) <= 5 {
+		return false, true
+	}
+	log.Printf("客户端 %s 因多次超速被断开连接", c.GetName())
+	return false, false
 }
 
 func (c *Client) executeCommand(msg *protocol.Message, entry *commandCacheEntry, cache *commandCache) {
@@ -382,7 +399,7 @@ func (c *Client) endCommandExecution() []*protocol.Message {
 
 func (c *Client) prepareActiveCommandResponse(msg *protocol.Message) *protocol.Message {
 	if msg == nil {
-		return msg
+		return nil
 	}
 	c.commandMu.Lock()
 	defer c.commandMu.Unlock()
@@ -472,45 +489,31 @@ func commandResponsesContainError(responses []*protocol.Message) bool {
 	return false
 }
 
+var commandResultTypes = map[protocol.MessageType]protocol.MessageType{
+	protocol.MsgReconnect:            protocol.MsgReconnected,
+	protocol.MsgPing:                 protocol.MsgPong,
+	protocol.MsgCreateRoom:           protocol.MsgRoomCreated,
+	protocol.MsgJoinRoom:             protocol.MsgRoomJoined,
+	protocol.MsgLeaveRoom:            protocol.MsgRoomLeft,
+	protocol.MsgQuickMatch:           protocol.MsgMatchQueued,
+	protocol.MsgPracticeMatch:        protocol.MsgMatchQueued,
+	protocol.MsgCancelMatch:          protocol.MsgMatchCancelled,
+	protocol.MsgReady:                protocol.MsgPlayerReady,
+	protocol.MsgCancelReady:          protocol.MsgPlayerReady,
+	protocol.MsgBid:                  protocol.MsgBidResult,
+	protocol.MsgPlayCards:            protocol.MsgCardPlayed,
+	protocol.MsgPass:                 protocol.MsgPlayerPass,
+	protocol.MsgGetStats:             protocol.MsgStatsResult,
+	protocol.MsgGetLeaderboard:       protocol.MsgLeaderboardResult,
+	protocol.MsgGetRoomList:          protocol.MsgRoomListResult,
+	protocol.MsgGetOnlineCount:       protocol.MsgOnlineCount,
+	protocol.MsgGetMaintenanceStatus: protocol.MsgMaintenancePull,
+	protocol.MsgChat:                 protocol.MsgChat,
+}
+
 func isCommandResult(command, response protocol.MessageType) bool {
-	switch command {
-	case protocol.MsgReconnect:
-		return response == protocol.MsgReconnected
-	case protocol.MsgPing:
-		return response == protocol.MsgPong
-	case protocol.MsgCreateRoom:
-		return response == protocol.MsgRoomCreated
-	case protocol.MsgJoinRoom:
-		return response == protocol.MsgRoomJoined
-	case protocol.MsgLeaveRoom:
-		return response == protocol.MsgRoomLeft
-	case protocol.MsgQuickMatch, protocol.MsgPracticeMatch:
-		return response == protocol.MsgMatchQueued
-	case protocol.MsgCancelMatch:
-		return response == protocol.MsgMatchCancelled
-	case protocol.MsgReady, protocol.MsgCancelReady:
-		return response == protocol.MsgPlayerReady
-	case protocol.MsgBid:
-		return response == protocol.MsgBidResult
-	case protocol.MsgPlayCards:
-		return response == protocol.MsgCardPlayed
-	case protocol.MsgPass:
-		return response == protocol.MsgPlayerPass
-	case protocol.MsgGetStats:
-		return response == protocol.MsgStatsResult
-	case protocol.MsgGetLeaderboard:
-		return response == protocol.MsgLeaderboardResult
-	case protocol.MsgGetRoomList:
-		return response == protocol.MsgRoomListResult
-	case protocol.MsgGetOnlineCount:
-		return response == protocol.MsgOnlineCount
-	case protocol.MsgGetMaintenanceStatus:
-		return response == protocol.MsgMaintenancePull
-	case protocol.MsgChat:
-		return response == protocol.MsgChat
-	default:
-		return false
-	}
+	expected, ok := commandResultTypes[command]
+	return ok && response == expected
 }
 
 func encodeClientMessage(msg *protocol.Message) ([]byte, error) {

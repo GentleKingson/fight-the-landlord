@@ -81,6 +81,7 @@ func TestServerShutdownStopsOwnedHTTPListenerAndWaitsForServeLoop(t *testing.T) 
 	cfg.Server.Port = port
 	cfg.Game.RoomCleanupDelay = 0
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	t.Cleanup(runtimeCancel)
 	s := &Server{
 		config:        cfg,
 		clients:       make(map[string]*Client),
@@ -92,7 +93,7 @@ func TestServerShutdownStopsOwnedHTTPListenerAndWaitsForServeLoop(t *testing.T) 
 
 	endpoint := "http://127.0.0.1:" + strconv.Itoa(port) + "/livez"
 	require.Eventually(t, func() bool {
-		response, requestErr := http.Get(endpoint)
+		response, requestErr := http.Get(endpoint) //nolint:gosec // endpoint is a loopback listener created by this test.
 		if requestErr != nil {
 			return false
 		}
@@ -108,7 +109,10 @@ func TestServerShutdownStopsOwnedHTTPListenerAndWaitsForServeLoop(t *testing.T) 
 		t.Fatal("Server.Shutdown returned without stopping the HTTP serve loop")
 	}
 	client := &http.Client{Timeout: 100 * time.Millisecond}
-	_, err = client.Get(endpoint)
+	response, err := client.Get(endpoint)
+	if response != nil {
+		defer response.Body.Close()
+	}
 	require.Error(t, err, "owned listener still accepted traffic after Shutdown")
 }
 
@@ -218,6 +222,7 @@ func TestServer_ReadOnlyEndpointsRejectWrites(t *testing.T) {
 		{name: "version", handler: s.handleVersion},
 	} {
 		t.Run(endpoint.name, func(t *testing.T) {
+			t.Parallel()
 			w := httptest.NewRecorder()
 			endpoint.handler(w, httptest.NewRequest(http.MethodPost, "/"+endpoint.name, http.NoBody))
 

@@ -91,12 +91,12 @@ func (c *deliveryBarrierClient) blockOn(messageType protocol.MessageType) {
 	c.mu.Unlock()
 }
 
-func (c *deliveryBarrierClient) messageCount(messageType protocol.MessageType) int {
+func (c *deliveryBarrierClient) dealCardsCount() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	count := 0
 	for _, current := range c.messages {
-		if current == messageType {
+		if current == protocol.MsgDealCards {
 			count++
 		}
 	}
@@ -166,7 +166,7 @@ func TestPrivateDeliveryRejectsSameRoomPhysicalClientReboundToAnotherPlayer(t *t
 	manager, gameRoom, clients := newBarrierDeliveryRoom(t, config.GameConfig{RoomTimeout: 60})
 	gameSession := NewGameSession(gameRoom, nil, config.GameConfig{})
 	gameSession.SetRoomManager(manager)
-	initialDeals := clients[0].messageCount(protocol.MsgDealCards)
+	initialDeals := clients[0].dealCardsCount()
 
 	clients[0].rebindIdentityForTest("replacement-player")
 	gameSession.dispatchPendingWork(pendingWork{deliveries: []pendingDelivery{{
@@ -174,7 +174,7 @@ func TestPrivateDeliveryRejectsSameRoomPhysicalClientReboundToAnotherPlayer(t *t
 		message:  &protocol.Message{Type: protocol.MsgDealCards},
 	}}})
 
-	require.Equal(t, initialDeals, clients[0].messageCount(protocol.MsgDealCards))
+	require.Equal(t, initialDeals, clients[0].dealCardsCount())
 }
 
 func TestDelayedGameStartRebuildsRosterAtPublication(t *testing.T) {
@@ -241,7 +241,7 @@ func TestCallerDisconnectBeforeLandlordDecisionSkipsPrivateHand(t *testing.T) {
 
 	callerIndex := gameSession.currentBidder
 	caller := gameSession.players[callerIndex]
-	initialDeals := clients[callerIndex].messageCount(protocol.MsgDealCards)
+	initialDeals := clients[callerIndex].dealCardsCount()
 	require.NoError(t, gameSession.HandleBid(caller.ID, true))
 	manager.NotifyPlayerOffline(clients[callerIndex])
 	for range 2 {
@@ -251,7 +251,7 @@ func TestCallerDisconnectBeforeLandlordDecisionSkipsPrivateHand(t *testing.T) {
 
 	require.Equal(t, GameStatePlaying, gameSession.GetStateForSerialization())
 	require.True(t, caller.IsLandlord)
-	require.Equal(t, initialDeals, clients[callerIndex].messageCount(protocol.MsgDealCards))
+	require.Equal(t, initialDeals, clients[callerIndex].dealCardsCount())
 }
 
 func TestPlayerDisconnectDuringDealSerializesPublicationWithoutBlockingState(t *testing.T) {
@@ -284,12 +284,12 @@ func TestPlayerDisconnectDuringDealSerializesPublicationWithoutBlockingState(t *
 	waitForSignal(t, startDone, "game start did not complete after releasing delivery")
 	waitForSignal(t, offlineDone, "offline publication did not complete after game start")
 
-	dealsAfterOffline := clients[1].messageCount(protocol.MsgDealCards)
+	dealsAfterOffline := clients[1].dealCardsCount()
 	gameSession.dispatchPendingWork(pendingWork{deliveries: []pendingDelivery{{
 		playerID: "p2",
 		message:  &protocol.Message{Type: protocol.MsgDealCards},
 	}}})
-	require.Equal(t, dealsAfterOffline, clients[1].messageCount(protocol.MsgDealCards))
+	require.Equal(t, dealsAfterOffline, clients[1].dealCardsCount())
 }
 
 func TestLandlordDisconnectDuringAnnouncementSkipsPrivateHandUpdate(t *testing.T) {
@@ -298,7 +298,7 @@ func TestLandlordDisconnectDuringAnnouncementSkipsPrivateHandUpdate(t *testing.T
 	gameSession := NewGameSession(gameRoom, storage.NewLeaderboardManager(nil), gameConfig)
 	t.Cleanup(gameSession.StopAllTimers)
 	gameSession.Start()
-	initialDeals := clients[0].messageCount(protocol.MsgDealCards)
+	initialDeals := clients[0].dealCardsCount()
 	clients[1].blockOn(protocol.MsgLandlord)
 
 	gameSession.mu.Lock()
@@ -320,13 +320,13 @@ func TestLandlordDisconnectDuringAnnouncementSkipsPrivateHandUpdate(t *testing.T
 	close(clients[1].release)
 	waitForSignal(t, deliveryDone, "landlord delivery did not complete")
 	waitForSignal(t, offlineDone, "landlord offline publication did not complete")
-	dealsAfterOffline := clients[0].messageCount(protocol.MsgDealCards)
+	dealsAfterOffline := clients[0].dealCardsCount()
 	require.GreaterOrEqual(t, dealsAfterOffline, initialDeals)
 	gameSession.dispatchPendingWork(pendingWork{deliveries: []pendingDelivery{{
 		playerID: "p1",
 		message:  &protocol.Message{Type: protocol.MsgDealCards},
 	}}})
-	require.Equal(t, dealsAfterOffline, clients[0].messageCount(protocol.MsgDealCards))
+	require.Equal(t, dealsAfterOffline, clients[0].dealCardsCount())
 }
 
 func TestRedealSkipsOfflinePlayerPrivateHand(t *testing.T) {
@@ -335,7 +335,7 @@ func TestRedealSkipsOfflinePlayerPrivateHand(t *testing.T) {
 	gameSession := NewGameSession(gameRoom, storage.NewLeaderboardManager(nil), gameConfig)
 	t.Cleanup(gameSession.StopAllTimers)
 	gameSession.Start()
-	initialDeals := clients[1].messageCount(protocol.MsgDealCards)
+	initialDeals := clients[1].dealCardsCount()
 	manager.NotifyPlayerOffline(clients[1])
 
 	for range 3 {
@@ -344,7 +344,7 @@ func TestRedealSkipsOfflinePlayerPrivateHand(t *testing.T) {
 		gameSession.mu.RUnlock()
 		require.NoError(t, gameSession.HandleBid(bidderID, false))
 	}
-	require.Equal(t, initialDeals, clients[1].messageCount(protocol.MsgDealCards))
+	require.Equal(t, initialDeals, clients[1].dealCardsCount())
 }
 
 func TestGameOverDeliveryConcurrentWithReconnect(t *testing.T) {

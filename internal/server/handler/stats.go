@@ -15,13 +15,13 @@ func (h *Handler) handleGetStats(client types.ClientInterface) {
 	ctx := context.Background()
 	playerStats, err := h.leaderboard.GetPlayerStats(ctx, client.GetID())
 	if err != nil {
-		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "获取统计失败", protocol.MsgGetStats))
+		sendMessage(client, codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "获取统计失败", protocol.MsgGetStats))
 		return
 	}
 
 	if playerStats == nil {
 		// 没有统计数据，返回空数据
-		client.SendMessage(codec.MustNewMessage(protocol.MsgStatsResult, protocol.StatsResultPayload{
+		sendMessage(client, codec.MustNewMessage(protocol.MsgStatsResult, protocol.StatsResultPayload{
 			PlayerID:   client.GetID(),
 			PlayerName: client.GetName(),
 		}))
@@ -36,7 +36,7 @@ func (h *Handler) handleGetStats(client types.ClientInterface) {
 		winRate = float64(playerStats.Wins) / float64(playerStats.TotalGames) * 100
 	}
 
-	client.SendMessage(codec.MustNewMessage(protocol.MsgStatsResult, protocol.StatsResultPayload{
+	sendMessage(client, codec.MustNewMessage(protocol.MsgStatsResult, protocol.StatsResultPayload{
 		PlayerID:      playerStats.PlayerID,
 		PlayerName:    playerStats.PlayerName,
 		TotalGames:    playerStats.TotalGames,
@@ -76,7 +76,7 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 
 	entries, err := h.leaderboard.GetLeaderboard(context.Background(), payload.Limit)
 	if err != nil {
-		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "获取排行榜失败", protocol.MsgGetLeaderboard))
+		sendMessage(client, codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "获取排行榜失败", protocol.MsgGetLeaderboard))
 		return
 	}
 
@@ -93,7 +93,7 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 		})
 	}
 
-	client.SendMessage(codec.MustNewMessage(protocol.MsgLeaderboardResult, protocol.LeaderboardResultPayload{
+	sendMessage(client, codec.MustNewMessage(protocol.MsgLeaderboardResult, protocol.LeaderboardResultPayload{
 		Type:    payload.Type,
 		Entries: protocolEntries,
 	}))
@@ -103,7 +103,7 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 func (h *Handler) handleGetRoomList(client types.ClientInterface) {
 	rooms := h.roomManager.GetRoomList()
 
-	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomListResult, protocol.RoomListResultPayload{
+	sendMessage(client, codec.MustNewMessage(protocol.MsgRoomListResult, protocol.RoomListResultPayload{
 		Rooms: rooms,
 	}))
 }
@@ -112,7 +112,7 @@ func (h *Handler) handleGetRoomList(client types.ClientInterface) {
 func (h *Handler) handleGetOnlineCount(client types.ClientInterface) {
 	count := h.server.GetOnlineCount()
 
-	client.SendMessage(codec.MustNewMessage(protocol.MsgOnlineCount, protocol.OnlineCountPayload{
+	sendMessage(client, codec.MustNewMessage(protocol.MsgOnlineCount, protocol.OnlineCountPayload{
 		Count: count,
 	}))
 }
@@ -121,7 +121,7 @@ func (h *Handler) handleGetOnlineCount(client types.ClientInterface) {
 func (h *Handler) handleGetMaintenanceStatus(client types.ClientInterface) {
 	maintenance := h.server.IsMaintenanceMode()
 
-	client.SendMessage(codec.MustNewMessage(protocol.MsgMaintenancePull, protocol.MaintenanceStatusPayload{
+	sendMessage(client, codec.MustNewMessage(protocol.MsgMaintenancePull, protocol.MaintenanceStatusPayload{
 		Maintenance: maintenance,
 	}))
 }

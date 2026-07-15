@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/types"
@@ -79,49 +81,54 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 创建客户端
+	leaseTransferred = s.activateWebSocketClient(conn, lease, negotiated, clientIP)
+}
+
+func (s *Server) activateWebSocketClient(
+	conn *websocket.Conn,
+	lease *connectionLease,
+	negotiated negotiatedClient,
+	clientIP string,
+) bool {
 	client := newClientWithLease(s, conn, lease)
-	client.IP = clientIP // 记录客户端 IP
+	client.IP = clientIP
 	client.clientVersion = negotiated.version
 	client.clientKind = negotiated.kind
 	client.capabilities = append([]string(nil), negotiated.capabilities...)
 	s.registerClient(client)
 
-	// 创建会话
 	playerID := client.GetID()
 	playerName := client.GetName()
-	session, err := s.sessionManager.CreateSession(playerID, playerName)
+	playerSession, err := s.sessionManager.CreateSession(playerID, playerName)
 	if err != nil {
 		log.Printf("创建安全会话失败: %v", err)
 		s.unregisterClient(client)
 		_ = conn.Close()
-		return
+		return false
 	}
 
-	// 发送连接成功消息（包含重连令牌）
-	if err := client.SendMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
+	connected := codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
 		PlayerID:       playerID,
 		PlayerName:     playerName,
-		ReconnectToken: session.ReconnectToken,
-	})); err != nil {
+		ReconnectToken: playerSession.ReconnectToken,
+	})
+	if err := client.SendMessage(connected); err != nil {
 		log.Printf("发送连接确认失败: %v", err)
 		s.unregisterClient(client)
 		s.sessionManager.DeleteSession(playerID)
 		_ = conn.Close()
-		return
+		return false
 	}
 
-	log.Printf("✅ 玩家 %s (%s) 已连接", playerName, playerID)
-
-	// 启动客户端读写协程
 	if !s.startClientPumps(client) {
 		client.Close()
 		s.unregisterClient(client)
 		s.sessionManager.DeleteSession(playerID)
 		_ = conn.Close()
-		return
+		return false
 	}
-	leaseTransferred = true
+	log.Printf("✅ 玩家 %s (%s) 已连接", playerName, playerID)
+	return true
 }
 
 func (s *Server) startClientPumps(client *Client) bool {

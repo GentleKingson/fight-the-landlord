@@ -145,7 +145,7 @@ func newRoomManager(parent context.Context, rs *storage.RedisStore, gameConfig c
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := context.WithCancel(parent) //nolint:gosec // Close owns cancellation and waits for all manager workers.
 	rm := &RoomManager{
 		redisStore:        rs,
 		roomTimeout:       gameConfig.RoomTimeoutDuration(),

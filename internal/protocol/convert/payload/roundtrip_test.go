@@ -228,7 +228,7 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 
 	t.Run("MatchCancelled", func(t *testing.T) {
 		t.Parallel()
-		original := protocol.MatchCancelledPayload{Reason: "cancelled"}
+		original := protocol.MatchCancelledPayload{Reason: protocol.MatchCancelReason}
 
 		data, err := EncodePayload(protocol.MsgMatchCancelled, original)
 		require.NoError(t, err)

@@ -46,6 +46,8 @@ func TestSessionManagerTokenGenerationFailureDoesNotCreateOrRotateSession(t *tes
 	t.Parallel()
 
 	t.Run("create", func(t *testing.T) {
+		t.Parallel()
+
 		sm := NewSessionManager()
 		sm.tokenReader = failingTokenReader{}
 		session, err := sm.CreateSession("p1", "Player1")
@@ -55,6 +57,8 @@ func TestSessionManagerTokenGenerationFailureDoesNotCreateOrRotateSession(t *tes
 	})
 
 	t.Run("rotate", func(t *testing.T) {
+		t.Parallel()
+
 		sm := NewSessionManager()
 		original := sm.MustCreateSession("p1", "Player1")
 		originalToken := original.ReconnectToken
@@ -478,6 +482,6 @@ func TestSessionManagerCloseWaitsAfterParentCancellation(t *testing.T) {
 	case err := <-done:
 		require.NoError(t, err)
 	case <-time.After(time.Second):
-		t.Fatal("SessionManager.Close did not wait for a cancelled worker")
+		t.Fatal("SessionManager.Close did not wait for a canceled worker")
 	}
 }

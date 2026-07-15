@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 
@@ -183,9 +184,7 @@ func commandFingerprint(msg *protocol.Message) [sha256.Size]byte {
 	writeFingerprintPart(hash, msg.Payload)
 	if msg.Command != nil {
 		writeFingerprintPart(hash, []byte(msg.Command.ExpectedGameID))
-		var turn [8]byte
-		binary.BigEndian.PutUint64(turn[:], uint64(msg.Command.ExpectedTurnID))
-		writeFingerprintPart(hash, turn[:])
+		writeFingerprintPart(hash, []byte(strconv.FormatInt(msg.Command.ExpectedTurnID, 10)))
 	}
 	var result [sha256.Size]byte
 	copy(result[:], hash.Sum(nil))

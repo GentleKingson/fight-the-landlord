@@ -391,7 +391,7 @@ func TestRoomManagerCloseUsesLiveContextForShutdownDelete(t *testing.T) {
 	require.NoError(t, rm.Close())
 	select {
 	case err := <-deleteContextErrors:
-		require.NoError(t, err, "shutdown deletion must not inherit the cancelled worker context")
+		require.NoError(t, err, "shutdown deletion must not inherit the canceled worker context")
 	case <-time.After(time.Second):
 		t.Fatal("RoomManager.Close did not execute the shutdown delete")
 	}

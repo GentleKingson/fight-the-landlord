@@ -347,6 +347,8 @@ func TestEveryPublishedRoomRemovalPathDeletesRedisAndNotifiesOnce(t *testing.T) 
 		{
 			name: "last player leaves",
 			remove: func(t *testing.T, rm *RoomManager) *Room {
+				t.Helper()
+
 				client := newConcurrencyClient("leave")
 				gameRoom, err := rm.CreateRoom(client)
 				require.NoError(t, err)
@@ -358,6 +360,8 @@ func TestEveryPublishedRoomRemovalPathDeletesRedisAndNotifiesOnce(t *testing.T) 
 		{
 			name: "all players offline",
 			remove: func(t *testing.T, rm *RoomManager) *Room {
+				t.Helper()
+
 				client := newConcurrencyClient("offline")
 				gameRoom, err := rm.CreateRoom(client)
 				require.NoError(t, err)
@@ -369,6 +373,8 @@ func TestEveryPublishedRoomRemovalPathDeletesRedisAndNotifiesOnce(t *testing.T) 
 		{
 			name: "waiting room timeout",
 			remove: func(t *testing.T, rm *RoomManager) *Room {
+				t.Helper()
+
 				client := newConcurrencyClient("timeout")
 				gameRoom, err := rm.CreateRoom(client)
 				require.NoError(t, err)
@@ -381,6 +387,8 @@ func TestEveryPublishedRoomRemovalPathDeletesRedisAndNotifiesOnce(t *testing.T) 
 		{
 			name: "published match rollback",
 			remove: func(t *testing.T, rm *RoomManager) *Room {
+				t.Helper()
+
 				tx, _ := beginCompleteMatchRoom(t, rm)
 				gameRoom, err := tx.Commit()
 				require.NoError(t, err)

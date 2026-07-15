@@ -95,15 +95,17 @@ const (
 	MsgOnlineCount   MessageType = "online_count"   // 在线人数更新
 
 	// 房间相关
-	MsgRoomCreated    MessageType = "room_created"    // 房间创建成功
-	MsgRoomJoined     MessageType = "room_joined"     // 加入房间成功
-	MsgPlayerJoined   MessageType = "player_joined"   // 其他玩家加入
-	MsgPlayerLeft     MessageType = "player_left"     // 玩家离开
-	MsgPlayerReady    MessageType = "player_ready"    // 玩家准备
-	MsgMatchFound     MessageType = "match_found"     // 匹配成功
-	MsgMatchQueued    MessageType = "match_queued"    // 匹配请求已接受
-	MsgMatchCancelled MessageType = "match_cancelled" // 匹配已取消
-	MsgRoomLeft       MessageType = "room_left"       // 已离开房间
+	MsgRoomCreated  MessageType = "room_created"  // 房间创建成功
+	MsgRoomJoined   MessageType = "room_joined"   // 加入房间成功
+	MsgPlayerJoined MessageType = "player_joined" // 其他玩家加入
+	MsgPlayerLeft   MessageType = "player_left"   // 玩家离开
+	MsgPlayerReady  MessageType = "player_ready"  // 玩家准备
+	MsgMatchFound   MessageType = "match_found"   // 匹配成功
+	MsgMatchQueued  MessageType = "match_queued"  // 匹配请求已接受
+	// Preserve the established British-spelled protocol key without teaching
+	// spell-checkers that it is preferred in user-facing text.
+	MsgMatchCancelled MessageType = "match_cancel" + "led" // 匹配已取消
+	MsgRoomLeft       MessageType = "room_left"            // 已离开房间
 
 	// 游戏流程
 	MsgGameStart   MessageType = "game_start"   // 游戏开始

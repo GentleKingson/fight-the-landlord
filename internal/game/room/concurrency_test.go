@@ -441,7 +441,7 @@ func (c *publicationBarrierClient) SendMessageIfIdentity(expectedPlayerID, expec
 func (c *publicationBarrierClient) Close()      {}
 func (c *publicationBarrierClient) IsBot() bool { return false }
 
-func (c *publicationBarrierClient) resetMessagesAndBlock(messageType protocol.MessageType) (<-chan struct{}, chan<- struct{}) {
+func (c *publicationBarrierClient) resetMessagesAndBlock(messageType protocol.MessageType) (entered <-chan struct{}, release chan<- struct{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = nil

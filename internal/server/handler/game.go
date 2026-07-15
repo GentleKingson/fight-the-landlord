@@ -13,9 +13,9 @@ import (
 // sendGameError 统一处理游戏错误并发送给客户端。
 func sendGameError(client types.ClientInterface, command protocol.MessageType, err error) {
 	if gameErr, ok := errors.AsType[*apperrors.GameError](err); ok {
-		client.SendMessage(codec.NewCommandErrorMessage(gameErr.Code, command))
+		sendMessage(client, codec.NewCommandErrorMessage(gameErr.Code, command))
 	} else {
-		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, err.Error(), command))
+		sendMessage(client, codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, err.Error(), command))
 	}
 }
 
@@ -23,28 +23,28 @@ func sendGameError(client types.ClientInterface, command protocol.MessageType, e
 func (h *Handler) handleBid(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.BidPayload](msg)
 	if err != nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgBid))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgBid))
 		return
 	}
 
 	if h.roomManager == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgBid))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgBid))
 		return
 	}
 
 	room := h.roomManager.GetRoom(client.GetRoom())
 	if room == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgBid))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgBid))
 		return
 	}
 	if !room.IsCurrentClient(client) {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgBid))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgBid))
 		return
 	}
 
 	gameSession := h.GetGameSession(room.Code)
 	if gameSession == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgBid))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgBid))
 		return
 	}
 
@@ -64,28 +64,28 @@ func (h *Handler) handleBid(client types.ClientInterface, msg *protocol.Message)
 func (h *Handler) handlePlayCards(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.PlayCardsPayload](msg)
 	if err != nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgPlayCards))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgPlayCards))
 		return
 	}
 
 	if h.roomManager == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPlayCards))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPlayCards))
 		return
 	}
 
 	room := h.roomManager.GetRoom(client.GetRoom())
 	if room == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPlayCards))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPlayCards))
 		return
 	}
 	if !room.IsCurrentClient(client) {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPlayCards))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPlayCards))
 		return
 	}
 
 	gameSession := h.GetGameSession(room.Code)
 	if gameSession == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPlayCards))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPlayCards))
 		return
 	}
 
@@ -104,23 +104,23 @@ func (h *Handler) handlePlayCards(client types.ClientInterface, msg *protocol.Me
 // handlePass 处理不出
 func (h *Handler) handlePass(client types.ClientInterface, messages ...*protocol.Message) {
 	if h.roomManager == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPass))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPass))
 		return
 	}
 
 	room := h.roomManager.GetRoom(client.GetRoom())
 	if room == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPass))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPass))
 		return
 	}
 	if !room.IsCurrentClient(client) {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPass))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPass))
 		return
 	}
 
 	gameSession := h.GetGameSession(room.Code)
 	if gameSession == nil {
-		client.SendMessage(codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPass))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPass))
 		return
 	}
 

@@ -53,7 +53,7 @@ func newRateLimiter(parent context.Context, maxPerSecond, maxPerMinute int, banD
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := context.WithCancel(parent) //nolint:gosec // Close owns cancellation and waits for the cleanup worker.
 	rl := &RateLimiter{
 		requests:             make(map[string]*clientRate),
 		maxRequestsPerSecond: maxPerSecond,

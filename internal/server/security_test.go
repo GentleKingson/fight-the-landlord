@@ -438,6 +438,6 @@ func TestRateLimiterCloseWaitsAfterParentCancellation(t *testing.T) {
 	case err := <-done:
 		require.NoError(t, err)
 	case <-time.After(time.Second):
-		t.Fatal("RateLimiter.Close did not wait for a cancelled worker")
+		t.Fatal("RateLimiter.Close did not wait for a canceled worker")
 	}
 }
