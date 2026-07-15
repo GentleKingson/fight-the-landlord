@@ -111,11 +111,12 @@ func NewGameSessionWithPlayers(r *room.Room, roomPlayers []room.PlayerSnapshot, 
 	players := make([]*GamePlayer, len(roomPlayers))
 	for i, rp := range roomPlayers {
 		players[i] = &GamePlayer{
-			ID:    rp.ID,
-			Name:  rp.Name,
-			Seat:  rp.Seat,
-			Ready: rp.Ready,
-			IsBot: rp.IsBot,
+			ID:        rp.ID,
+			Name:      rp.Name,
+			Seat:      rp.Seat,
+			Ready:     rp.Ready,
+			IsOffline: rp.Client == nil,
+			IsBot:     rp.IsBot,
 		}
 	}
 
@@ -129,5 +130,21 @@ func NewGameSessionWithPlayers(r *room.Room, roomPlayers []room.PlayerSnapshot, 
 		landlordCandidate: -1,
 		lastPlayerIdx:     -1,
 		bidMultiplier:     1,
+	}
+}
+
+// SyncRoomPresence applies a room membership snapshot while a newly-created
+// session is being registered. The handler serializes this with disconnect and
+// reconnect lookups so an event in the construction window is not lost.
+func (gs *GameSession) SyncRoomPresence(roomPlayers []room.PlayerSnapshot) {
+	online := make(map[string]bool, len(roomPlayers))
+	for _, player := range roomPlayers {
+		online[player.ID] = player.Client != nil
+	}
+
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	for _, player := range gs.players {
+		player.IsOffline = !online[player.ID]
 	}
 }

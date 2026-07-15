@@ -127,12 +127,13 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 	// 初始化匹配器
 	s.matcher = match.NewMatcher(match.MatcherDeps{
-		RoomManager: s.roomManager,
-		RedisStore:  s.redisStore,
-		Leaderboard: s.leaderboard,
-		GameConfig:  cfg.Game,
-		BotEngine:   botEngine,
-		BotConfig:   cfg.BOT,
+		RoomManager:         s.roomManager,
+		RedisStore:          s.redisStore,
+		Leaderboard:         s.leaderboard,
+		GameConfig:          cfg.Game,
+		BotEngine:           botEngine,
+		BotConfig:           cfg.BOT,
+		ResolveActiveClient: s.GetClientByID,
 		RegisterSession: func(roomCode string, gs *session.GameSession) {
 			s.handler.SetGameSession(roomCode, gs)
 		},

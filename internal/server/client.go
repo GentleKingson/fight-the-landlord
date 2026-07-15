@@ -250,6 +250,13 @@ func (c *Client) handleDisconnect() {
 		return
 	}
 
+	// Cancel queued or uncommitted matching before room cleanup observes the
+	// client's room identity. A stale replaced connection never reaches this
+	// point because unregisterClient uses compare-and-delete semantics.
+	if c.server.matcher != nil {
+		c.server.matcher.PlayerDisconnected(c)
+	}
+
 	playerID, _, roomID := c.identitySnapshot()
 
 	// 标记会话为离线状态
@@ -265,11 +272,6 @@ func (c *Client) handleDisconnect() {
 				gameSession.PlayerOffline(playerID)
 			}
 		}
-	}
-
-	// 如果在匹配队列中，移除
-	if c.server.matcher != nil {
-		c.server.matcher.RemoveFromQueue(c)
 	}
 }
 

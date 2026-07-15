@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
@@ -104,6 +106,13 @@ func TestServer_RebindClientIsPointerSafe(t *testing.T) {
 	assert.Nil(t, server.GetClientByID("restored-id"))
 }
 
+func TestServerActiveClientResolverReturnsNilForMissingIdentity(t *testing.T) {
+	server := &Server{clients: make(map[string]*Client)}
+	if active := server.GetClientByID("missing"); active != nil {
+		t.Fatalf("missing identity resolved to a non-nil interface: %T", active)
+	}
+}
+
 func TestClient_StaleDisconnectDoesNotClobberReboundConnection(t *testing.T) {
 	t.Parallel()
 
@@ -140,6 +149,60 @@ func TestClient_StaleDisconnectDoesNotClobberReboundConnection(t *testing.T) {
 	recipient, ok := gameRoom.PrivateRecipient(restored.PlayerID)
 	require.True(t, ok)
 	assert.Same(t, rebound, recipient)
+}
+
+func TestClientDisconnectCancelsAuthoritativeMatchState(t *testing.T) {
+	server := &Server{clients: make(map[string]*Client)}
+	matcher := match.NewMatcher(match.MatcherDeps{
+		QueueTimeout:        time.Hour,
+		ResolveActiveClient: server.GetClientByID,
+	})
+	server.matcher = matcher
+	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
+
+	client := NewClient(server, nil)
+	server.registerClient(client)
+	require.True(t, matcher.AddToQueue(client))
+
+	client.handleDisconnect()
+
+	assert.Zero(t, matcher.GetQueueLength())
+	assert.Nil(t, server.GetClientByID(client.GetID()))
+}
+
+func TestStaleDisconnectDoesNotCancelReplacementMatchGeneration(t *testing.T) {
+	server := &Server{clients: make(map[string]*Client)}
+	matcher := match.NewMatcher(match.MatcherDeps{
+		QueueTimeout:        time.Hour,
+		ResolveActiveClient: server.GetClientByID,
+	})
+	server.matcher = matcher
+	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
+
+	previous := NewClient(server, nil)
+	previous.rebindIdentity("restored-id", "Restored Player", "")
+	server.registerClient(previous)
+	require.True(t, matcher.AddToQueue(previous))
+
+	replacement := NewClient(server, nil)
+	temporaryID := replacement.GetID()
+	server.registerClient(replacement)
+	replaced, err := server.RebindClient(
+		temporaryID,
+		previous.GetID(),
+		previous.GetName(),
+		"",
+		replacement,
+	)
+	require.NoError(t, err)
+	require.Same(t, previous, replaced)
+	matcher.ReplaceClient(previous, replacement)
+
+	previous.handleDisconnect()
+
+	assert.Equal(t, 1, matcher.GetQueueLength())
+	assert.True(t, matcher.RemoveFromQueue(replacement))
+	assert.Equal(t, replacement, server.GetClientByID("restored-id"))
 }
 
 func TestClient_StaleLeaveDoesNotClobberReboundSessionRoom(t *testing.T) {
@@ -333,6 +396,23 @@ func TestServer_ShutdownAndSendAreConcurrentSafe(t *testing.T) {
 	close(start)
 	wg.Wait()
 	assert.True(t, client.isClosed())
+}
+
+func TestServerShutdownClosesMatcherBeforeDependencies(t *testing.T) {
+	server := &Server{
+		config:  &config.Config{},
+		redis:   redis.NewClient(&redis.Options{}),
+		clients: make(map[string]*Client),
+	}
+	matcher := match.NewMatcher(match.MatcherDeps{QueueTimeout: time.Hour})
+	server.matcher = matcher
+	queued := NewClient(server, nil)
+	require.True(t, matcher.AddToQueue(queued))
+
+	server.Shutdown()
+
+	assert.Zero(t, matcher.GetQueueLength())
+	assert.False(t, matcher.AddToQueue(NewClient(server, nil)))
 }
 
 func TestServer_ReconnectReplacementAndSendAreConcurrentSafe(t *testing.T) {

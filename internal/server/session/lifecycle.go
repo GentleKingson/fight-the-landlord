@@ -15,12 +15,29 @@ import (
 // Start 开始游戏
 func (gs *GameSession) Start() {
 	gs.actionMu.Lock()
-	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
 	gs.startBiddingRound()
 	work := gs.takePendingWorkLocked()
 	gs.mu.Unlock()
 	gs.dispatchPendingWork(work)
+	gs.pauseInitialOfflineTurn()
+	gs.actionMu.Unlock()
+}
+
+// pauseInitialOfflineTurn closes the registration window where a player can
+// disconnect before the first authoritative turn exists. Presence is already
+// recorded on the session; once bidding starts, the normal offline wait policy
+// must replace the turn timer when that player was selected first.
+func (gs *GameSession) pauseInitialOfflineTurn() {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	if gs.state != GameStateBidding || !gs.validPlayerIndex(gs.currentBidder) {
+		return
+	}
+	player := gs.players[gs.currentBidder]
+	if player.IsOffline && gs.pauseOfflineTurnLocked(player.ID, gs.currentBidder) {
+		gs.markStateChangedLocked()
+	}
 }
 
 // maxRedeals 最大流局次数；达到后下一局随机强制指定地主，避免无限流局

@@ -138,12 +138,19 @@ func (rm *RoomManager) ReconnectPlayer(oldPlayerID, roomCode string, newClient t
 // generateRoomCode 生成房间号
 func (rm *RoomManager) generateRoomCode() string {
 	for {
-		code := make([]byte, roomCodeLength)
-		for i := range code {
-			code[i] = roomCodeChars[rand.IntN(len(roomCodeChars))]
+		var codeStr string
+		if rm.roomCodeFunc != nil {
+			codeStr = rm.roomCodeFunc()
+		} else {
+			code := make([]byte, roomCodeLength)
+			for i := range code {
+				code[i] = roomCodeChars[rand.IntN(len(roomCodeChars))]
+			}
+			codeStr = string(code)
 		}
-		codeStr := string(code)
-		if _, exists := rm.rooms[codeStr]; !exists {
+		_, published := rm.rooms[codeStr]
+		_, pending := rm.pendingRooms[codeStr]
+		if !published && !pending {
 			return codeStr
 		}
 	}

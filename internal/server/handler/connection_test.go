@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
@@ -35,6 +36,10 @@ func TestHandleReconnectRestoresIdentityRoomAndReadyCommand(t *testing.T) {
 	sessionManager.SetOffline(restoredClient.GetID())
 	roomManager.NotifyPlayerOffline(restoredClient)
 	originalToken := restoredSession.ReconnectToken
+	previousConnection := testutil.NewSimpleClient(restoredClient.GetID(), restoredClient.GetName())
+	matcher := match.NewMatcher(match.MatcherDeps{QueueTimeout: time.Hour})
+	require.True(t, matcher.AddToQueue(previousConnection))
+	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
 
 	provisionalClient := testutil.NewSimpleClient("temporary-player", "Temporary Player")
 	provisionalSession := sessionManager.CreateSession(provisionalClient.GetID(), provisionalClient.GetName())
@@ -53,11 +58,12 @@ func TestHandleReconnectRestoresIdentityRoomAndReadyCommand(t *testing.T) {
 		client.ID = args.String(1)
 		client.Name = args.String(2)
 		client.RoomCode = args.String(3)
-	}).Return(nil, nil).Once()
+	}).Return(previousConnection, nil).Once()
 
 	h := NewHandler(HandlerDeps{
 		Server:         server,
 		RoomManager:    roomManager,
+		Matcher:        matcher,
 		SessionManager: sessionManager,
 	})
 	reconnectMessage := codec.MustNewMessage(protocol.MsgReconnect, protocol.ReconnectPayload{
@@ -99,6 +105,7 @@ func TestHandleReconnectRestoresIdentityRoomAndReadyCommand(t *testing.T) {
 	recipient, ok := gameRoom.PrivateRecipient("player-1")
 	require.True(t, ok)
 	require.Same(t, provisionalClient, recipient)
+	require.True(t, matcher.RemoveFromQueue(provisionalClient), "rebind must transfer matcher ownership to the active connection")
 	server.AssertExpectations(t)
 }
 

@@ -159,6 +159,14 @@ func (s *Server) sendShutdownNotification() {
 
 // Shutdown 关闭服务器
 func (s *Server) Shutdown() {
+	// Stop authoritative queue deadlines, bot-fill work, and room assembly
+	// before closing the clients and backing services they may still reference.
+	if s.matcher != nil {
+		if err := s.matcher.Close(); err != nil {
+			log.Printf("关闭匹配器失败: %v", err)
+		}
+	}
+
 	time.Sleep(s.config.Game.RoomCleanupDelayDuration())
 
 	// 关闭所有客户端连接
@@ -169,7 +177,11 @@ func (s *Server) Shutdown() {
 	s.clientsMu.Unlock()
 
 	// 关闭 Redis
-	_ = s.redis.Close()
+	if s.redis != nil {
+		if err := s.redis.Close(); err != nil {
+			log.Printf("关闭 Redis 失败: %v", err)
+		}
+	}
 
 	log.Println("服务器已关闭")
 }

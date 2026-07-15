@@ -176,7 +176,11 @@ func (s *Server) unregisterClient(client *Client) bool {
 func (s *Server) GetClientByID(id string) types.ClientInterface {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
-	return s.clients[id]
+	client, ok := s.clients[id]
+	if !ok || client == nil {
+		return nil
+	}
+	return client
 }
 
 func (s *Server) RegisterClient(id string, client types.ClientInterface) {

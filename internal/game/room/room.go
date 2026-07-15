@@ -74,21 +74,24 @@ func newRoomPlayer(client types.ClientInterface, seat int) *RoomPlayer {
 
 // RoomManager 房间管理器
 type RoomManager struct {
-	redisStore  *storage.RedisStore
-	roomTimeout time.Duration
-	gameConfig  config.GameConfig
-	onGameStart func(*Room, []PlayerSnapshot)
-	rooms       map[string]*Room
-	mu          sync.RWMutex
+	redisStore   *storage.RedisStore
+	roomTimeout  time.Duration
+	gameConfig   config.GameConfig
+	onGameStart  func(*Room, []PlayerSnapshot)
+	rooms        map[string]*Room
+	pendingRooms map[string]*MatchRoomTransaction
+	roomCodeFunc func() string
+	mu           sync.RWMutex
 }
 
 // NewRoomManager 创建房间管理器
 func NewRoomManager(rs *storage.RedisStore, gameConfig config.GameConfig) *RoomManager {
 	rm := &RoomManager{
-		redisStore:  rs,
-		roomTimeout: gameConfig.RoomTimeoutDuration(),
-		gameConfig:  gameConfig,
-		rooms:       make(map[string]*Room),
+		redisStore:   rs,
+		roomTimeout:  gameConfig.RoomTimeoutDuration(),
+		gameConfig:   gameConfig,
+		rooms:        make(map[string]*Room),
+		pendingRooms: make(map[string]*MatchRoomTransaction),
 	}
 
 	// 启动房间清理协程

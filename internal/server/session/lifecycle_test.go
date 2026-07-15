@@ -85,6 +85,35 @@ func TestStartGame_BidderSelected(t *testing.T) {
 	assert.Less(t, gs.currentBidder, 3)
 }
 
+func TestStartGamePausesWhenInitialBidderDisconnectedBeforeRegistration(t *testing.T) {
+	clients := []*testutil.SimpleClient{
+		testutil.NewSimpleClient("p1", "Player1"),
+		testutil.NewSimpleClient("p2", "Player2"),
+		testutil.NewSimpleClient("p3", "Player3"),
+	}
+	r := room.NewMockRoom("INITIAL-OFFLINE", clients[0])
+	r.AddPlayerForTest(clients[1], 1, true)
+	r.AddPlayerForTest(clients[2], 2, true)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
+	for _, client := range clients {
+		require.True(t, r.DetachClient(client.GetID(), client))
+	}
+
+	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{
+		TurnTimeout:        3600,
+		BidTimeout:         3600,
+		OfflineWaitTimeout: 3600,
+	})
+	t.Cleanup(gs.StopAllTimers)
+	gs.Start()
+
+	gs.timerMu.Lock()
+	defer gs.timerMu.Unlock()
+	assert.Nil(t, gs.turnTimer)
+	assert.NotNil(t, gs.offlineWaitTimer)
+	assert.True(t, gs.turnDeadline.IsZero())
+}
+
 func TestEndGame_WinnerAnnounced(t *testing.T) {
 	t.Parallel()
 

@@ -60,6 +60,9 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		client.Close()
 		return
 	}
+	if h.matcher != nil && previous != nil && previous != client {
+		h.matcher.ReplaceClient(previous, client)
+	}
 
 	// 构建重连响应
 	reconnectPayload := protocol.ReconnectedPayload{

@@ -114,23 +114,34 @@ func (gs *GameSession) PlayerOffline(playerID string) {
 		return
 	}
 
-	// 检查是否是当前回合玩家
-	isBidding := gs.state == GameStateBidding && gs.currentBidder == playerIdx
-	isPlaying := gs.state == GameStatePlaying && gs.currentPlayer == playerIdx
-
-	if !isBidding && !isPlaying {
+	paused := gs.pauseOfflineTurnLocked(playerID, playerIdx)
+	if !paused {
 		if stateChanged {
 			gs.markStateChangedLocked()
 		}
 		return // 不是当前回合，无需暂停
 	}
+	gs.markStateChangedLocked()
+}
+
+// pauseOfflineTurnLocked pauses the active turn for playerIdx. The caller owns
+// gs.mu; timerMu prevents duplicate disconnect notifications from creating
+// multiple offline timers for the same authoritative turn.
+func (gs *GameSession) pauseOfflineTurnLocked(playerID string, playerIdx int) bool {
+	isBidding := gs.state == GameStateBidding && gs.currentBidder == playerIdx
+	isPlaying := gs.state == GameStatePlaying && gs.currentPlayer == playerIdx
+	if !isBidding && !isPlaying {
+		return false
+	}
 
 	gs.timerMu.Lock()
 	defer gs.timerMu.Unlock()
+	if gs.offlineWaitTimer != nil {
+		return false
+	}
 
 	// 暂停计时器，计算剩余时间
 	if gs.turnTimer != nil {
-		stateChanged = true
 		gs.turnTimer.Stop()
 		gs.remainingTime = time.Until(gs.turnDeadline)
 		if gs.remainingTime < 0 {
@@ -145,12 +156,9 @@ func (gs *GameSession) PlayerOffline(playerID string) {
 	gs.offlineWaitTimer = time.AfterFunc(offlineTimeout, func() {
 		gs.handleOfflineTimeout(playerID)
 	})
-	stateChanged = true
-	if stateChanged {
-		gs.markStateChangedLocked()
-	}
 
 	log.Printf("⏸️ 玩家 %s 离线，暂停计时等待重连 (%v)", gs.players[playerIdx].Name, offlineTimeout)
+	return true
 }
 
 // PlayerOnline 玩家上线

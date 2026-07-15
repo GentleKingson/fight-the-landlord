@@ -68,6 +68,15 @@ func (h *Handler) SetGameSession(roomCode string, gs *session.GameSession) {
 	if gs == nil {
 		delete(h.games, roomCode)
 	} else {
+		// Keep registration serialized with GetGameSession. Disconnect and
+		// reconnect update the room first, then look up the session, so either
+		// this snapshot observes the event or that lookup updates the published
+		// session after this lock is released.
+		if h.roomManager != nil {
+			if gameRoom := h.roomManager.GetRoom(roomCode); gameRoom != nil {
+				gs.SyncRoomPresence(gameRoom.SnapshotPlayers())
+			}
+		}
 		h.games[roomCode] = gs
 	}
 }

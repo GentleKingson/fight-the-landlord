@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	r "github.com/palemoky/fight-the-landlord/internal/game/room"
@@ -42,6 +43,22 @@ func setupGameRoom(t *testing.T) (*r.Room, *session.GameSession, []*testutil.Moc
 	gs.Start()
 
 	return room, gs, clients
+}
+
+func TestSetGameSessionReconcilesDisconnectDuringRegistration(t *testing.T) {
+	client := testutil.NewSimpleClient("p1", "Player 1")
+	gameRoom := r.NewMockRoom("registration-race", client)
+	roomManager := r.NewRoomManager(nil, config.GameConfig{RoomTimeout: 10})
+	roomManager.AddRoomForTest(gameRoom)
+
+	game := session.NewGameSessionWithPlayers(gameRoom, gameRoom.SnapshotPlayers(), nil, config.GameConfig{})
+	require.True(t, gameRoom.DetachClient(client.GetID(), client))
+	h := NewHandler(HandlerDeps{RoomManager: roomManager})
+	h.SetGameSession(gameRoom.Code, game)
+
+	snapshot := game.BuildGameStateDTO(client.GetID(), nil)
+	require.Len(t, snapshot.Players, 1)
+	assert.False(t, snapshot.Players[0].Online)
 }
 
 func TestHandler_HandleBid_Success(t *testing.T) {

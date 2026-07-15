@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
+	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
 type synchronizedClient struct {
@@ -91,44 +93,74 @@ func TestHandler_CancelMatchNotQueuedIsCorrelated(t *testing.T) {
 	assert.Equal(t, protocol.MsgCancelMatch, payload.CommandType)
 }
 
-func TestHandler_CancelMatchAfterPracticeAcceptanceIsTooLate(t *testing.T) {
+type handlerBlockingAssembly struct {
+	gameRoom    *room.Room
+	joinStarted chan struct{}
+	rollback    chan struct{}
+	joinOnce    sync.Once
+	rollOnce    sync.Once
+}
+
+func (a *handlerBlockingAssembly) Room() *room.Room { return a.gameRoom }
+func (a *handlerBlockingAssembly) Join(ctx context.Context, _ types.ClientInterface) error {
+	a.joinOnce.Do(func() { close(a.joinStarted) })
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (a *handlerBlockingAssembly) Commit(context.Context) error { return nil }
+func (a *handlerBlockingAssembly) Rollback() error {
+	a.rollOnce.Do(func() { close(a.rollback) })
+	return nil
+}
+
+func TestHandler_CancelMatchCancelsInflightPracticeTransaction(t *testing.T) {
 	server := new(testutil.MockServer)
 	server.On("IsMaintenanceMode").Return(false)
-	rm := room.NewRoomManager(nil, config.GameConfig{
-		TurnTimeout: 3600,
-		BidTimeout:  3600,
-		RoomTimeout: 10,
-	})
+	rm := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 10})
+	assembly := &handlerBlockingAssembly{
+		joinStarted: make(chan struct{}),
+		rollback:    make(chan struct{}),
+	}
 	matcher := match.NewMatcher(match.MatcherDeps{
-		RoomManager: rm,
-		GameConfig: config.GameConfig{
-			TurnTimeout: 3600,
-			BidTimeout:  3600,
+		RoomManager:  rm,
+		QueueTimeout: time.Hour,
+		BeginRoom: func(_ context.Context, first types.ClientInterface) (match.RoomAssembly, error) {
+			assembly.gameRoom = room.NewMockRoom("practice", first)
+			return assembly, nil
 		},
 	})
+	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
 	client := &synchronizedClient{id: "p1", name: "Player1"}
 	h := NewHandler(HandlerDeps{Server: server, RoomManager: rm, Matcher: matcher})
 
 	h.handlePracticeMatch(client)
+	select {
+	case <-assembly.joinStarted:
+	case <-time.After(time.Second):
+		t.Fatal("practice transaction did not reach inflight Join")
+	}
 	h.handleCancelMatch(client)
+	select {
+	case <-assembly.rollback:
+	case <-time.After(time.Second):
+		t.Fatal("practice transaction was not rolled back")
+	}
 
 	messages := client.sentMessages()
 	require.NotEmpty(t, messages)
 	assert.Equal(t, protocol.MsgMatchQueued, messages[0].Type)
-	var cancellationError *protocol.ErrorPayload
+	var cancellation *protocol.MatchCancelledPayload
 	for _, message := range messages {
-		if message.Type != protocol.MsgError {
+		if message.Type != protocol.MsgMatchCancelled {
 			continue
 		}
-		payload, err := codec.ParsePayload[protocol.ErrorPayload](message)
+		payload, err := codec.ParsePayload[protocol.MatchCancelledPayload](message)
 		require.NoError(t, err)
-		if payload.CommandType == protocol.MsgCancelMatch {
-			cancellationError = payload
-			break
-		}
+		cancellation = payload
+		break
 	}
-	require.NotNil(t, cancellationError)
-	assert.Equal(t, protocol.ErrCodeMatchNotQueued, cancellationError.Code)
+	require.NotNil(t, cancellation)
+	assert.Equal(t, "cancelled", cancellation.Reason)
 }
 
 func TestHandler_QuickMatchDuplicateIsRejected(t *testing.T) {
