@@ -72,9 +72,11 @@ class FakeWebSocket {
 describe('GameSocket reconnect identity state machine', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllTimers();
     vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
     FakeWebSocket.instances = [];
     localStorage.clear();
+    vi.advanceTimersByTime(0);
     useAppStore.setState({
       connected: false,
       connectionStatus: 'idle',
@@ -366,7 +368,7 @@ describe('GameSocket reconnect identity state machine', () => {
     expect(gameSocket.send(MsgType.Ready)).toEqual({ ok: false, reason: 'not-connected' });
   });
 
-  it('reports encoding failures and ignores malformed incoming frames without closing', () => {
+  it('reports encoding failures and tolerates an isolated malformed incoming frame', () => {
     const gameSocket = new GameSocket('ws://example.test/ws', { heartbeatIntervalMs: 60_000 });
     gameSocket.connect();
     const socket = latestSocket();
@@ -382,6 +384,101 @@ describe('GameSocket reconnect identity state machine', () => {
     expect(useAppStore.getState().error).toContain('收到无效的服务器消息');
     expect(socket.readyState).toBe(FakeWebSocket.OPEN);
     gameSocket.shutdown();
+  });
+
+  it('closes and renegotiates after the consecutive malformed-frame threshold', () => {
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      heartbeatIntervalMs: 60_000,
+      malformedFrameThreshold: 3,
+      reconnectBaseDelayMs: 25,
+      reconnectJitterRatio: 0
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+
+    socket.receive(Uint8Array.of(0xff));
+    socket.receive(Uint8Array.of(0xff));
+    expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+    socket.receive(Uint8Array.of(0xff));
+
+    expect(socket.closeCalls).toContainEqual({ code: 4003, reason: 'malformed server frames' });
+    expect(useAppStore.getState().error).toContain('连续收到 3 条无效');
+    vi.advanceTimersByTime(24);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    openAndNegotiate(latestSocket());
+    gameSocket.shutdown();
+  });
+
+  it('resets the malformed-frame counter after any valid frame', () => {
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      heartbeatIntervalMs: 60_000,
+      malformedFrameThreshold: 3
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+
+    socket.receive(Uint8Array.of(0xff));
+    socket.receive(Uint8Array.of(0xff));
+    socket.receive(encodeMessage(MsgType.OnlineCount, { count: 7 }));
+    socket.receive(Uint8Array.of(0xff));
+    socket.receive(Uint8Array.of(0xff));
+    expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+    socket.receive(Uint8Array.of(0xff));
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    gameSocket.shutdown();
+  });
+
+  it('renegotiates and reuses the rotated credential after an unknown snapshot phase', async () => {
+    storeReconnect('player', 'token-1');
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      heartbeatIntervalMs: 60_000,
+      reconnectBaseDelayMs: 25,
+      reconnectJitterRatio: 0
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+
+    socket.receive(encodeMessage(MsgType.Reconnected, {
+      player_id: 'player',
+      player_name: '青竹',
+      room_code: '123456',
+      reconnect_token: 'token-2',
+      game_state: { phase: 'paused' }
+    }));
+    vi.runAllTicks();
+    vi.advanceTimersByTime(0);
+
+    expect(socket.closeCalls).toContainEqual({ code: 4003, reason: 'authoritative resync' });
+    expect(useAppStore.getState().error).toContain('paused');
+    expect(loadReconnect()).toEqual({ id: 'player', token: 'token-2' });
+    expect(vi.getTimerCount()).toBe(1);
+
+    gameSocket.shutdown();
+    expect(vi.getTimerCount()).toBe(0);
+
+    const retryGameSocket = new GameSocket('ws://example.test/ws', { heartbeatIntervalMs: 60_000 });
+    retryGameSocket.connect();
+    const retry = latestSocket();
+    openAndNegotiate(retry);
+    retry.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'temporary',
+      player_name: '临时玩家',
+      reconnect_token: 'temporary-token'
+    }));
+    expect(decodeMessage(retry.sent[0])).toMatchObject({
+      type: MsgType.Reconnect,
+      payload: { player_id: 'player', token: 'token-2' }
+    });
+    await Promise.resolve();
+    vi.runAllTicks();
+    expect(vi.getTimerCount()).toBe(1);
+    retryGameSocket.shutdown();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('uses capped exponential reconnect delays without creating duplicate sockets or timers', () => {

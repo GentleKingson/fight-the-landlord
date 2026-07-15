@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -68,6 +69,17 @@ type Server struct {
 	commandCache          *commandCache
 	readinessCheck        func(context.Context) error
 	shuttingDown          atomic.Bool
+	runtimeCtx            context.Context
+	runtimeCancel         context.CancelFunc
+	monitorOnce           sync.Once
+	monitorWG             sync.WaitGroup
+	shutdownOnce          sync.Once
+	httpServerMu          sync.Mutex
+	httpServer            *http.Server
+	httpServeWG           sync.WaitGroup
+	clientPumpsMu         sync.Mutex
+	clientPumpsClosed     bool
+	clientPumpsWG         sync.WaitGroup
 
 	// 维护模式
 	maintenanceMode bool
@@ -79,11 +91,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	if err := validateOriginPolicy(cfg.Server.Environment, cfg.Security.AllowedOrigins); err != nil {
-		return nil, err
-	}
-	if strings.EqualFold(strings.TrimSpace(cfg.Server.Environment), "production") && strings.TrimSpace(cfg.Redis.Password) == "" {
-		return nil, fmt.Errorf("production requires a non-empty Redis password")
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 	ipResolver, err := NewClientIPResolver(cfg.Security.TrustedProxyCIDRs)
 	if err != nil {
@@ -100,8 +109,10 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
+		_ = rdb.Close()
 		return nil, fmt.Errorf("redis 连接失败: %w", err)
 	}
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 
 	s := &Server{
 		config:         cfg,
@@ -109,9 +120,10 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		redisStore:     storage.NewRedisStore(rdb),
 		leaderboard:    storage.NewLeaderboardManager(rdb),
 		clients:        make(map[string]*Client),
-		sessionManager: session.NewSessionManager(),
+		sessionManager: session.NewSessionManagerWithContext(runtimeCtx),
 		// 初始化安全组件
-		rateLimiter: NewRateLimiter(
+		rateLimiter: NewRateLimiterWithContext(
+			runtimeCtx,
 			cfg.Security.RateLimit.MaxPerSecond,
 			cfg.Security.RateLimit.MaxPerMinute,
 			cfg.Security.RateLimit.BanDurationTime(),
@@ -129,11 +141,13 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		maxConnections:    cfg.Server.MaxConnections,
 		connectionLimiter: newConnectionLimiter(cfg.Server.MaxConnections),
 		commandCache:      newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL),
+		runtimeCtx:        runtimeCtx,
+		runtimeCancel:     runtimeCancel,
 	}
 	s.readinessCheck = func(ctx context.Context) error { return rdb.Ping(ctx).Err() }
 
 	// 初始化房间管理器
-	s.roomManager = room.NewRoomManager(s.redisStore, cfg.Game)
+	s.roomManager = room.NewRoomManagerWithContext(runtimeCtx, s.redisStore, cfg.Game)
 
 	// 初始化机器人 (未启用时为 nil）
 	var botEngine bot.DecisionEngine
@@ -149,6 +163,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 	// 初始化匹配器
 	s.matcher = match.NewMatcher(match.MatcherDeps{
+		Context:             runtimeCtx,
 		RoomManager:         s.roomManager,
 		RedisStore:          s.redisStore,
 		Leaderboard:         s.leaderboard,
@@ -216,11 +231,8 @@ func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
 	handler := s.httpHandler(loadWebAssets())
 
-	// 启动监控 goroutine
-	go s.monitorStats()
-
 	log.Printf("🚀 服务器启动在 ws://%s/ws (CPU核心数: %d)", addr, runtime.NumCPU())
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second, // 防止 Slowloris 攻击
@@ -228,5 +240,28 @@ func (s *Server) Start() error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	return server.ListenAndServe()
+
+	s.httpServerMu.Lock()
+	if s.shuttingDown.Load() {
+		s.httpServerMu.Unlock()
+		return nil
+	}
+	s.httpServer = httpServer
+	s.httpServeWG.Add(1)
+	s.startMonitorStats()
+	s.httpServerMu.Unlock()
+	defer func() {
+		s.httpServerMu.Lock()
+		if s.httpServer == httpServer {
+			s.httpServer = nil
+		}
+		s.httpServerMu.Unlock()
+		s.httpServeWG.Done()
+	}()
+
+	err := httpServer.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }

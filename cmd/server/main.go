@@ -20,6 +20,7 @@ var version = "dev"
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "配置文件路径")
+	devDefaults := flag.Bool("dev-defaults", false, "配置加载失败时使用开发默认值")
 	healthcheck := flag.Bool("healthcheck", false, "检查本地服务健康状态后退出")
 	healthcheckURL := flag.String("healthcheck-url", defaultHealthcheckURL(), "健康检查地址")
 	flag.Parse()
@@ -35,10 +36,9 @@ func main() {
 	server.Version = version
 
 	// 加载配置
-	cfg, err := config.Load(*configPath)
+	cfg, err := loadServerConfig(*configPath, *devDefaults)
 	if err != nil {
-		log.Printf("加载配置文件失败，使用默认配置: %v", err)
-		cfg = config.Default()
+		log.Fatalf("加载配置文件失败: %v", err)
 	}
 
 	// 创建服务器
@@ -63,6 +63,18 @@ func main() {
 	<-ctx.Done()
 	log.Println("📢 收到关闭信号，开始优雅关闭...")
 	srv.GracefulShutdown(cfg.Game.ShutdownTimeoutDuration())
+}
+
+func loadServerConfig(path string, devDefaults bool) (*config.Config, error) {
+	cfg, err := config.Load(path)
+	if err == nil {
+		return cfg, nil
+	}
+	if !devDefaults {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	log.Printf("配置加载失败，显式使用开发默认值: %v", err)
+	return config.Default(), nil
 }
 
 func defaultHealthcheckURL() string {

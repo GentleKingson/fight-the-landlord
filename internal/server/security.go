@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -22,6 +23,10 @@ type RateLimiter struct {
 	maxRequestsPerMinute int           // 每分钟最大请求数
 	banDuration          time.Duration // 封禁时长
 	cleanupInterval      time.Duration // 清理间隔
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	workers              sync.WaitGroup
+	closeOnce            sync.Once
 }
 
 // clientRate 客户端速率记录
@@ -35,18 +40,51 @@ type clientRate struct {
 
 // NewRateLimiter 创建速率限制器
 func NewRateLimiter(maxPerSecond, maxPerMinute int, banDuration time.Duration) *RateLimiter {
+	return NewRateLimiterWithContext(context.Background(), maxPerSecond, maxPerMinute, banDuration)
+}
+
+// NewRateLimiterWithContext creates a limiter whose cleanup worker is owned by
+// the supplied runtime context.
+func NewRateLimiterWithContext(ctx context.Context, maxPerSecond, maxPerMinute int, banDuration time.Duration) *RateLimiter {
+	return newRateLimiter(ctx, maxPerSecond, maxPerMinute, banDuration, 5*time.Minute)
+}
+
+func newRateLimiter(parent context.Context, maxPerSecond, maxPerMinute int, banDuration, cleanupInterval time.Duration) *RateLimiter {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
 	rl := &RateLimiter{
 		requests:             make(map[string]*clientRate),
 		maxRequestsPerSecond: maxPerSecond,
 		maxRequestsPerMinute: maxPerMinute,
 		banDuration:          banDuration,
-		cleanupInterval:      5 * time.Minute,
+		cleanupInterval:      cleanupInterval,
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
 
-	// 启动清理协程
-	go rl.cleanup()
+	rl.workers.Add(1)
+	go func() {
+		defer rl.workers.Done()
+		rl.cleanup()
+	}()
 
 	return rl
+}
+
+// Close stops the cleanup worker and waits for it to exit. It is idempotent.
+func (rl *RateLimiter) Close() error {
+	if rl == nil {
+		return nil
+	}
+	rl.closeOnce.Do(func() {
+		if rl.cancel != nil {
+			rl.cancel()
+		}
+		rl.workers.Wait()
+	})
+	return nil
 }
 
 // Allow 检查是否允许请求
@@ -115,16 +153,21 @@ func (rl *RateLimiter) cleanup() {
 	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for ip, rate := range rl.requests {
-			// 如果超过 10 分钟没有请求，删除记录
-			if now.Sub(rate.lastMinute) > 10*time.Minute && now.After(rate.bannedUntil) {
-				delete(rl.requests, ip)
+	for {
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, rate := range rl.requests {
+				// 如果超过 10 分钟没有请求，删除记录
+				if now.Sub(rate.lastMinute) > 10*time.Minute && now.After(rate.bannedUntil) {
+					delete(rl.requests, ip)
+				}
 			}
+			rl.mu.Unlock()
+		case <-rl.ctx.Done():
+			return
 		}
-		rl.mu.Unlock()
 	}
 }
 

@@ -3,9 +3,12 @@ package room
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 )
+
+const shutdownDeleteTimeout = 5 * time.Second
 
 type roomPersistenceQueue struct {
 	pendingSave        func()
@@ -14,7 +17,20 @@ type roomPersistenceQueue struct {
 }
 
 func (rm *RoomManager) persistenceReady() bool {
+	rm.persistenceMu.Lock()
+	closed := rm.persistenceClosed
+	rm.persistenceMu.Unlock()
+	if closed {
+		return false
+	}
 	return rm.saveRoomFunc != nil || rm.deleteRoomFunc != nil || (rm.redisStore != nil && rm.redisStore.IsReady())
+}
+
+func (rm *RoomManager) persistenceContext() context.Context {
+	if rm.ctx != nil {
+		return rm.ctx
+	}
+	return context.Background()
 }
 
 func (rm *RoomManager) saveOperation() func(context.Context, string, *storage.RoomData) error {
@@ -54,7 +70,7 @@ func (rm *RoomManager) PersistRoom(gameRoom *Room) {
 	operation := rm.saveOperation()
 	if operation != nil {
 		rm.enqueuePersistenceSave(gameRoom.Code, func() {
-			if err := operation(context.Background(), gameRoom.Code, data); err != nil {
+			if err := operation(rm.persistenceContext(), gameRoom.Code, data); err != nil {
 				log.Printf("保存房间 %s 到 Redis 失败: %v", gameRoom.Code, err)
 			}
 		})
@@ -72,12 +88,22 @@ func (rm *RoomManager) enqueueRoomDelete(code string, identity *Room) {
 	operation := rm.deleteOperation()
 	rm.enqueuePersistenceDelete(code, func() {
 		if operation != nil {
-			if err := operation(context.Background(), code); err != nil {
+			ctx, cancel := rm.deletionContext()
+			defer cancel()
+			if err := operation(ctx, code); err != nil {
 				log.Printf("从 Redis 删除房间 %s 失败: %v", code, err)
 			}
 		}
 		rm.finishRoomRetirement(code, identity)
 	})
+}
+
+func (rm *RoomManager) deletionContext() (context.Context, context.CancelFunc) {
+	// Saves obey lifecycle cancellation immediately. Deletes are different: a
+	// room has already been unpublished, so it gets one bounded cleanup attempt
+	// even when shutdown races with Redis I/O. WithoutCancel retains context
+	// values while the timeout still guarantees that Close can finish.
+	return context.WithTimeout(context.WithoutCancel(rm.persistenceContext()), shutdownDeleteTimeout)
 }
 
 func (rm *RoomManager) finishRoomRetirement(code string, identity *Room) {
@@ -90,29 +116,49 @@ func (rm *RoomManager) finishRoomRetirement(code string, identity *Room) {
 
 func (rm *RoomManager) enqueuePersistenceSave(code string, operation func()) {
 	rm.persistenceMu.Lock()
+	if rm.persistenceClosed {
+		rm.persistenceMu.Unlock()
+		return
+	}
 	queue, exists := rm.persistenceQueueLocked(code)
 	if queue.pendingDelete != nil {
 		queue.pendingAfterDelete = operation
 	} else {
 		queue.pendingSave = operation
 	}
+	if !exists {
+		rm.persistenceWG.Add(1)
+	}
 	rm.persistenceMu.Unlock()
 	if !exists {
-		go rm.runPersistenceQueue(code, queue)
+		go func() {
+			defer rm.persistenceWG.Done()
+			rm.runPersistenceQueue(code, queue)
+		}()
 	}
 }
 
 func (rm *RoomManager) enqueuePersistenceDelete(code string, operation func()) {
 	rm.persistenceMu.Lock()
+	if rm.persistenceClosed {
+		rm.persistenceMu.Unlock()
+		return
+	}
 	queue, exists := rm.persistenceQueueLocked(code)
 	// A Delete makes all queued pre-delete snapshots obsolete. A Save that is
 	// already performing I/O is allowed to finish; the single worker executes
 	// this Delete immediately afterward.
 	queue.pendingSave = nil
 	queue.pendingDelete = operation
+	if !exists {
+		rm.persistenceWG.Add(1)
+	}
 	rm.persistenceMu.Unlock()
 	if !exists {
-		go rm.runPersistenceQueue(code, queue)
+		go func() {
+			defer rm.persistenceWG.Done()
+			rm.runPersistenceQueue(code, queue)
+		}()
 	}
 }
 

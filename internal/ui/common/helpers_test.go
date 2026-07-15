@@ -33,3 +33,14 @@ func TestTruncateName(t *testing.T) {
 		})
 	}
 }
+
+func TestEscapeTerminalText(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(
+		t,
+		`safe\u{1B}[2J\u{A}\u{202E}text\u{9B}tail`,
+		EscapeTerminalText("safe\x1b[2J\n\u202Etext\u009Btail"),
+	)
+	assert.Equal(t, "你好 👋", EscapeTerminalText("你好 👋"))
+}

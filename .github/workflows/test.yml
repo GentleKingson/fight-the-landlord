@@ -121,6 +121,9 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      - name: Benchmark full-hand rule response enumeration
+        run: npm run bench:rules
+
       - name: Build production client
         env:
           VITE_APP_VERSION: ci

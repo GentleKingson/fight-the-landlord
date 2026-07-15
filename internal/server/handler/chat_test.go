@@ -45,7 +45,7 @@ func TestHandler_HandleChat_LegacyJSONFixture(t *testing.T) {
 	require.NotNil(t, broadcast)
 	payload := requireChatPayload(t, broadcast)
 	assert.Equal(t, "legacy hello", payload.Content)
-	assert.Equal(t, "legacy-fixture-1", payload.MessageID)
+	requireServerChatID(t, payload.MessageID)
 	assert.Equal(t, int64(1), h.LegacyChatMessages())
 }
 
@@ -85,6 +85,7 @@ func TestHandler_HandleChat_RejectsInvalidFields(t *testing.T) {
 		{name: "unknown scope", mutate: func(p *protocol.ChatPayload) { p.Scope = "global" }},
 		{name: "empty content", mutate: func(p *protocol.ChatPayload) { p.Content = "" }},
 		{name: "whitespace content", mutate: func(p *protocol.ChatPayload) { p.Content = " \t\n　" }},
+		{name: "control-only content", mutate: func(p *protocol.ChatPayload) { p.Content = "\x00\x1b\u202E" }},
 		{name: "content over Unicode limit", mutate: func(p *protocol.ChatPayload) { p.Content = strings.Repeat("界", 241) }},
 		{name: "missing message id", mutate: func(p *protocol.ChatPayload) { p.MessageID = "" }},
 		{name: "message id too long", mutate: func(p *protocol.ChatPayload) { p.MessageID = strings.Repeat("a", 129) }},
@@ -138,7 +139,7 @@ func TestHandler_HandleChat_LobbyCanonicalizesAuthoritativeFields(t *testing.T) 
 	assert.Equal(t, "你好", got.Content)
 	assert.Equal(t, "lobby", got.Scope)
 	assert.False(t, got.IsSystem)
-	assert.Equal(t, "3fcbf9f4-6e5b-4af3-866d-93fe49782afd", got.MessageID)
+	requireServerChatID(t, got.MessageID)
 	assert.Empty(t, got.RoomCode)
 	assert.Empty(t, got.GameID)
 	assert.GreaterOrEqual(t, got.Time, before.Unix())
@@ -165,7 +166,39 @@ func TestHandler_HandleChat_AcceptsUnicodeAndIDBoundaries(t *testing.T) {
 	server.AssertExpectations(t)
 	got := requireChatPayload(t, broadcast)
 	assert.Equal(t, 240, len([]rune(got.Content)))
-	assert.Len(t, got.MessageID, 128)
+	requireServerChatID(t, got.MessageID)
+}
+
+func TestHandler_HandleChat_SanitizesDangerousControlsAndGeneratesUniqueServerIDs(t *testing.T) {
+	server := new(testutil.MockServer)
+	client := testutil.NewSimpleClient("p1", "Player1")
+	broadcasts := make([]*protocol.Message, 0, 2)
+	server.On("BroadcastToLobby", mock.Anything).Run(func(args mock.Arguments) {
+		broadcasts = append(broadcasts, args.Get(0).(*protocol.Message))
+	}).Twice()
+	h := NewHandler(HandlerDeps{Server: server})
+
+	for _, content := range []string{
+		"hello\x00\x1b[2J\u202Eworld\u2066",
+		"second\u200Fmessage",
+	} {
+		h.handleChat(client, chatMessage(protocol.ChatPayload{
+			Content: content, Scope: "lobby", MessageID: "reused-client-id",
+		}))
+	}
+
+	server.AssertExpectations(t)
+	require.Len(t, broadcasts, 2)
+	first := requireChatPayload(t, broadcasts[0])
+	second := requireChatPayload(t, broadcasts[1])
+	assert.NotContains(t, first.Content, "\x00")
+	assert.NotContains(t, first.Content, "\x1b")
+	assert.NotContains(t, first.Content, "\u202E")
+	assert.NotContains(t, first.Content, "\u2066")
+	assert.NotContains(t, second.Content, "\u200F")
+	requireServerChatID(t, first.MessageID)
+	requireServerChatID(t, second.MessageID)
+	assert.NotEqual(t, first.MessageID, second.MessageID)
 }
 
 func TestHandler_HandleChat_LobbyRequiresLobbyMembership(t *testing.T) {
@@ -221,7 +254,7 @@ func TestHandler_HandleChat_RoomIsIsolatedAndMetadataIsAuthoritative(t *testing.
 	got := requireChatPayload(t, sender.Messages[0])
 	assert.Equal(t, "p1", got.SenderID)
 	assert.Equal(t, "room hello", got.Content)
-	assert.Equal(t, "room-msg-1", got.MessageID)
+	requireServerChatID(t, got.MessageID)
 	assert.Equal(t, "ROOM-A", got.RoomCode)
 	assert.Empty(t, got.GameID)
 	assert.False(t, got.IsSystem)
@@ -305,7 +338,7 @@ func TestHandler_HandleChat_GameIsIsolatedAndUsesCurrentGameID(t *testing.T) {
 		got := requireChatPayload(t, client.Messages[0])
 		assert.Equal(t, room.Code, got.RoomCode)
 		assert.Equal(t, gameID, got.GameID)
-		assert.Equal(t, "game-msg-1", got.MessageID)
+		requireServerChatID(t, got.MessageID)
 		assert.False(t, got.IsSystem)
 	}
 	assert.Empty(t, outsider.Messages)
@@ -367,6 +400,12 @@ func requireChatPayload(t *testing.T, msg *protocol.Message) *protocol.ChatPaylo
 	payload, err := codec.ParsePayload[protocol.ChatPayload](msg)
 	require.NoError(t, err)
 	return payload
+}
+
+func requireServerChatID(t *testing.T, messageID string) {
+	t.Helper()
+	assert.Regexp(t, `^srv:[0-9]+:[0-9]+$`, messageID)
+	assert.LessOrEqual(t, len(messageID), maxChatMessageIDLen)
 }
 
 func roomWithClients(code string, clients ...*testutil.SimpleClient) *gameroom.Room {

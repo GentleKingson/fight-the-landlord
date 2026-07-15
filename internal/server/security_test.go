@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRateLimiter_Allow(t *testing.T) {
@@ -400,5 +402,42 @@ func TestOriginChecker_SpecificOrigins(t *testing.T) {
 			req.Header.Set("Origin", tt.origin)
 		}
 		assert.Equal(t, tt.allowed, oc.Check(req), "Origin: %s", tt.origin)
+	}
+}
+
+func TestRateLimiterCloseStopsCleanupWorker(t *testing.T) {
+	t.Parallel()
+
+	rl := newRateLimiter(context.Background(), 10, 100, time.Second, 5*time.Millisecond)
+	rl.mu.Lock()
+	rl.requests["stale"] = &clientRate{
+		lastMinute: time.Now().Add(-11 * time.Minute),
+	}
+	rl.mu.Unlock()
+
+	require.Eventually(t, func() bool {
+		rl.mu.RLock()
+		_, exists := rl.requests["stale"]
+		rl.mu.RUnlock()
+		return !exists
+	}, time.Second, time.Millisecond)
+	require.NoError(t, rl.Close())
+	require.NoError(t, rl.Close(), "Close must be idempotent")
+}
+
+func TestRateLimiterCloseWaitsAfterParentCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rl := NewRateLimiterWithContext(ctx, 10, 100, time.Second)
+	cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- rl.Close() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("RateLimiter.Close did not wait for a cancelled worker")
 	}
 }

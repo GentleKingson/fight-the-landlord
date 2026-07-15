@@ -22,6 +22,7 @@ export interface GameSocketOptions {
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
   reconnectJitterRatio?: number;
+  malformedFrameThreshold?: number;
   random?: () => number;
 }
 
@@ -31,6 +32,7 @@ interface ResolvedGameSocketOptions {
   reconnectBaseDelayMs: number;
   reconnectMaxDelayMs: number;
   reconnectJitterRatio: number;
+  malformedFrameThreshold: number;
   random: () => number;
 }
 
@@ -40,6 +42,7 @@ const DEFAULT_OPTIONS: ResolvedGameSocketOptions = {
   reconnectBaseDelayMs: 1000,
   reconnectMaxDelayMs: 30_000,
   reconnectJitterRatio: 0.2,
+  malformedFrameThreshold: 3,
   random: Math.random
 };
 
@@ -66,6 +69,7 @@ export class GameSocket {
   private browserListenersInstalled = false;
   private negotiated = false;
   private helloRequestId: string | null = null;
+  private consecutiveMalformedFrames = 0;
   private readonly listeners = new Set<Listener>();
   private readonly options: ResolvedGameSocketOptions;
 
@@ -106,6 +110,7 @@ export class GameSocket {
     this.negotiated = false;
     this.helloRequestId = null;
     this.closeError = null;
+    this.consecutiveMalformedFrames = 0;
     socket.binaryType = 'arraybuffer';
 
     socket.onopen = () => {
@@ -131,13 +136,28 @@ export class GameSocket {
         message = decodeMessage(event.data as ArrayBuffer);
       } catch (error) {
         const detail = error instanceof ProtocolDecodeError ? error.message : errorMessage(error);
-        useAppStore.getState().setError(`收到无效的服务器消息：${detail}`);
+        this.consecutiveMalformedFrames += 1;
+        const malformedMessage = `收到无效的服务器消息：${detail}`;
+        useAppStore.getState().setError(malformedMessage);
+        if (this.consecutiveMalformedFrames >= this.options.malformedFrameThreshold) {
+          this.closeRecoverableSocket(
+            socket,
+            `连续收到 ${this.consecutiveMalformedFrames} 条无效的服务器消息，正在重新协商`,
+            4003,
+            'malformed server frames'
+          );
+        }
         return;
       }
 
+      this.consecutiveMalformedFrames = 0;
       if (message.type === MsgType.Pong) this.clearPongWatchdog();
       if (!this.advanceNegotiationState(message, socket)) return;
-      useAppStore.getState().handleMessage(message);
+      const handlingResult = useAppStore.getState().handleMessage(message);
+      if (handlingResult?.authoritativeResyncRequired) {
+        this.closeRecoverableSocket(socket, handlingResult.reason, 4003, 'authoritative resync');
+        return;
+      }
       this.advanceIdentityState(message, socket);
       for (const listener of this.listeners) listener(message);
     };
@@ -182,6 +202,7 @@ export class GameSocket {
     this.reconnectIdentity = null;
     this.negotiated = false;
     this.helloRequestId = null;
+    this.consecutiveMalformedFrames = 0;
     this.reconnectWhenClosed = false;
     this.closeError = null;
     this.removeBrowserListeners();
@@ -376,10 +397,17 @@ export class GameSocket {
   }
 
   private closeUnhealthySocket(socket: WebSocket, message: string): void {
+    this.closeRecoverableSocket(socket, message, 4000, 'heartbeat timeout');
+  }
+
+  private closeRecoverableSocket(socket: WebSocket, message: string, code: number, reason: string): void {
     if (this.socket !== socket) return;
+    if (socket.readyState === WebSocket.CLOSING || socket.readyState === WebSocket.CLOSED) return;
+    this.stopHeartbeat();
+    this.negotiated = false;
     this.closeError = message;
     useAppStore.getState().setError(message);
-    socket.close(4000, 'heartbeat timeout');
+    socket.close(code, reason);
   }
 
   private stopHeartbeat(): void {
@@ -485,12 +513,17 @@ function resolveOptions(options: GameSocketOptions): ResolvedGameSocketOptions {
   const reconnectBaseDelayMs = positiveDuration(options.reconnectBaseDelayMs, DEFAULT_OPTIONS.reconnectBaseDelayMs);
   const reconnectMaxDelayMs = positiveDuration(options.reconnectMaxDelayMs, DEFAULT_OPTIONS.reconnectMaxDelayMs);
   const reconnectJitterRatio = Math.min(1, Math.max(0, options.reconnectJitterRatio ?? DEFAULT_OPTIONS.reconnectJitterRatio));
+  const malformedFrameThreshold = positiveInteger(
+    options.malformedFrameThreshold,
+    DEFAULT_OPTIONS.malformedFrameThreshold
+  );
   return {
     heartbeatIntervalMs,
     pongTimeoutMs,
     reconnectBaseDelayMs,
     reconnectMaxDelayMs,
     reconnectJitterRatio,
+    malformedFrameThreshold,
     random: options.random ?? DEFAULT_OPTIONS.random
   };
 }
@@ -503,6 +536,10 @@ function unitRandom(random: () => number): number {
 
 function positiveDuration(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function positiveInteger(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
 function errorMessage(error: unknown): string {

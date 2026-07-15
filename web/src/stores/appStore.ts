@@ -3,7 +3,7 @@ import { MsgType, WireMessageType, type ChatPayload, type GameStateDTO, type Inc
 import { initialConnectionSlice, type ConnectionSlice, type ConnectionStatus, type StoredIdentity } from './slices/connectionSlice';
 import { initialLobbySlice, type LobbySlice } from './slices/lobbySlice';
 import { initialRoomSlice, mergePlayer, normalizeRoomPlayer, normalizeRoomPlayers, type RoomSlice } from './slices/roomSlice';
-import { initialGameSlice, isGameMessage, reduceGameMessage, restoreGameSnapshot, shouldRestoreSnapshot, type GameSlice } from './slices/gameSlice';
+import { GameSnapshotSyncError, initialGameSlice, isGameMessage, mapSnapshotPhase, reduceGameMessage, restoreGameSnapshot, shouldRestoreSnapshot, type GameSlice } from './slices/gameSlice';
 import { initialUiSlice, type BusinessError, type BusinessErrorCategory, type CommandKind, type CommandRequest, type PendingCommand, type UiSlice } from './slices/uiSlice';
 import { observePong, observeServerTimestamp } from './slices/clock';
 import { useChatStore } from './slices/chatSlice';
@@ -32,7 +32,12 @@ interface AppActions {
   setSelection: (keys: string[]) => void;
   clearSelection: () => void;
   leaveLocalRoom: () => void;
-  handleMessage: (message: IncomingMessage) => void;
+  handleMessage: (message: IncomingMessage) => MessageHandlingResult | undefined;
+}
+
+export interface MessageHandlingResult {
+  authoritativeResyncRequired: true;
+  reason: string;
 }
 
 export type AppState = ConnectionSlice & LobbySlice & RoomSlice & GameSlice & UiSlice & AppActions;
@@ -222,6 +227,26 @@ export const useAppStore = create<AppState>((set, get) => ({
           reconnectCandidate: null,
           provisionalIdentity: null
         };
+        if (payload.game_state) {
+          try {
+            mapSnapshotPhase(payload.game_state.phase);
+          } catch (error) {
+            if (!(error instanceof GameSnapshotSyncError)) throw error;
+            const reason = `${error.message}，正在重新获取权威快照`;
+            set({
+              connected: false,
+              connectionStatus: 'reconnecting',
+              playerId: payload.player_id,
+              playerName: payload.player_name,
+              reconnectToken: payload.reconnect_token,
+              reconnectCandidate: null,
+              provisionalIdentity: null,
+              error: reason,
+              businessError: createBusinessError('network', reason)
+            });
+            return { authoritativeResyncRequired: true, reason };
+          }
+        }
         if (payload.game_state && shouldRestoreSnapshot(state, payload.game_state, message.event)) {
           const receivedAt = Date.now();
           const snapshot = restoreGameSnapshot(payload.game_state, {

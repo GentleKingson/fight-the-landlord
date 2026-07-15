@@ -212,12 +212,85 @@ func (rm *RoomManager) generateRoomCode() string {
 
 // cleanupLoop 定期清理超时房间
 func (rm *RoomManager) cleanupLoop() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(rm.cleanupPeriod)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		rm.cleanup()
+	for {
+		select {
+		case <-ticker.C:
+			rm.cleanup()
+		case <-rm.ctx.Done():
+			return
+		}
 	}
+}
+
+// Close stops background work, retires every published room, and waits for
+// cleanup and persistence workers to exit. It is safe to call repeatedly.
+func (rm *RoomManager) Close() error {
+	if rm == nil {
+		return nil
+	}
+	rm.closeOnce.Do(func() {
+		rm.mu.Lock()
+		rm.closed = true
+		rm.mu.Unlock()
+		if rm.cancel != nil {
+			rm.cancel()
+		}
+		rm.cleanupWG.Wait()
+
+		dispatches, pendingPlayers := rm.removeAllForShutdown()
+		for _, dispatch := range dispatches {
+			rm.dispatchRoomRemoval(dispatch)
+		}
+		for _, player := range pendingPlayers {
+			closeRemovedBot(player.Client)
+		}
+
+		rm.persistenceMu.Lock()
+		rm.persistenceClosed = true
+		// Saves no longer describe a published room. Preserve deletes so current
+		// workers can finish retirement bookkeeping before they exit.
+		for _, queue := range rm.persistenceQueues {
+			queue.pendingSave = nil
+			queue.pendingAfterDelete = nil
+		}
+		rm.persistenceMu.Unlock()
+		rm.persistenceWG.Wait()
+	})
+	return nil
+}
+
+func (rm *RoomManager) removeAllForShutdown() ([]roomRemovalDispatch, []PlayerSnapshot) {
+	rm.mu.Lock()
+	dispatches := make([]roomRemovalDispatch, 0, len(rm.rooms))
+	for _, gameRoom := range rm.rooms {
+		gameRoom.publishMu.Lock()
+		gameRoom.mu.Lock()
+		dispatch, removed := rm.removePublishedRoomLocked(gameRoom, RoomRemovalShutdown)
+		gameRoom.mu.Unlock()
+		gameRoom.publishMu.Unlock()
+		if removed {
+			dispatches = append(dispatches, dispatch)
+		}
+	}
+
+	pendingPlayers := make([]PlayerSnapshot, 0)
+	for code, transaction := range rm.pendingRooms {
+		if transaction == nil || transaction.room == nil {
+			delete(rm.pendingRooms, code)
+			continue
+		}
+		transaction.room.mu.Lock()
+		pendingPlayers = append(pendingPlayers, transaction.room.snapshotPlayersLocked()...)
+		transaction.room.state = RoomStateEnded
+		transaction.state = matchRoomEnded
+		transaction.room.mu.Unlock()
+		delete(rm.pendingRooms, code)
+	}
+	rm.mu.Unlock()
+	return dispatches, pendingPlayers
 }
 
 // cleanup 清理超时房间

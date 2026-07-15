@@ -8,6 +8,7 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	payloadconv "github.com/palemoky/fight-the-landlord/internal/protocol/convert/payload"
+	"github.com/palemoky/fight-the-landlord/internal/ui/common"
 	"github.com/palemoky/fight-the-landlord/internal/ui/model"
 )
 
@@ -17,16 +18,7 @@ func handleMsgChat(m model.Model, msg *protocol.Message) tea.Cmd {
 		return nil
 	}
 
-	sender := payload.SenderName
-	if sender == "" {
-		sender = "未知"
-	}
-
-	timeStr := time.Unix(payload.Time, 0).Format("15:04")
-	chatLine := fmt.Sprintf("[%s] %s: %s", timeStr, sender, payload.Content)
-	if payload.IsSystem {
-		chatLine = fmt.Sprintf("[%s] 系统: %s", timeStr, payload.Content)
-	}
+	chatLine := formatChatLine(payload)
 
 	// Route message to appropriate chat based on scope
 	switch payload.Scope {
@@ -44,6 +36,22 @@ func handleMsgChat(m model.Model, msg *protocol.Message) tea.Cmd {
 	}
 
 	return nil
+}
+
+func formatChatLine(payload protocol.ChatPayload) string {
+	sender := common.EscapeTerminalText(payload.SenderName)
+	if sender == "" {
+		sender = "未知"
+	}
+	content := common.EscapeTerminalText(payload.Content)
+
+	timeStr := time.Unix(payload.Time, 0).Format("15:04")
+	chatLine := fmt.Sprintf("[%s] %s: %s", timeStr, sender, content)
+	if payload.IsSystem {
+		return fmt.Sprintf("[%s] 系统: %s", timeStr, content)
+	}
+
+	return chatLine
 }
 
 // setMaintenanceNotification 设置维护模式通知

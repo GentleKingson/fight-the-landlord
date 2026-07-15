@@ -1,6 +1,8 @@
 package room
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -305,4 +307,121 @@ func TestSetAllPlayersReady(t *testing.T) {
 		assert.True(t, p.Ready)
 	}
 	room.mu.RUnlock()
+}
+
+func TestRoomManagerCloseStopsCleanupAndRemovesPublishedRooms(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rm := newRoomManager(ctx, nil, config.GameConfig{RoomTimeout: 10}, 5*time.Millisecond)
+	client := testutil.NewSimpleClient("shutdown-player", "Shutdown Player")
+	gameRoom, err := rm.CreateRoom(client)
+	require.NoError(t, err)
+	removals := make(chan RoomRemoval, 1)
+	rm.SetOnRoomRemoved(func(removal RoomRemoval) { removals <- removal })
+	cancel()
+
+	require.NoError(t, rm.Close())
+	require.NoError(t, rm.Close(), "Close must be idempotent")
+	require.Nil(t, rm.GetRoom(gameRoom.Code))
+	require.Empty(t, client.GetRoom())
+	_, err = rm.CreateRoom(testutil.NewSimpleClient("late-player", "Late Player"))
+	require.ErrorIs(t, err, ErrRoomManagerClosed)
+	select {
+	case removal := <-removals:
+		require.Same(t, gameRoom, removal.Room)
+		require.Equal(t, RoomRemovalShutdown, removal.Reason)
+	case <-time.After(time.Second):
+		t.Fatal("RoomManager.Close did not dispatch room removal")
+	}
+}
+
+func TestRoomManagerCloseCancelsAndWaitsForPersistenceWorker(t *testing.T) {
+	t.Parallel()
+
+	rm := NewRoomManagerWithContext(context.Background(), nil, config.GameConfig{RoomTimeout: 10})
+	saveStarted := make(chan struct{})
+	saveExited := make(chan struct{})
+	var once sync.Once
+	rm.saveRoomFunc = func(ctx context.Context, _ string, _ *storage.RoomData) error {
+		once.Do(func() { close(saveStarted) })
+		<-ctx.Done()
+		close(saveExited)
+		return ctx.Err()
+	}
+	client := testutil.NewSimpleClient("persist-player", "Persist Player")
+	_, err := rm.CreateRoom(client)
+	require.NoError(t, err)
+
+	select {
+	case <-saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("persistence worker did not start")
+	}
+	done := make(chan error, 1)
+	go func() { done <- rm.Close() }()
+	select {
+	case <-saveExited:
+	case <-time.After(time.Second):
+		t.Fatal("RoomManager.Close did not cancel persistence")
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("RoomManager.Close did not wait for persistence")
+	}
+}
+
+func TestRoomManagerCloseUsesLiveContextForShutdownDelete(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rm := NewRoomManagerWithContext(ctx, nil, config.GameConfig{RoomTimeout: 10})
+	deleteContextErrors := make(chan error, 1)
+	rm.deleteRoomFunc = func(deleteCtx context.Context, _ string) error {
+		deleteContextErrors <- deleteCtx.Err()
+		return deleteCtx.Err()
+	}
+	client := testutil.NewSimpleClient("delete-player", "Delete Player")
+	_, err := rm.CreateRoom(client)
+	require.NoError(t, err)
+	cancel()
+
+	require.NoError(t, rm.Close())
+	select {
+	case err := <-deleteContextErrors:
+		require.NoError(t, err, "shutdown deletion must not inherit the cancelled worker context")
+	case <-time.After(time.Second):
+		t.Fatal("RoomManager.Close did not execute the shutdown delete")
+	}
+}
+
+func TestRoomDeleteContextIsDetachedFromManagerCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rm := NewRoomManagerWithContext(ctx, nil, config.GameConfig{RoomTimeout: 10})
+	deleteStarted := make(chan context.Context, 1)
+	releaseDelete := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseDelete) }) }
+	rm.deleteRoomFunc = func(deleteCtx context.Context, _ string) error {
+		deleteStarted <- deleteCtx
+		<-releaseDelete
+		return deleteCtx.Err()
+	}
+	t.Cleanup(func() {
+		release()
+		require.NoError(t, rm.Close())
+	})
+	client := testutil.NewSimpleClient("delete-race-player", "Delete Race Player")
+	_, err := rm.CreateRoom(client)
+	require.NoError(t, err)
+	require.True(t, rm.LeaveRoom(client))
+
+	deleteCtx := <-deleteStarted
+	cancel()
+	require.NoError(t, deleteCtx.Err(), "an in-flight bounded delete must survive manager cancellation")
+	release()
 }

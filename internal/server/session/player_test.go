@@ -1,11 +1,13 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type failingTokenReader struct{}
@@ -444,4 +446,38 @@ func TestSessionManager_DeleteSession_NonExistent(t *testing.T) {
 	sm := NewSessionManager()
 	// Should not panic
 	sm.DeleteSession("non-existent")
+}
+
+func TestSessionManagerCloseStopsCleanupWorker(t *testing.T) {
+	t.Parallel()
+
+	sm := newSessionManager(context.Background(), 5*time.Millisecond)
+	playerSession := sm.MustCreateSession("expired", "Expired Player")
+	sm.SetOffline(playerSession.PlayerID)
+	playerSession.mu.Lock()
+	playerSession.DisconnectedAt = time.Now().Add(-sessionExpireTime - time.Minute)
+	playerSession.mu.Unlock()
+
+	require.Eventually(t, func() bool {
+		return sm.GetSession(playerSession.PlayerID) == nil
+	}, time.Second, time.Millisecond)
+	require.NoError(t, sm.Close())
+	require.NoError(t, sm.Close(), "Close must be idempotent")
+}
+
+func TestSessionManagerCloseWaitsAfterParentCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sm := NewSessionManagerWithContext(ctx)
+	cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- sm.Close() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("SessionManager.Close did not wait for a cancelled worker")
+	}
 }

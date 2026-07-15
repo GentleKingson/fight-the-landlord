@@ -14,6 +14,7 @@ require (
 	github.com/minio/selfupdate v0.6.0
 	github.com/redis/go-redis/v9 v9.20.0
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/mod v0.38.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )

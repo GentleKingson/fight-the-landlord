@@ -12,6 +12,7 @@
     "proto:check": "node scripts/generate-protocol.mjs --check",
     "preview": "vite preview",
     "test": "vitest run",
+    "bench:rules": "vitest bench --run tests/rules.bench.ts",
     "test:e2e": "playwright test",
     "test:e2e:real": "playwright test --config playwright.real.config.ts"
   },

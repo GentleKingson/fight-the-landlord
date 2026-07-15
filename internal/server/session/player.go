@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -61,21 +62,61 @@ type SessionManager struct {
 	tokenReader io.Reader
 	now         func() time.Time
 	mu          sync.RWMutex
+
+	ctx             context.Context
+	cancel          context.CancelFunc
+	cleanupInterval time.Duration
+	workers         sync.WaitGroup
+	closeOnce       sync.Once
 }
 
 // NewSessionManager 创建会话管理器
 func NewSessionManager() *SessionManager {
+	return NewSessionManagerWithContext(context.Background())
+}
+
+// NewSessionManagerWithContext creates a manager whose cleanup worker stops
+// when either the parent context is cancelled or Close is called.
+func NewSessionManagerWithContext(ctx context.Context) *SessionManager {
+	return newSessionManager(ctx, time.Minute)
+}
+
+func newSessionManager(parent context.Context, cleanupInterval time.Duration) *SessionManager {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
 	sm := &SessionManager{
-		sessions:    make(map[string]*PlayerSession),
-		tokens:      make(map[string]string),
-		tokenReader: rand.Reader,
-		now:         time.Now,
+		sessions:        make(map[string]*PlayerSession),
+		tokens:          make(map[string]string),
+		tokenReader:     rand.Reader,
+		now:             time.Now,
+		ctx:             ctx,
+		cancel:          cancel,
+		cleanupInterval: cleanupInterval,
 	}
 
-	// 启动会话清理协程
-	go sm.cleanupLoop()
+	sm.workers.Add(1)
+	go func() {
+		defer sm.workers.Done()
+		sm.cleanupLoop()
+	}()
 
 	return sm
+}
+
+// Close stops the cleanup worker and waits for it to exit. It is idempotent.
+func (sm *SessionManager) Close() error {
+	if sm == nil {
+		return nil
+	}
+	sm.closeOnce.Do(func() {
+		if sm.cancel != nil {
+			sm.cancel()
+		}
+		sm.workers.Wait()
+	})
+	return nil
 }
 
 // CreateSession 创建新会话
@@ -375,11 +416,16 @@ func (sm *SessionManager) IsOnline(playerID string) bool {
 
 // cleanupLoop 定期清理过期会话
 func (sm *SessionManager) cleanupLoop() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(sm.cleanupInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		sm.cleanup()
+	for {
+		select {
+		case <-ticker.C:
+			sm.cleanup()
+		case <-sm.ctx.Done():
+			return
+		}
 	}
 }
 

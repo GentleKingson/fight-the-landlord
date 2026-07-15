@@ -69,6 +69,13 @@ export function encodeMessage<Name extends MessageName>(
     if (command && (typeof command.request_id !== 'string' || command.request_id.trim() === '')) {
       throw new ProtocolEncodeError(`${type} command metadata requires request_id`, type);
     }
+    if (command) {
+      assertSafeInt64Fields('protocol.CommandMeta', command, {
+        operation: 'encode',
+        messageType: type,
+        path: 'command'
+      });
+    }
     const envelope = { type: numericType, payload: payloadBytes, ...(command ? { command } : {}) };
     const envelopeError = Envelope.verify(envelope);
     if (envelopeError) throw new Error(envelopeError);
@@ -116,7 +123,11 @@ function decodeCommand(value: unknown, messageType: MessageName): CommandMeta | 
     throw new ProtocolDecodeError('Invalid command metadata', MESSAGE_TYPE_BY_NAME[messageType]);
   }
 
-  assertSafeInt64Fields('protocol.CommandMeta', value, messageType, 'command');
+  assertSafeInt64Fields('protocol.CommandMeta', value, {
+    operation: 'decode',
+    messageType,
+    path: 'command'
+  });
   const validationError = staticMessageCodec('protocol.CommandMeta').verify(value);
   if (validationError) {
     throw new ProtocolDecodeError(
@@ -140,7 +151,11 @@ function decodeEvent(value: unknown, messageType: MessageName): EventMeta | unde
     throw new ProtocolDecodeError('Invalid event metadata', MESSAGE_TYPE_BY_NAME[messageType]);
   }
 
-  assertSafeInt64Fields('protocol.EventMeta', value, messageType, 'event');
+  assertSafeInt64Fields('protocol.EventMeta', value, {
+    operation: 'decode',
+    messageType,
+    path: 'event'
+  });
   const validationError = staticMessageCodec('protocol.EventMeta').verify(value);
   if (validationError) {
     throw new ProtocolDecodeError(
@@ -164,7 +179,7 @@ function encodePayload<Name extends MessageName>(type: Name, payload?: Encodable
   assertRequiredFields(type, payload, 'encode');
 
   const PayloadType = staticMessageCodec(payloadTypeName);
-  assertSafeInt64Fields(payloadTypeName, payload, type);
+  assertSafeInt64Fields(payloadTypeName, payload, { operation: 'encode', messageType: type });
   const validationError = PayloadType.verify(payload);
   if (validationError) throw new ProtocolEncodeError(`Invalid ${type} payload: ${validationError}`, type);
   return PayloadType.encode(payload).finish();
@@ -178,7 +193,7 @@ function decodePayload(type: MessageName, bytes: Uint8Array): PayloadByName[Mess
   }
   const PayloadType = staticMessageCodec(payloadTypeName);
   const decoded = PayloadType.decode(bytes);
-  assertSafeInt64Fields(payloadTypeName, decoded, type);
+  assertSafeInt64Fields(payloadTypeName, decoded, { operation: 'decode', messageType: type });
   const validationError = PayloadType.verify(decoded);
   if (validationError) throw new ProtocolDecodeError(`Invalid ${type} payload: ${validationError}`, MESSAGE_TYPE_BY_NAME[type]);
   const payload = materializeMessage(payloadTypeName, decoded);
@@ -210,18 +225,29 @@ function assertRequiredFields(type: MessageName, payload: UnknownRecord, operati
   }
 }
 
-function assertSafeInt64Fields(typeName: string, value: UnknownRecord, messageType: MessageName, path = ''): void {
+interface SafeInt64Context {
+  operation: 'encode' | 'decode';
+  messageType: MessageName;
+  path?: string;
+}
+
+function assertSafeInt64Fields(typeName: string, value: UnknownRecord, context: SafeInt64Context): void {
   for (const field of INT64_FIELD_METADATA_BY_TYPE[typeName] ?? []) {
     const fieldValue = value[field.name];
     if (fieldValue === undefined || fieldValue === null) continue;
     const values = field.repeated && Array.isArray(fieldValue) ? fieldValue : [fieldValue];
-    for (const item of values) {
-      const fieldPath = path ? `${path}.${field.name}` : field.name;
+    for (const [index, item] of values.entries()) {
+      const basePath = context.path ? `${context.path}.${field.name}` : field.name;
+      const fieldPath = field.repeated ? `${basePath}[${index}]` : basePath;
       if (field.kind === 'int64' && !isSafeIntegerValue(item)) {
-        throw new ProtocolEncodeError(`${messageType} field ${fieldPath} exceeds JavaScript's safe integer range`, messageType);
+        const message = `${context.messageType} field ${fieldPath} exceeds JavaScript's safe integer range`;
+        if (context.operation === 'encode') {
+          throw new ProtocolEncodeError(message, context.messageType);
+        }
+        throw new ProtocolDecodeError(message, MESSAGE_TYPE_BY_NAME[context.messageType]);
       }
       if (field.kind === 'message' && isRecord(item)) {
-        assertSafeInt64Fields(field.message_type, item, messageType, fieldPath);
+        assertSafeInt64Fields(field.message_type, item, { ...context, path: fieldPath });
       }
     }
   }

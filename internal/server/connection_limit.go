@@ -6,17 +6,19 @@ import (
 )
 
 // connectionLimiter reserves capacity during a handshake and counts only
-// upgraded physical WebSocket connections as active. A nil slots channel is
-// the explicit unlimited mode used for maxConnections <= 0.
+// upgraded physical WebSocket connections as active. A zero limit is the
+// explicit unlimited mode used for maxConnections <= 0. Atomic reservations
+// keep memory usage constant even when an operator configures a large limit.
 type connectionLimiter struct {
-	slots  chan struct{}
-	active atomic.Int64
+	limit    int64
+	reserved atomic.Int64
+	active   atomic.Int64
 }
 
 func newConnectionLimiter(maxConnections int) *connectionLimiter {
 	limiter := &connectionLimiter{}
 	if maxConnections > 0 {
-		limiter.slots = make(chan struct{}, maxConnections)
+		limiter.limit = int64(maxConnections)
 	}
 	return limiter
 }
@@ -34,14 +36,18 @@ func (l *connectionLimiter) tryAcquire() (*connectionLease, bool) {
 	if l == nil {
 		return &connectionLease{}, true
 	}
-	if l.slots != nil {
-		select {
-		case l.slots <- struct{}{}:
-		default:
+	if l.limit <= 0 {
+		return &connectionLease{limiter: l}, true
+	}
+	for {
+		reserved := l.reserved.Load()
+		if reserved >= l.limit {
 			return nil, false
 		}
+		if l.reserved.CompareAndSwap(reserved, reserved+1) {
+			return &connectionLease{limiter: l, reserved: true}, true
+		}
 	}
-	return &connectionLease{limiter: l}, true
 }
 
 func (l *connectionLimiter) activeCount() int {
@@ -58,6 +64,7 @@ type connectionLease struct {
 	limiter *connectionLimiter
 
 	mu        sync.Mutex
+	reserved  bool
 	activated bool
 	released  bool
 }
@@ -85,13 +92,14 @@ func (l *connectionLease) release() {
 		return
 	}
 	l.released = true
+	reserved := l.reserved
 	activated := l.activated
 	l.mu.Unlock()
 
 	if activated {
 		l.limiter.active.Add(-1)
 	}
-	if l.limiter.slots != nil {
-		<-l.limiter.slots
+	if reserved {
+		l.limiter.reserved.Add(-1)
 	}
 }

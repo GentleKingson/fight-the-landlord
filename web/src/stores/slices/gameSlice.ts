@@ -58,6 +58,15 @@ export interface GameSlice {
   seatActions: Record<string, SeatAction>;
 }
 
+export const SEEN_GAME_STREAM_LIMIT = 64;
+
+export class GameSnapshotSyncError extends Error {
+  constructor(readonly snapshotPhase: string) {
+    super(`游戏状态同步失败：服务器返回未知阶段 "${snapshotPhase || '(empty)'}"`);
+    this.name = 'GameSnapshotSyncError';
+  }
+}
+
 export const initialGameSlice: GameSlice = {
   hand: [],
   bottomCards: [],
@@ -400,9 +409,7 @@ export function restoreGameSnapshot(
     streamId,
     eventVersion,
     turnId,
-    seenGameStreams: streamId
-      ? { ...(context.seenGameStreams ?? {}), [streamId]: eventVersion }
-      : { ...(context.seenGameStreams ?? {}) },
+    seenGameStreams: rememberGameStream(context.seenGameStreams ?? {}, streamId, eventVersion),
     turnDeadlineMs,
     serverTimeMs,
     timeout: turnDeadlineMs && serverTimeMs
@@ -444,14 +451,14 @@ function hasCompleteSettlement(dto: GameStateDTO): boolean {
     && [...playerIds].every((playerId) => scoreIds.has(playerId) && handIds.has(playerId));
 }
 
-function mapSnapshotPhase(phase: string): RoomSlice['phase'] {
+export function mapSnapshotPhase(phase: string): RoomSlice['phase'] {
   switch (phase) {
     case 'waiting': return 'waiting';
     case 'bidding': return 'bidding';
     case 'playing': return 'playing';
     case 'ended':
     case 'game_over': return 'game_over';
-    default: return 'waiting';
+    default: throw new GameSnapshotSyncError(phase);
   }
 }
 
@@ -489,10 +496,21 @@ function eventWatermark(event: EventMeta, seenGameStreams: Record<string, number
     eventVersion: event.event_version,
     gameId: event.game_id,
     turnId: event.turn_id,
-    seenGameStreams: { ...seenGameStreams, [event.stream_id]: event.event_version },
+    seenGameStreams: rememberGameStream(seenGameStreams, event.stream_id, event.event_version),
     serverTimeMs: event.server_time_ms,
     turnDeadlineMs: event.turn_deadline_ms
   };
+}
+
+function rememberGameStream(
+  seenGameStreams: Record<string, number>,
+  streamId: string,
+  eventVersion: number
+): Record<string, number> {
+  const entries = Object.entries(seenGameStreams)
+    .filter(([seenStreamId]) => seenStreamId !== streamId);
+  if (streamId) entries.push([streamId, eventVersion]);
+  return Object.fromEntries(entries.slice(-SEEN_GAME_STREAM_LIMIT));
 }
 
 function accepted(patch: GameReducerResult['patch']): Omit<GameReducerResult, 'serverTimestamp'> {

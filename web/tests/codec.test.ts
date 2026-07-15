@@ -5,7 +5,12 @@ import {
   decodeMessage,
   encodeMessage
 } from '../src/protocol/codec';
-import { MessageType, MsgType, type MessageName } from '../src/protocol/generated';
+import {
+  MessageType,
+  MsgType,
+  REQUIRED_FIELDS_BY_NAME,
+  type MessageName
+} from '../src/protocol/generated';
 import { protocol } from '../src/protocol/generated-runtime.js';
 
 describe('protocol codec', () => {
@@ -164,5 +169,52 @@ describe('protocol codec', () => {
     expect(() => encodeMessage(MsgType.Ping, { timestamp: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
       /safe integer range/
     );
+  });
+
+  it('rejects unsafe int64 values nested inside repeated payload messages', () => {
+    expect(() => encodeMessage(MsgType.Reconnected, {
+      player_id: 'p1',
+      player_name: '青竹',
+      game_state: {
+        settlement: {
+          scores: [{ score: Number.MAX_SAFE_INTEGER + 1 }]
+        }
+      }
+    })).toThrow(/game_state\.settlement\.scores\[0\]\.score/);
+  });
+
+  it('rejects decoded nested int64 overflow as a protocol decode error', () => {
+    const payload = protocol.ReconnectedPayload.encode({
+      player_id: 'p1',
+      player_name: '青竹',
+      game_state: {
+        phase: 'ended',
+        settlement: {
+          multiplier: 1,
+          scores: [{
+            player_id: 'p1',
+            player_name: '青竹',
+            is_landlord: true,
+            score: Number.MAX_SAFE_INTEGER + 1
+          }],
+          player_hands: []
+        }
+      }
+    }).finish();
+    const frame = protocol.Message.encode({
+      type: MessageType.MSG_RECONNECTED,
+      payload
+    }).finish();
+
+    expect(() => decodeMessage(frame)).toThrowError(ProtocolDecodeError);
+    expect(() => decodeMessage(frame)).toThrow(/game_state\.settlement\.scores\[0\]\.score/);
+  });
+
+  it('uses required-field metadata emitted by the protocol generator', () => {
+    expect(REQUIRED_FIELDS_BY_NAME).toMatchObject({
+      join_room: ['room_code'],
+      reconnected: ['player_id', 'player_name'],
+      command_ack: ['request_id', 'command_type']
+    });
   });
 });

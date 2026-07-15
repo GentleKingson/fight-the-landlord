@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,16 +70,70 @@ func TestServer_HandleHealth(t *testing.T) {
 	assert.Equal(t, "text/plain; charset=utf-8", res.Header.Get("Content-Type"))
 }
 
+func TestServerShutdownStopsOwnedHTTPListenerAndWaitsForServeLoop(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := listener.Addr().(*net.TCPAddr).Port
+	require.NoError(t, listener.Close())
+
+	cfg := config.Default()
+	cfg.Server.Host = "127.0.0.1"
+	cfg.Server.Port = port
+	cfg.Game.RoomCleanupDelay = 0
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	s := &Server{
+		config:        cfg,
+		clients:       make(map[string]*Client),
+		runtimeCtx:    runtimeCtx,
+		runtimeCancel: runtimeCancel,
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- s.Start() }()
+
+	endpoint := "http://127.0.0.1:" + strconv.Itoa(port) + "/livez"
+	require.Eventually(t, func() bool {
+		response, requestErr := http.Get(endpoint)
+		if requestErr != nil {
+			return false
+		}
+		_ = response.Body.Close()
+		return response.StatusCode == http.StatusOK
+	}, 2*time.Second, 10*time.Millisecond)
+
+	s.Shutdown()
+	select {
+	case err := <-serveDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Server.Shutdown returned without stopping the HTTP serve loop")
+	}
+	client := &http.Client{Timeout: 100 * time.Millisecond}
+	_, err = client.Get(endpoint)
+	require.Error(t, err, "owned listener still accepted traffic after Shutdown")
+}
+
 func TestNewServerRejectsMissingProductionRedisCredentialBeforeDial(t *testing.T) {
 	t.Parallel()
-	cfg := &config.Config{}
+	cfg := config.Default()
 	cfg.Server.Environment = "production"
 	cfg.Security.AllowedOrigins = []string{"https://game.example"}
 
 	server, err := NewServer(cfg)
 
 	assert.Nil(t, server)
-	assert.EqualError(t, err, "production requires a non-empty Redis password")
+	assert.ErrorContains(t, err, "redis.password")
+}
+
+func TestNewServerValidatesConfigurationBeforeDial(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Server.Port = 0
+
+	server, err := NewServer(cfg)
+
+	assert.Nil(t, server)
+	assert.ErrorContains(t, err, "server.port")
 }
 
 func TestServer_ReadinessChecksDependencyAndShutdownState(t *testing.T) {

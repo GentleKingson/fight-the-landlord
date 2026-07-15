@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -55,6 +57,7 @@ func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message
 	now := time.Now()
 	payload.Time = now.Unix()
 	payload.ServerTime = now.UnixMilli()
+	payload.MessageID = fmt.Sprintf("srv:%d:%d", now.UnixNano(), h.chatMessageSequence.Add(1))
 
 	if payload.Scope == "lobby" {
 		if client.GetRoom() != "" {
@@ -125,7 +128,7 @@ func validateChatPayload(payload *protocol.ChatPayload) (string, string) {
 	if !utf8.ValidString(payload.Content) {
 		return "", "聊天内容必须是有效的 UTF-8 文本"
 	}
-	content := strings.TrimSpace(payload.Content)
+	content := strings.TrimSpace(stripDangerousChatRunes(payload.Content))
 	if content == "" {
 		return "", "聊天内容不能为空"
 	}
@@ -136,6 +139,27 @@ func validateChatPayload(payload *protocol.ChatPayload) (string, string) {
 		return "", "消息 ID 格式无效"
 	}
 	return content, ""
+}
+
+func stripDangerousChatRunes(content string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || isBidirectionalControl(r) {
+			return -1
+		}
+		return r
+	}, content)
+}
+
+func isBidirectionalControl(r rune) bool {
+	switch r {
+	case '\u061C', '\u200E', '\u200F',
+		'\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
+		'\u2066', '\u2067', '\u2068', '\u2069',
+		'\u206A', '\u206B', '\u206C', '\u206D', '\u206E', '\u206F':
+		return true
+	default:
+		return false
+	}
 }
 
 func validChatMessageID(messageID string) bool {

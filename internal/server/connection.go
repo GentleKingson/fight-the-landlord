@@ -22,7 +22,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 维护模式检查（最优先）
-	if s.IsMaintenanceMode() {
+	if s.shuttingDown.Load() || s.IsMaintenanceMode() {
 		log.Printf("🔧 维护模式，拒绝新连接: %s", clientIP)
 		http.Error(w, "Server is under maintenance, please try again later",
 			http.StatusServiceUnavailable)
@@ -114,9 +114,34 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Printf("✅ 玩家 %s (%s) 已连接", playerName, playerID)
 
 	// 启动客户端读写协程
+	if !s.startClientPumps(client) {
+		client.Close()
+		s.unregisterClient(client)
+		s.sessionManager.DeleteSession(playerID)
+		_ = conn.Close()
+		return
+	}
 	leaseTransferred = true
-	go client.WritePump()
-	go client.ReadPump()
+}
+
+func (s *Server) startClientPumps(client *Client) bool {
+	s.clientPumpsMu.Lock()
+	if s.clientPumpsClosed || s.shuttingDown.Load() {
+		s.clientPumpsMu.Unlock()
+		return false
+	}
+	s.clientPumpsWG.Add(2)
+	s.clientPumpsMu.Unlock()
+
+	go func() {
+		defer s.clientPumpsWG.Done()
+		client.WritePump()
+	}()
+	go func() {
+		defer s.clientPumpsWG.Done()
+		client.ReadPump()
+	}()
+	return true
 }
 
 // handleHealth 健康检查接口

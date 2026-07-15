@@ -26,6 +26,10 @@ func TestCompareVersions(t *testing.T) {
 		{"prerelease older than release", "v1.2.3-rc.1", "v1.2.3", -1},
 		{"release newer than prerelease", "v1.2.3", "v1.2.3-rc.1", 1},
 		{"prerelease ordering", "v1.2.3-rc.1", "v1.2.3-rc.2", -1},
+		{"numeric prerelease ordering", "v1.2.3-rc.10", "v1.2.3-rc.2", 1},
+		{"build metadata does not affect precedence", "v1.2.3+web.9", "v1.2.3+server.2", 0},
+		{"build metadata does not lower the patch", "v1.2.3+build.7", "v1.2.2", 1},
+		{"large components do not overflow", "v999999999999999999999.0.0", "v2.0.0", 1},
 		{"dev compares as zero base", "dev", "v0.0.0", 0},
 	}
 

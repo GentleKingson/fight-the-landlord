@@ -2,9 +2,11 @@ package server
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +40,7 @@ func newWebSocketLimitTestServer(t *testing.T, maxConnections int) (*Server, str
 	})
 
 	httpServer := httptest.NewServer(http.HandlerFunc(s.handleWebSocket))
+	t.Cleanup(s.Shutdown)
 	t.Cleanup(httpServer.Close)
 	return s, "ws" + strings.TrimPrefix(httpServer.URL, "http")
 }
@@ -180,6 +183,26 @@ func TestHandleWebSocketRejectsClientBelowMinimumVersion(t *testing.T) {
 	_ = conn.Close()
 }
 
+func TestHandleWebSocketComparesMinimumVersionUsingSemverPrecedence(t *testing.T) {
+	s, url := newWebSocketLimitTestServer(t, 1)
+	s.config = &config.Config{Server: config.ServerConfig{MinClientVersion: "v1.2.3+server.7"}}
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	require.NoError(t, err)
+	response := writeHelloAndReadResponse(
+		t,
+		conn,
+		"hello-build-metadata",
+		protocol.ProtocolVersion,
+		"v1.2.2",
+		protocol.ClientKindWeb,
+	)
+	require.Equal(t, protocol.MsgProtocolRejected, response.Type)
+	payload, err := codec.ParsePayload[protocol.ProtocolRejectedPayload](response)
+	require.NoError(t, err)
+	assert.Equal(t, "v1.2.3+server.7", payload.MinClientVersion)
+	_ = conn.Close()
+}
+
 func TestHandleWebSocketRequiresHelloAsFirstMessage(t *testing.T) {
 	s, url := newWebSocketLimitTestServer(t, 1)
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
@@ -207,7 +230,7 @@ func TestHandleWebSocket_UpgradeFailureReleasesCapacity(t *testing.T) {
 	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusBadRequest, response.StatusCode)
 	assert.Zero(t, s.activeConnectionLimiter().activeCount())
-	assert.Empty(t, s.activeConnectionLimiter().slots)
+	assert.Zero(t, s.activeConnectionLimiter().reserved.Load())
 
 	conn, _ := dialConnectedWebSocket(t, url)
 	require.NotNil(t, conn)
@@ -259,7 +282,7 @@ func TestConnectionLimiter_NonPositiveMeansUnlimited(t *testing.T) {
 	for _, maxConnections := range []int{0, -1, -100} {
 		t.Run(fmt.Sprintf("max_%d", maxConnections), func(t *testing.T) {
 			limiter := newConnectionLimiter(maxConnections)
-			assert.Nil(t, limiter.slots)
+			assert.Zero(t, limiter.limit)
 
 			leases := make([]*connectionLease, 0, 100)
 			for range 100 {
@@ -276,4 +299,58 @@ func TestConnectionLimiter_NonPositiveMeansUnlimited(t *testing.T) {
 			assert.Zero(t, limiter.activeCount())
 		})
 	}
+}
+
+func TestConnectionLimiterLargeLimitUsesConstantSpaceAndContendedLeasesAreExactOnce(t *testing.T) {
+	t.Parallel()
+
+	large := newConnectionLimiter(math.MaxInt)
+	require.EqualValues(t, math.MaxInt, large.limit)
+	require.Zero(t, large.reserved.Load())
+	lease, acquired := large.tryAcquire()
+	require.True(t, acquired)
+	require.EqualValues(t, 1, large.reserved.Load())
+	lease.release()
+	require.Zero(t, large.reserved.Load())
+
+	const limit = 32
+	limiter := newConnectionLimiter(limit)
+	start := make(chan struct{})
+	leases := make(chan *connectionLease, limit*8)
+	var attempts sync.WaitGroup
+	for range limit * 8 {
+		attempts.Add(1)
+		go func() {
+			defer attempts.Done()
+			<-start
+			if lease, ok := limiter.tryAcquire(); ok {
+				leases <- lease
+			}
+		}()
+	}
+	close(start)
+	attempts.Wait()
+	close(leases)
+
+	acquiredLeases := make([]*connectionLease, 0, limit)
+	for lease := range leases {
+		lease.activate()
+		acquiredLeases = append(acquiredLeases, lease)
+	}
+	require.Len(t, acquiredLeases, limit)
+	require.EqualValues(t, limit, limiter.reserved.Load())
+	require.Equal(t, limit, limiter.activeCount())
+
+	var releases sync.WaitGroup
+	for _, lease := range acquiredLeases {
+		releases.Add(1)
+		go func(lease *connectionLease) {
+			defer releases.Done()
+			lease.release()
+			lease.release()
+		}(lease)
+	}
+	releases.Wait()
+	require.Zero(t, limiter.reserved.Load())
+	require.Zero(t, limiter.activeCount())
 }

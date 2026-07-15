@@ -38,8 +38,9 @@ type Handler struct {
 	// gamesLifecycleMu orders exact registration/removal against final
 	// Reconnected and RoomLeft enqueueing. Never call Retire or Matcher while
 	// holding it.
-	gamesLifecycleMu   sync.Mutex
-	legacyChatMessages atomic.Int64
+	gamesLifecycleMu    sync.Mutex
+	legacyChatMessages  atomic.Int64
+	chatMessageSequence atomic.Uint64
 }
 
 // LegacyChatMessages reports migration traffic that still embeds JSON Chat

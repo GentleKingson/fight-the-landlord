@@ -24,6 +24,10 @@ func (rm *RoomManager) CreateRoomWithResponse(client types.ClientInterface) (*Ro
 func (rm *RoomManager) createRoom(client types.ClientInterface, publishResponse bool) (*Room, error) {
 	creator := newRoomPlayer(client, 0)
 	rm.mu.Lock()
+	if rm.closed {
+		rm.mu.Unlock()
+		return nil, ErrRoomManagerClosed
+	}
 	code := rm.generateRoomCode()
 	room := newRoom(code, time.Now())
 	room.publishMu.Lock()

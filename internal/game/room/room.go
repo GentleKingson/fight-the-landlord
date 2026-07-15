@@ -2,6 +2,7 @@ package room
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -14,6 +15,8 @@ const (
 	roomCodeLength = 6            // 房间号长度
 	roomCodeChars  = "0123456789" // 房间号字符集
 )
+
+var ErrRoomManagerClosed = errors.New("room manager is closed")
 
 // RoomPlayer 房间中的玩家
 type RoomPlayer struct {
@@ -111,16 +114,38 @@ type RoomManager struct {
 	pendingRooms  map[string]*MatchRoomTransaction
 	retiringRooms map[string]*Room
 	roomCodeFunc  func() string
+	closed        bool
 	mu            sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
+	cleanupPeriod time.Duration
+	cleanupWG     sync.WaitGroup
+	closeOnce     sync.Once
 
 	persistenceMu     sync.Mutex
 	persistenceQueues map[string]*roomPersistenceQueue
+	persistenceClosed bool
+	persistenceWG     sync.WaitGroup
 	saveRoomFunc      func(context.Context, string, *storage.RoomData) error
 	deleteRoomFunc    func(context.Context, string) error
 }
 
 // NewRoomManager 创建房间管理器
 func NewRoomManager(rs *storage.RedisStore, gameConfig config.GameConfig) *RoomManager {
+	return NewRoomManagerWithContext(context.Background(), rs, gameConfig)
+}
+
+// NewRoomManagerWithContext creates a room manager whose cleanup and
+// persistence workers are owned by the supplied runtime context.
+func NewRoomManagerWithContext(ctx context.Context, rs *storage.RedisStore, gameConfig config.GameConfig) *RoomManager {
+	return newRoomManager(ctx, rs, gameConfig, time.Minute)
+}
+
+func newRoomManager(parent context.Context, rs *storage.RedisStore, gameConfig config.GameConfig, cleanupPeriod time.Duration) *RoomManager {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
 	rm := &RoomManager{
 		redisStore:        rs,
 		roomTimeout:       gameConfig.RoomTimeoutDuration(),
@@ -129,10 +154,16 @@ func NewRoomManager(rs *storage.RedisStore, gameConfig config.GameConfig) *RoomM
 		pendingRooms:      make(map[string]*MatchRoomTransaction),
 		retiringRooms:     make(map[string]*Room),
 		persistenceQueues: make(map[string]*roomPersistenceQueue),
+		ctx:               ctx,
+		cancel:            cancel,
+		cleanupPeriod:     cleanupPeriod,
 	}
 
-	// 启动房间清理协程
-	go rm.cleanupLoop()
+	rm.cleanupWG.Add(1)
+	go func() {
+		defer rm.cleanupWG.Done()
+		rm.cleanupLoop()
+	}()
 
 	return rm
 }

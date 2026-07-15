@@ -4,7 +4,7 @@ import { useAppStore } from '../src/stores/appStore';
 import { buildCardCounter, ledgerFromSnapshot } from '../src/stores/slices/cardCounter';
 import { initialServerClock, observePong, remainingSeconds } from '../src/stores/slices/clock';
 import { initialConnectionSlice } from '../src/stores/slices/connectionSlice';
-import { initialGameSlice, reduceGameMessage, restoreGameSnapshot } from '../src/stores/slices/gameSlice';
+import { SEEN_GAME_STREAM_LIMIT, initialGameSlice, reduceGameMessage, restoreGameSnapshot } from '../src/stores/slices/gameSlice';
 import { initialLobbySlice } from '../src/stores/slices/lobbySlice';
 import { initialRoomSlice } from '../src/stores/slices/roomSlice';
 import { initialUiSlice } from '../src/stores/slices/uiSlice';
@@ -17,6 +17,7 @@ const players: PlayerInfo[] = [
 
 beforeEach(() => {
   vi.useRealTimers();
+  localStorage.clear();
   useAppStore.getState().clearPendingCommands();
   useAppStore.setState({
     ...initialConnectionSlice,
@@ -154,6 +155,31 @@ describe('authoritative snapshot restoration', () => {
     });
   });
 
+  it('rejects an unknown snapshot phase and requests an authoritative resync', () => {
+    useAppStore.setState({ phase: 'playing', gameId: 'g-current', streamId: 'game:g-current' });
+
+    const result = useAppStore.getState().handleMessage({
+      type: MsgType.Reconnected,
+      payload: {
+        player_id: 'p1',
+        player_name: '青竹',
+        room_code: '123456',
+        reconnect_token: 'rotated-token',
+        game_state: snapshot({ phase: 'paused', game_id: 'g-unknown', snapshot_version: 1 })
+      }
+    });
+
+    expect(result).toMatchObject({
+      authoritativeResyncRequired: true,
+      reason: expect.stringContaining('paused')
+    });
+    expect(useAppStore.getState()).toMatchObject({
+      phase: 'playing',
+      gameId: 'g-current',
+      error: expect.stringContaining('paused')
+    });
+  });
+
   it.each([
     {
       winner_id: '',
@@ -275,6 +301,33 @@ describe('authoritative event ordering', () => {
     });
     expect(useAppStore.getState().lastPlayed).toEqual([card(0, 8)]);
     expect(useAppStore.getState().seatActions.p3?.type).toBe('pass');
+  });
+
+  it('keeps seen game streams in a bounded least-recently-used set', () => {
+    const capacity = SEEN_GAME_STREAM_LIMIT;
+    const original = Object.fromEntries(
+      Array.from({ length: capacity }, (_, index) => [`game:g${index}`, index + 1])
+    );
+
+    const refreshed = restoreGameSnapshot(snapshot({ game_id: 'g0', snapshot_version: 100 }), {
+      currentPlayerId: 'p1',
+      receivedAt: 10_000,
+      event: event('g0', 100, 2),
+      seenGameStreams: original
+    });
+    const extended = restoreGameSnapshot(snapshot({ game_id: 'g64', snapshot_version: 1 }), {
+      currentPlayerId: 'p1',
+      receivedAt: 10_001,
+      event: event('g64', 1, 2),
+      seenGameStreams: refreshed.seenGameStreams
+    });
+
+    expect(Object.keys(extended.seenGameStreams ?? {})).toHaveLength(capacity);
+    expect(extended.seenGameStreams).toMatchObject({
+      'game:g0': 100,
+      'game:g64': 1
+    });
+    expect(extended.seenGameStreams).not.toHaveProperty('game:g1');
   });
 });
 

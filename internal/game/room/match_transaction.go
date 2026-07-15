@@ -57,6 +57,9 @@ func (rm *RoomManager) BeginMatchRoom(first types.ClientInterface) (*MatchRoomTr
 
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
+	if rm.closed {
+		return nil, ErrRoomManagerClosed
+	}
 	if rm.pendingRooms == nil {
 		rm.pendingRooms = make(map[string]*MatchRoomTransaction)
 	}
@@ -88,6 +91,9 @@ func (tx *MatchRoomTransaction) Join(client types.ClientInterface) error {
 	rm := tx.manager
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
+	if rm.closed {
+		return ErrMatchRoomTransactionEnded
+	}
 	if tx.state != matchRoomPending || rm.pendingRooms[tx.room.Code] != tx {
 		return ErrMatchRoomTransactionEnded
 	}
@@ -119,6 +125,9 @@ func (tx *MatchRoomTransaction) Commit() (*Room, error) {
 	rm := tx.manager
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
+	if rm.closed {
+		return nil, ErrMatchRoomTransactionEnded
+	}
 	if tx.state != matchRoomPending || rm.pendingRooms[tx.room.Code] != tx {
 		return nil, ErrMatchRoomTransactionEnded
 	}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -502,6 +503,42 @@ func TestServerShutdownClosesMatcherBeforeDependencies(t *testing.T) {
 
 	assert.Zero(t, matcher.GetQueueLength())
 	assert.False(t, matcher.AddToQueue(NewClient(server, nil)))
+}
+
+func TestServerShutdownCancelsAndWaitsForOwnedRuntimeWorkers(t *testing.T) {
+	t.Parallel()
+
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	cfg := config.Default()
+	cfg.Game.RoomCleanupDelay = 0
+	roomManager := room.NewRoomManagerWithContext(runtimeCtx, nil, cfg.Game)
+	sessionManager := session.NewSessionManagerWithContext(runtimeCtx)
+	rateLimiter := NewRateLimiterWithContext(runtimeCtx, 10, 100, time.Second)
+	matcher := match.NewMatcher(match.MatcherDeps{
+		Context:      runtimeCtx,
+		RoomManager:  roomManager,
+		QueueTimeout: time.Hour,
+	})
+	server := &Server{
+		config:         cfg,
+		clients:        make(map[string]*Client),
+		roomManager:    roomManager,
+		sessionManager: sessionManager,
+		rateLimiter:    rateLimiter,
+		matcher:        matcher,
+		runtimeCtx:     runtimeCtx,
+		runtimeCancel:  runtimeCancel,
+	}
+	server.startMonitorStats()
+
+	server.Shutdown()
+	server.Shutdown()
+
+	require.ErrorIs(t, runtimeCtx.Err(), context.Canceled)
+	require.NoError(t, matcher.Close())
+	require.NoError(t, roomManager.Close())
+	require.NoError(t, sessionManager.Close())
+	require.NoError(t, rateLimiter.Close())
 }
 
 func TestServer_ReconnectReplacementAndSendAreConcurrentSafe(t *testing.T) {
