@@ -361,10 +361,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
         break;
       }
-      case MsgType.RoomLeft:
+      case MsgType.RoomLeft: {
+        const payload = message.payload as { room_code: string };
+        if (payload.room_code !== state.roomCode) break;
         get().finishCommand('leave-room');
         get().leaveLocalRoom();
         break;
+      }
       case MsgType.StatsResult:
         set({ stats: message.payload as StatsResultPayload, lobbyPanel: 'stats' });
         break;

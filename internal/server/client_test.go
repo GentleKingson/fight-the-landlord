@@ -16,6 +16,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 )
@@ -72,6 +73,43 @@ func TestClient_SetRoomSynchronizesPlayerSession(t *testing.T) {
 	assert.Empty(t, playerSession.RoomCode)
 }
 
+func TestClient_SendMessageIfRoomSkipsStaleTerminalDelivery(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(nil, nil)
+	message := codec.MustNewMessage(protocol.MsgRoomLeft, protocol.RoomLeftPayload{RoomCode: "retired-room"})
+
+	sent, err := client.SendMessageIfRoom("", message)
+	require.NoError(t, err)
+	require.True(t, sent)
+	require.Len(t, client.send, 1)
+
+	client.SetRoom("replacement-room")
+	sent, err = client.SendMessageIfRoom("", message)
+	require.NoError(t, err)
+	require.False(t, sent)
+	require.Len(t, client.send, 1)
+}
+
+func TestClient_SendMessageIfIdentityRejectsReboundPlayerInSameRoom(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(nil, nil)
+	client.rebindIdentity("original-player", "Original", "shared-room")
+	message := &protocol.Message{Type: protocol.MsgDealCards}
+
+	client.rebindIdentity("replacement-player", "Replacement", "shared-room")
+	sent, err := client.SendMessageIfIdentity("original-player", "shared-room", message)
+	require.NoError(t, err)
+	require.False(t, sent)
+	require.Empty(t, client.send)
+
+	sent, err = client.SendMessageIfIdentity("replacement-player", "shared-room", message)
+	require.NoError(t, err)
+	require.True(t, sent)
+	require.Len(t, client.send, 1)
+}
+
 func TestServer_RebindClientIsPointerSafe(t *testing.T) {
 	t.Parallel()
 
@@ -104,6 +142,57 @@ func TestServer_RebindClientIsPointerSafe(t *testing.T) {
 	assert.False(t, server.UnregisterClient("restored-id", previous))
 	assert.True(t, server.UnregisterClient("restored-id", rebound))
 	assert.Nil(t, server.GetClientByID("restored-id"))
+}
+
+func TestServer_RebindClientAndMatchCommitHaveOneAtomicWinner(t *testing.T) {
+	server := &Server{clients: make(map[string]*Client)}
+	provisional := NewClient(server, nil)
+	temporaryID := provisional.GetID()
+	server.registerClient(provisional)
+
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	tx, err := roomManager.BeginMatchRoom(provisional)
+	require.NoError(t, err)
+	require.NoError(t, tx.Join(NewClient(nil, nil)))
+	require.NoError(t, tx.Join(NewClient(nil, nil)))
+	t.Cleanup(tx.Rollback)
+
+	start := make(chan struct{})
+	commitResult := make(chan error, 1)
+	rebindResult := make(chan error, 1)
+	go func() {
+		<-start
+		_, commitErr := tx.Commit()
+		commitResult <- commitErr
+	}()
+	go func() {
+		<-start
+		_, rebindErr := server.RebindClient(
+			temporaryID,
+			"restored-player",
+			"Restored Player",
+			"restored-room",
+			provisional,
+		)
+		rebindResult <- rebindErr
+	}()
+	close(start)
+
+	commitErr := <-commitResult
+	rebindErr := <-rebindResult
+	require.NotEqual(t, commitErr == nil, rebindErr == nil, "exactly one identity transition must commit")
+	if commitErr == nil {
+		require.Equal(t, temporaryID, provisional.GetID())
+		require.Equal(t, tx.Room().Code, provisional.GetRoom())
+		require.Same(t, provisional, server.GetClientByID(temporaryID))
+		require.Nil(t, server.GetClientByID("restored-player"))
+		return
+	}
+
+	require.Equal(t, "restored-player", provisional.GetID())
+	require.Equal(t, "restored-room", provisional.GetRoom())
+	require.Nil(t, server.GetClientByID(temporaryID))
+	require.Same(t, provisional, server.GetClientByID("restored-player"))
 }
 
 func TestServerActiveClientResolverReturnsNilForMissingIdentity(t *testing.T) {

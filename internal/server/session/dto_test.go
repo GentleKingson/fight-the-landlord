@@ -95,6 +95,7 @@ func TestBuildGameStateDTOBiddingIsCompleteAndHidesBottomCards(t *testing.T) {
 	assert.False(t, first.IsGrab)
 	assert.Equal(t, 1, first.Multiplier)
 	assert.Equal(t, baseScore, first.BaseScore)
+	assert.Nil(t, first.Settlement)
 	assert.LessOrEqual(t, first.ServerTimeMS, first.TurnDeadlineMS)
 	assert.Greater(t, first.TurnDeadlineMS-first.ServerTimeMS, int64(28*time.Second/time.Millisecond))
 	assert.LessOrEqual(t, first.TurnDeadlineMS-first.ServerTimeMS, int64(30*time.Second/time.Millisecond))
@@ -267,6 +268,71 @@ func TestBuildGameStateDTOEndedClearsTurnAndKeepsFinalPlay(t *testing.T) {
 	assert.Equal(t, 2, snapshot.Multiplier, "landlord spring multiplier must be settled in ended snapshots")
 }
 
+func TestBuildGameStateDTOEndedIncludesImmutableSettlementForEveryPlayer(t *testing.T) {
+	t.Parallel()
+
+	gs, sessionManager := newSnapshotTestSession(t)
+	winnerCard := card.Card{Suit: card.Spade, Rank: card.Rank3, Color: card.Black}
+	loserCard := card.Card{Suit: card.Heart, Rank: card.Rank4, Color: card.Red}
+
+	gs.mu.Lock()
+	gs.gameID = "settlement-game"
+	gs.state = GameStatePlaying
+	gs.players[0].IsLandlord = true
+	gs.players[0].Hand = []card.Card{winnerCard}
+	gs.players[1].Hand = []card.Card{loserCard}
+	gs.players[2].Hand = nil
+	gs.bidMultiplier = 2
+	gs.endGame(gs.players[0])
+	gs.players[1].Hand[0] = card.Card{Suit: card.Club, Rank: card.RankA, Color: card.Black}
+	gs.mu.Unlock()
+
+	var authoritative *protocol.GameSettlementDTO
+	for _, playerID := range []string{"p1", "p2", "p3"} {
+		snapshot := gs.BuildGameStateDTO(playerID, sessionManager)
+		require.Equal(t, "ended", snapshot.Phase)
+		require.NotNil(t, snapshot.Settlement)
+		assert.Equal(t, "p1", snapshot.Settlement.WinnerID)
+		assert.Equal(t, "Player1", snapshot.Settlement.WinnerName)
+		assert.True(t, snapshot.Settlement.WinnerIsLandlord)
+		assert.Equal(t, 4, snapshot.Settlement.Multiplier)
+		require.Len(t, snapshot.Settlement.Scores, 3)
+		require.Len(t, snapshot.Settlement.PlayerHands, 3)
+		assert.Equal(t, []protocol.CardInfo{convert.CardToInfo(loserCard)}, snapshot.Settlement.PlayerHands[1].Cards)
+		if authoritative == nil {
+			authoritative = snapshot.Settlement
+			continue
+		}
+		assert.Equal(t, authoritative, snapshot.Settlement)
+	}
+
+	require.NotNil(t, authoritative)
+	authoritative.WinnerName = "mutated"
+	authoritative.Scores[0].Score = 999
+	authoritative.PlayerHands[1].Cards[0].Rank = 99
+	repeated := gs.BuildGameStateDTO("p1", sessionManager)
+	require.NotNil(t, repeated.Settlement)
+	assert.Equal(t, "Player1", repeated.Settlement.WinnerName)
+	assert.Equal(t, 8, repeated.Settlement.Scores[0].Score)
+	assert.Equal(t, convert.CardToInfo(loserCard), repeated.Settlement.PlayerHands[1].Cards[0])
+}
+
+func TestDealNewRoundClearsStoredSettlement(t *testing.T) {
+	t.Parallel()
+
+	gs, _ := newSnapshotTestSession(t)
+	gs.mu.Lock()
+	gs.state = GameStatePlaying
+	gs.players[0].IsLandlord = true
+	gs.endGame(gs.players[0])
+	stored := gs.settlement
+	gs.dealNewRound()
+	cleared := gs.settlement
+	gs.mu.Unlock()
+	require.NotNil(t, stored)
+	assert.Nil(t, cleared)
+}
+
 func TestTurnDeadlinePausesAndResumesWithoutChangingTurnID(t *testing.T) {
 	t.Parallel()
 
@@ -314,6 +380,9 @@ func TestTurnDeadlineExistsBeforeTurnBroadcast(t *testing.T) {
 	gameRoom.AddPlayerForTest(clients[1], 1, false)
 	gameRoom.AddPlayerForTest(clients[2], 2, false)
 	gameRoom.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
+	for _, client := range clients {
+		client.SetRoom(gameRoom.Code)
+	}
 	gs := NewGameSession(gameRoom, storage.NewLeaderboardManager(nil), config.GameConfig{BidTimeout: 30, TurnTimeout: 40})
 	t.Cleanup(gs.StopAllTimers)
 

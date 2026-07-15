@@ -37,6 +37,32 @@ describe('app store message flow', () => {
     expect(useAppStore.getState().playerId).toBe('p1');
   });
 
+  it('ignores a stale room-left event after entering a replacement room', () => {
+    useAppStore.setState({
+      phase: 'waiting',
+      roomCode: 'new-room',
+      players: [{ id: 'p1', name: '青竹', seat: 0, ready: false, is_landlord: false, cards_count: 0, online: true }],
+      hand: [{ suit: 0, rank: 14, color: 0 }]
+    });
+
+    useAppStore.getState().handleMessage({
+      type: MsgType.RoomLeft,
+      payload: { room_code: 'old-room' }
+    });
+
+    expect(useAppStore.getState().roomCode).toBe('new-room');
+    expect(useAppStore.getState().phase).toBe('waiting');
+    expect(useAppStore.getState().players).toHaveLength(1);
+    expect(useAppStore.getState().hand).toHaveLength(1);
+
+    useAppStore.getState().handleMessage({
+      type: MsgType.RoomLeft,
+      payload: { room_code: 'new-room' }
+    });
+    expect(useAppStore.getState().roomCode).toBe('');
+    expect(useAppStore.getState().phase).toBe('lobby');
+  });
+
   it('keeps bottom cards hidden after deal cards before landlord is confirmed', () => {
     useAppStore.getState().handleMessage({
       type: MsgType.DealCards,

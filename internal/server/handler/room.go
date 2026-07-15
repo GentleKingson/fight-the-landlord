@@ -23,7 +23,7 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 		return
 	}
 
-	room, err := h.roomManager.CreateRoom(client)
+	room, err := h.roomManager.CreateRoomWithResponse(client)
 	if err != nil {
 		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, err.Error(), protocol.MsgCreateRoom))
 		return
@@ -33,16 +33,6 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "创建房间失败", protocol.MsgCreateRoom))
 		return
 	}
-	player, ok := room.GetPlayerInfo(client.GetID())
-	if !ok {
-		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "房间成员状态不同步", protocol.MsgCreateRoom))
-		return
-	}
-
-	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomCreated, protocol.RoomCreatedPayload{
-		RoomCode: room.Code,
-		Player:   player,
-	}))
 }
 
 // handleJoinRoom 处理加入房间
@@ -64,7 +54,7 @@ func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Mes
 		return
 	}
 
-	room, err := h.roomManager.JoinRoom(client, payload.RoomCode)
+	room, err := h.roomManager.JoinRoomWithResponse(client, payload.RoomCode)
 	if err != nil {
 		var gameErr *apperrors.GameError
 		if errors.As(err, &gameErr) {
@@ -79,17 +69,6 @@ func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Mes
 		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "加入房间失败", protocol.MsgJoinRoom))
 		return
 	}
-	player, ok := room.GetPlayerInfo(client.GetID())
-	if !ok {
-		client.SendMessage(codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "房间成员状态不同步", protocol.MsgJoinRoom))
-		return
-	}
-
-	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
-		RoomCode: room.Code,
-		Player:   player,
-		Players:  room.GetAllPlayersInfo(),
-	}))
 }
 
 // handleLeaveRoom 处理离开房间
@@ -100,13 +79,19 @@ func (h *Handler) handleLeaveRoom(client types.ClientInterface) {
 	}
 
 	roomCode := client.GetRoom()
+	playerID := client.GetID()
 	if !h.roomManager.LeaveRoom(client) || client.GetRoom() != "" {
 		client.SendMessage(codec.NewCommandErrorMessageWithText(
 			protocol.ErrCodeUnknown, "离开房间失败", protocol.MsgLeaveRoom))
 		return
 	}
 
-	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomLeft, protocol.RoomLeftPayload{RoomCode: roomCode}))
+	_, _ = types.SendMessageIfIdentity(
+		client,
+		playerID,
+		"",
+		codec.MustNewMessage(protocol.MsgRoomLeft, protocol.RoomLeftPayload{RoomCode: roomCode}),
+	)
 }
 
 func (h *Handler) leaveRoomBeforeCommand(client types.ClientInterface, command protocol.MessageType) bool {

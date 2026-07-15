@@ -620,7 +620,7 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 			PlayerName: "Player1",
 			RoomCode:   "123456",
 			GameState: &protocol.GameStateDTO{
-				Phase: "playing",
+				Phase: "ended",
 				Players: []protocol.PlayerInfo{
 					{ID: "p1", Name: "Player1", Seat: 0, IsLandlord: true},
 				},
@@ -628,6 +628,18 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 				BottomCards: []protocol.CardInfo{{Suit: 1, Rank: 5}},
 				CurrentTurn: "p1",
 				MustPlay:    true,
+				Settlement: &protocol.GameSettlementDTO{
+					WinnerID:         "p1",
+					WinnerName:       "Player1",
+					WinnerIsLandlord: true,
+					Multiplier:       4,
+					Scores: []protocol.PlayerScore{
+						{PlayerID: "p1", PlayerName: "Player1", IsLandlord: true, Score: 8},
+					},
+					PlayerHands: []protocol.PlayerHand{
+						{PlayerID: "p1", PlayerName: "Player1", Cards: []protocol.CardInfo{}},
+					},
+				},
 			},
 		}
 
@@ -641,8 +653,10 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 		assert.Equal(t, "p1", result.PlayerID)
 		assert.Equal(t, "123456", result.RoomCode)
 		require.NotNil(t, result.GameState)
-		assert.Equal(t, "playing", result.GameState.Phase)
+		assert.Equal(t, "ended", result.GameState.Phase)
 		assert.True(t, result.GameState.MustPlay)
+		require.NotNil(t, result.GameState.Settlement)
+		assert.Equal(t, original.GameState.Settlement, result.GameState.Settlement)
 	})
 
 	t.Run("PlayerOffline", func(t *testing.T) {

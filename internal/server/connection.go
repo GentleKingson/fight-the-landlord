@@ -221,7 +221,10 @@ func (s *Server) RebindClient(temporaryID, playerID, playerName, roomCode string
 	}
 
 	previous := s.clients[playerID]
-	rebound.rebindIdentity(playerID, playerName, roomCode)
+	if !rebound.rebindIdentityIfUnbound(temporaryID, playerID, playerName, roomCode) {
+		s.clientsMu.Unlock()
+		return nil, fmt.Errorf("temporary client %q gained a room or changed identity during reconnect", temporaryID)
+	}
 	if temporaryID != playerID {
 		delete(s.clients, temporaryID)
 	}

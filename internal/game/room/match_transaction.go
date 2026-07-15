@@ -38,6 +38,16 @@ type MatchRoomTransaction struct {
 	state        matchRoomTransactionState
 }
 
+// Room returns the immutable room identity reserved by this transaction. The
+// room remains unpublished until Commit succeeds; exposing its identity lets
+// the matcher bind cancellation before the Commit/removal window opens.
+func (tx *MatchRoomTransaction) Room() *Room {
+	if tx == nil {
+		return nil
+	}
+	return tx.room
+}
+
 // BeginMatchRoom reserves an unpublished room and adds the first participant.
 // It deliberately does not bind the client, persist the room, or send messages.
 func (rm *RoomManager) BeginMatchRoom(first types.ClientInterface) (*MatchRoomTransaction, error) {
@@ -113,27 +123,34 @@ func (tx *MatchRoomTransaction) Commit() (*Room, error) {
 		return nil, ErrMatchRoomTransactionEnded
 	}
 
+	tx.room.publishMu.Lock()
+	defer tx.room.publishMu.Unlock()
 	tx.room.mu.Lock()
 	defer tx.room.mu.Unlock()
 	if len(tx.participants) != 3 || len(tx.room.players) != 3 {
 		return nil, ErrMatchRoomParticipantCount
 	}
 	for index, client := range tx.participants {
-		if client.GetRoom() != "" {
-			return nil, ErrMatchRoomRosterChanged
-		}
-		playerID := client.GetID()
+		playerID := tx.room.playerOrder[index]
 		player, exists := tx.room.players[playerID]
-		if !exists || player == nil || player.Client != client || tx.room.playerOrder[index] != playerID {
+		if !exists || player == nil || player.Client != client {
 			return nil, ErrMatchRoomRosterChanged
 		}
+	}
+	bound := make([]PlayerSnapshot, 0, len(tx.participants))
+	for index, client := range tx.participants {
+		player := tx.room.players[tx.room.playerOrder[index]]
+		if !types.CompareAndSetRoom(client, player.ID, "", tx.room.Code) {
+			for _, current := range bound {
+				types.CompareAndSetRoom(current.Client, current.ID, tx.room.Code, "")
+			}
+			return nil, ErrMatchRoomRosterChanged
+		}
+		bound = append(bound, snapshotPlayer(player))
 	}
 
 	delete(rm.pendingRooms, tx.room.Code)
 	rm.rooms[tx.room.Code] = tx.room
-	for _, client := range tx.participants {
-		client.SetRoom(tx.room.Code)
-	}
 	tx.state = matchRoomPublished
 	return tx.room, nil
 }
@@ -153,29 +170,27 @@ func (tx *MatchRoomTransaction) Rollback() {
 		return
 	}
 
+	tx.room.publishMu.Lock()
 	tx.room.mu.Lock()
 	wasPublished := tx.state == matchRoomPublished
 	if rm.pendingRooms[tx.room.Code] == tx {
 		delete(rm.pendingRooms, tx.room.Code)
 	}
-	if rm.rooms[tx.room.Code] == tx.room {
-		delete(rm.rooms, tx.room.Code)
+	var removal roomRemovalDispatch
+	removed := false
+	if wasPublished {
+		removal, removed = rm.removePublishedRoomLocked(tx.room, RoomRemovalRollback)
 	}
-	for _, player := range tx.room.players {
-		if player == nil || player.Client == nil {
-			continue
-		}
-		if player.Client.GetRoom() == tx.room.Code {
-			player.Client.SetRoom("")
-		}
+	if !removed {
+		tx.room.state = RoomStateEnded
 	}
-	tx.room.state = RoomStateEnded
 	tx.state = matchRoomEnded
 	tx.room.mu.Unlock()
 	rm.mu.Unlock()
+	tx.room.publishMu.Unlock()
 
-	if wasPublished {
-		rm.deleteRoomAsync(tx.room.Code)
+	if removed {
+		rm.dispatchRoomRemoval(removal)
 	}
 }
 

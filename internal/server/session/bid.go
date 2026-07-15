@@ -25,6 +25,10 @@ func (gs *GameSession) handleBid(playerID string, bid bool, expectedTurnID int64
 	gs.actionMu.Lock()
 	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
+	if gs.retired {
+		gs.mu.Unlock()
+		return apperrors.ErrGameNotStart
+	}
 
 	if gs.state != GameStateBidding {
 		gs.mu.Unlock()

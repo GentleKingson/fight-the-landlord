@@ -16,12 +16,29 @@ import (
 func (gs *GameSession) Start() {
 	gs.actionMu.Lock()
 	gs.mu.Lock()
+	if gs.retired {
+		gs.mu.Unlock()
+		gs.actionMu.Unlock()
+		return
+	}
 	gs.startBiddingRound()
 	work := gs.takePendingWorkLocked()
 	gs.mu.Unlock()
 	gs.dispatchPendingWork(work)
 	gs.pauseInitialOfflineTurn()
 	gs.actionMu.Unlock()
+}
+
+// Retire permanently prevents a removed session from starting and stops any
+// timer it already owns. actionMu serializes retirement with Start and command
+// delivery, so a late registration callback cannot reactivate the session.
+func (gs *GameSession) Retire() {
+	gs.actionMu.Lock()
+	defer gs.actionMu.Unlock()
+	gs.mu.Lock()
+	gs.retired = true
+	gs.mu.Unlock()
+	gs.stopTimer()
 }
 
 // pauseInitialOfflineTurn closes the registration window where a player can
@@ -66,6 +83,7 @@ func (gs *GameSession) dealNewRound() {
 	gs.lastPlayerIdx = -1
 	gs.consecutivePasses = 0
 	gs.settledMultiplier = 0
+	gs.settlement = nil
 
 	// 重置叫抢与倍数状态
 	gs.landlordCaller = -1
@@ -164,17 +182,25 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 			Cards:      convert.CardsToInfos(p.Hand),
 		}
 	}
+	gs.settlement = cloneGameSettlement(&protocol.GameSettlementDTO{
+		WinnerID:         winner.ID,
+		WinnerName:       winner.Name,
+		WinnerIsLandlord: winner.IsLandlord,
+		Multiplier:       multiplier,
+		Scores:           scores,
+		PlayerHands:      playerHands,
+	})
 
 	// Keep the room ended until every client has observed GameOver. A Ready
 	// command delivered synchronously by a client callback must not be able to
 	// replace this session before the terminal event is broadcast.
 	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgGameOver, protocol.GameOverPayload{
-		WinnerID:    winner.ID,
-		WinnerName:  winner.Name,
-		IsLandlord:  winner.IsLandlord,
-		PlayerHands: playerHands,
-		Multiplier:  multiplier,
-		Scores:      scores,
+		WinnerID:    gs.settlement.WinnerID,
+		WinnerName:  gs.settlement.WinnerName,
+		IsLandlord:  gs.settlement.WinnerIsLandlord,
+		PlayerHands: gs.settlement.PlayerHands,
+		Multiplier:  gs.settlement.Multiplier,
+		Scores:      gs.settlement.Scores,
 	}))
 
 	// Preserve membership and the completed GameSession for reconnect. The room

@@ -32,8 +32,17 @@ type Handler struct {
 	leaderboard    *storage.LeaderboardManager
 	sessionManager *session.SessionManager
 	handlers       map[protocol.MessageType]handlerFunc
-	games          map[string]*session.GameSession
+	games          map[string]gameRegistration
 	gamesMu        sync.RWMutex
+	// gamesLifecycleMu orders exact registration/removal against final
+	// Reconnected and RoomLeft enqueueing. Never call Retire or Matcher while
+	// holding it.
+	gamesLifecycleMu sync.Mutex
+}
+
+type gameRegistration struct {
+	room    *room.Room
+	session *session.GameSession
 }
 
 // handlerFunc 统一的处理器函数签名
@@ -48,9 +57,13 @@ func NewHandler(deps HandlerDeps) *Handler {
 		chatLimiter:    deps.ChatLimiter,
 		leaderboard:    deps.Leaderboard,
 		sessionManager: deps.SessionManager,
-		games:          make(map[string]*session.GameSession),
+		games:          make(map[string]gameRegistration),
 	}
 	h.initHandlers()
+	if h.roomManager != nil {
+		h.roomManager.SetOnRoomRemoved(h.handleRoomRemoved)
+		h.roomManager.SetOnPresenceChanged(h.handlePresenceChanged)
+	}
 	return h
 }
 
@@ -58,27 +71,98 @@ func NewHandler(deps HandlerDeps) *Handler {
 func (h *Handler) GetGameSession(roomCode string) *session.GameSession {
 	h.gamesMu.RLock()
 	defer h.gamesMu.RUnlock()
-	return h.games[roomCode]
+	return h.games[roomCode].session
 }
 
-// SetGameSession 设置房间的游戏会话
-func (h *Handler) SetGameSession(roomCode string, gs *session.GameSession) {
-	h.gamesMu.Lock()
-	defer h.gamesMu.Unlock()
-	if gs == nil {
-		delete(h.games, roomCode)
-	} else {
+// SetGameSession publishes a session only while RoomManager still owns the
+// exact Room used to construct it. gamesMu serializes this validation with the
+// removal callback, closing both deletion-before-registration and code-reuse
+// windows.
+func (h *Handler) SetGameSession(roomCode string, gs *session.GameSession) bool {
+	if gs == nil || h.roomManager == nil {
+		return false
+	}
+	gameRoom := gs.RoomIdentity()
+	var previous *session.GameSession
+	accepted := gameRoom != nil && gameRoom.Code == roomCode && h.roomManager.WithCurrentRoomPublication(gameRoom, func() {
+		h.gamesLifecycleMu.Lock()
+		h.gamesMu.Lock()
 		// Keep registration serialized with GetGameSession. Disconnect and
 		// reconnect update the room first, then look up the session, so either
 		// this snapshot observes the event or that lookup updates the published
 		// session after this lock is released.
-		if h.roomManager != nil {
-			if gameRoom := h.roomManager.GetRoom(roomCode); gameRoom != nil {
-				gs.SyncRoomPresence(gameRoom.SnapshotPlayers())
-			}
+		gs.SetRoomManager(h.roomManager)
+		gs.SyncRoomPresence(gameRoom.SnapshotPlayers())
+		if current := h.games[roomCode]; current.session != nil && current.session != gs {
+			previous = current.session
 		}
-		h.games[roomCode] = gs
+		h.games[roomCode] = gameRegistration{room: gameRoom, session: gs}
+		h.gamesMu.Unlock()
+		h.gamesLifecycleMu.Unlock()
+	})
+
+	// Retire can wait for an in-progress GameSession action and must never run
+	// under gamesMu, which also protects reconnect and room-removal progress.
+	if !accepted {
+		gs.Retire()
+	} else if previous != nil {
+		previous.Retire()
 	}
+	return accepted
+}
+
+func (h *Handler) handlePresenceChanged(gameRoom *room.Room, playerID string, online bool) {
+	if gameRoom == nil || playerID == "" {
+		return
+	}
+	h.gamesMu.RLock()
+	registration := h.games[gameRoom.Code]
+	h.gamesMu.RUnlock()
+	if registration.room != gameRoom || registration.session == nil || registration.session.RoomIdentity() != gameRoom {
+		return
+	}
+	if online {
+		registration.session.PlayerOnline(playerID)
+		return
+	}
+	registration.session.PlayerOffline(playerID)
+}
+
+func (h *Handler) handleRoomRemoved(removal room.RoomRemoval) {
+	var retired *session.GameSession
+	h.gamesLifecycleMu.Lock()
+	h.gamesMu.Lock()
+	if current := h.games[removal.Code]; current.room == removal.Room {
+		delete(h.games, removal.Code)
+		retired = current.session
+	}
+	h.gamesMu.Unlock()
+	h.gamesLifecycleMu.Unlock()
+
+	if retired != nil {
+		retired.Retire()
+	}
+	if h.matcher != nil {
+		h.matcher.RoomRemoved(removal.Room)
+	}
+	if removal.Reason == room.RoomRemovalLeft {
+		return
+	}
+
+	// Serialize the terminal room event with any final reconnect response. If a
+	// reconnect won the boundary, RoomLeft is enqueued after it; otherwise the
+	// reconnect observes that RoomManager no longer owns the room.
+	h.gamesLifecycleMu.Lock()
+	message := codec.MustNewMessage(protocol.MsgRoomLeft, protocol.RoomLeftPayload{RoomCode: removal.Code})
+	for _, player := range removal.Players {
+		if player.Client == nil || player.IsBot {
+			continue
+		}
+		if _, err := types.SendMessageIfIdentity(player.Client, player.ID, "", message); err != nil {
+			log.Printf("发送房间 %s 移除事件给玩家 %s 失败: %v", removal.Code, player.ID, err)
+		}
+	}
+	h.gamesLifecycleMu.Unlock()
 }
 
 // initHandlers 初始化消息处理器映射

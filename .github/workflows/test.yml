@@ -60,7 +60,7 @@ jobs:
 
       - name: Check generated Go protocol
         run: |
-          protoc --proto_path=. --go_out=. \
+          protoc --experimental_allow_proto3_optional --proto_path=. --go_out=. \
             --go_opt=module=github.com/palemoky/fight-the-landlord \
             internal/protocol/proto/*.proto
           (cd internal/protocol/convert/msgtype && go run gen.go)

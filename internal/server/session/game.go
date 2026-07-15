@@ -10,6 +10,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 )
 
@@ -46,6 +47,7 @@ type GamePlayer struct {
 // GameSession 游戏会话
 type GameSession struct {
 	room        *room.Room
+	roomManager atomic.Pointer[room.RoomManager]
 	leaderboard *storage.LeaderboardManager
 	gameConfig  config.GameConfig
 	state       GameState
@@ -76,9 +78,11 @@ type GameSession struct {
 	landlordPlays     int // 地主实际出牌次数（用于反春天判断）
 	farmerPlays       int // 农民实际出牌次数（用于春天判断）
 	settledMultiplier int // 游戏结束后的最终倍数（含春天/反春天）
+	settlement        *protocol.GameSettlementDTO
 	pendingDeliveries []pendingDelivery
 	pendingResults    []pendingGameResult
 	pendingRoomReset  bool
+	retired           bool // guarded by mu; retirement is serialized by actionMu
 
 	// 出牌相关
 	currentPlayer     int             // 当前出牌玩家索引
@@ -130,6 +134,25 @@ func NewGameSessionWithPlayers(r *room.Room, roomPlayers []room.PlayerSnapshot, 
 		landlordCandidate: -1,
 		lastPlayerIdx:     -1,
 		bidMultiplier:     1,
+	}
+}
+
+// RoomIdentity returns the immutable Room pointer this session was created
+// from. Lifecycle registries use pointer identity to reject stale sessions when
+// a room code is reused.
+func (gs *GameSession) RoomIdentity() *room.Room {
+	if gs == nil {
+		return nil
+	}
+	return gs.room
+}
+
+// SetRoomManager installs the exact room lifecycle used for delivery. The
+// pointer is atomic because registration may race a retiring test seam, while
+// normal production registration sets it before Start.
+func (gs *GameSession) SetRoomManager(manager *room.RoomManager) {
+	if gs != nil {
+		gs.roomManager.Store(manager)
 	}
 }
 

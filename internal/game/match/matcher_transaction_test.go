@@ -121,8 +121,9 @@ func TestMatcherAssemblyFailuresRollbackBeforeRoomJoined(t *testing.T) {
 					assembly.failCommit = testCase.commitFails
 					return assembly, nil
 				},
-				RegisterSession: func(string, *session.GameSession) {
+				RegisterSession: func(string, *session.GameSession) bool {
 					registered.Add(1)
+					return true
 				},
 				BotFillDelay: time.Hour,
 			})
@@ -137,6 +138,7 @@ func TestMatcherAssemblyFailuresRollbackBeforeRoomJoined(t *testing.T) {
 				waitSignal(t, assembly.rollbackDone, "RoomAssembly.Rollback")
 				require.Equal(t, testCase.wantRollback, assembly.rollbackCalls.Load())
 			}
+			matcher.workers.Wait()
 
 			for _, client := range clients {
 				require.False(t, client.hasMessage(protocol.MsgRoomJoined))
@@ -180,6 +182,7 @@ func TestMatcherRemoveFromQueueCancelsInflightTransaction(t *testing.T) {
 	require.True(t, matcher.RemoveFromQueue(clients[0]), "CancelMatch must cancel inflight work")
 	waitSignal(t, assembly.rollbackDone, "RoomAssembly.Rollback")
 	require.EqualValues(t, 1, assembly.rollbackCalls.Load())
+	matcher.workers.Wait()
 	for _, client := range clients {
 		require.False(t, client.hasMessage(protocol.MsgRoomJoined))
 		require.Empty(t, client.GetRoom())
@@ -265,6 +268,7 @@ func TestMatcherDisconnectCancelsInflightAtTransactionBoundaries(t *testing.T) {
 			matcher.PlayerDisconnected(victim)
 			waitSignal(t, assembly.rollbackDone, "RoomAssembly.Rollback")
 			require.EqualValues(t, 1, assembly.rollbackCalls.Load())
+			matcher.workers.Wait()
 			for _, client := range clients {
 				require.False(t, client.hasMessage(protocol.MsgRoomJoined))
 				require.Empty(t, client.GetRoom())
@@ -448,8 +452,11 @@ func TestMatcherDefaultRoomTransactionCommitsCompleteRoster(t *testing.T) {
 			TurnTimeout: 3600,
 			BidTimeout:  3600,
 		},
-		RegisterSession: func(_ string, game *session.GameSession) { registered <- game },
-		BotFillDelay:    time.Hour,
+		RegisterSession: func(_ string, game *session.GameSession) bool {
+			registered <- game
+			return true
+		},
+		BotFillDelay: time.Hour,
 	})
 	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
 
@@ -507,13 +514,34 @@ func TestMatcherPostCommitDisconnectIsCarriedIntoRegisteredSession(t *testing.T)
 	registry.Set(peers[1])
 	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
 	registered := make(chan *session.GameSession, 1)
+	var registrationMu sync.Mutex
+	var registeredGame *session.GameSession
+	roomManager.SetOnPresenceChanged(func(_ *room.Room, playerID string, online bool) {
+		registrationMu.Lock()
+		defer registrationMu.Unlock()
+		if registeredGame == nil {
+			return
+		}
+		if online {
+			registeredGame.PlayerOnline(playerID)
+		} else {
+			registeredGame.PlayerOffline(playerID)
+		}
+	})
 	matcher := NewMatcher(MatcherDeps{
 		RoomManager:         roomManager,
 		QueueTimeout:        time.Hour,
 		ResolveActiveClient: registry.Resolve,
 		GameConfig:          config.GameConfig{TurnTimeout: 3600, BidTimeout: 3600},
-		RegisterSession:     func(_ string, game *session.GameSession) { registered <- game },
-		BotFillDelay:        time.Hour,
+		RegisterSession: func(_ string, game *session.GameSession) bool {
+			registrationMu.Lock()
+			game.SyncRoomPresence(game.RoomIdentity().SnapshotPlayers())
+			registeredGame = game
+			registrationMu.Unlock()
+			registered <- game
+			return true
+		},
+		BotFillDelay: time.Hour,
 	})
 	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
 
@@ -524,9 +552,14 @@ func TestMatcherPostCommitDisconnectIsCarriedIntoRegisteredSession(t *testing.T)
 	require.False(t, matcher.RemoveFromQueue(first))
 	registry.Remove(first.GetID())
 	require.False(t, matcher.PlayerDisconnected(first), "committed work no longer belongs to the queue")
-	roomManager.NotifyPlayerOffline(first)
+	offlineDone := make(chan struct{})
+	go func() {
+		roomManager.NotifyPlayerOffline(first)
+		close(offlineDone)
+	}()
 	close(first.release)
 	game := waitValue(t, registered, "registered committed game")
+	waitSignal(t, offlineDone, "post-commit disconnect publication")
 	t.Cleanup(game.StopAllTimers)
 	for _, client := range peers {
 		client.waitForMessage(t, protocol.MsgRoomJoined)

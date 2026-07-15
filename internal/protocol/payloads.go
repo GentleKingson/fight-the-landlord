@@ -76,6 +76,17 @@ type GameStateDTO struct {
 	Multiplier          int                 `json:"multiplier"`            // 当前倍数
 	BaseScore           int                 `json:"base_score"`            // 本局底分
 	PlayedCards         []PlayerPlayedCards `json:"played_cards"`          // 已公开出牌账本
+	Settlement          *GameSettlementDTO  `json:"settlement,omitempty"`  // 结束态的完整权威结算
+}
+
+// GameSettlementDTO 完整的权威结算快照（用于结束态重连恢复）。
+type GameSettlementDTO struct {
+	WinnerID         string        `json:"winner_id"`
+	WinnerName       string        `json:"winner_name"`
+	WinnerIsLandlord bool          `json:"winner_is_landlord"`
+	Multiplier       int           `json:"multiplier"`
+	Scores           []PlayerScore `json:"scores"`
+	PlayerHands      []PlayerHand  `json:"player_hands"`
 }
 
 // PlayerPlayedCards 某位玩家本局已经公开打出的牌。

@@ -73,6 +73,14 @@ func TestGameStateDTORoundTrip(t *testing.T) {
 		LastPlayerID: "p2",
 		MustPlay:     true,
 		CanBeat:      true,
+		Settlement: &protocol.GameSettlementDTO{
+			WinnerID:         "p1",
+			WinnerName:       "Player1",
+			WinnerIsLandlord: true,
+			Multiplier:       4,
+			Scores:           []protocol.PlayerScore{{PlayerID: "p1", PlayerName: "Player1", IsLandlord: true, Score: 8}},
+			PlayerHands:      []protocol.PlayerHand{{PlayerID: "p2", PlayerName: "Player2", Cards: []protocol.CardInfo{{Suit: 2, Rank: 7, Color: 0}}}},
+		},
 	}
 
 	proto := GameStateDTOToProto(gs)
@@ -87,6 +95,15 @@ func TestGameStateDTORoundTrip(t *testing.T) {
 	assert.Len(t, result.Hand, len(gs.Hand))
 	assert.Len(t, result.BottomCards, len(gs.BottomCards))
 	assert.Len(t, result.LastPlayed, len(gs.LastPlayed))
+	assert.Equal(t, gs.Settlement, result.Settlement)
+}
+
+func TestGameStateDTOWithoutSettlementRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	result := ProtoToGameStateDTO(GameStateDTOToProto(&protocol.GameStateDTO{Phase: "ended"}))
+
+	assert.Nil(t, result.Settlement)
 }
 
 // --- PlayerHand conversion tests ---

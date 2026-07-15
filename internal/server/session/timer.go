@@ -45,7 +45,7 @@ func (gs *GameSession) startPlayTimer() {
 func (gs *GameSession) handlePlayTimeout(expectedTurnID int64) {
 	gs.mu.Lock()
 
-	if gs.state != GameStatePlaying || gs.turnID != expectedTurnID {
+	if gs.retired || gs.state != GameStatePlaying || gs.turnID != expectedTurnID {
 		gs.mu.Unlock()
 		return
 	}
@@ -97,6 +97,9 @@ func (gs *GameSession) StopAllTimers() {
 func (gs *GameSession) PlayerOffline(playerID string) {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	if gs.retired {
+		return
+	}
 
 	// 找到玩家
 	playerIdx := -1
@@ -165,6 +168,9 @@ func (gs *GameSession) pauseOfflineTurnLocked(playerID string, playerIdx int) bo
 func (gs *GameSession) PlayerOnline(playerID string) {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	if gs.retired {
+		return
+	}
 
 	// 找到玩家
 	playerIdx := -1
@@ -229,6 +235,10 @@ func (gs *GameSession) PlayerOnline(playerID string) {
 // handleOfflineTimeout 离线超时处理
 func (gs *GameSession) handleOfflineTimeout(playerID string) {
 	gs.mu.Lock()
+	if gs.retired {
+		gs.mu.Unlock()
+		return
+	}
 
 	// 找到玩家
 	playerIdx := -1

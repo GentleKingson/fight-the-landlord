@@ -9,8 +9,25 @@ export function GameResult({ socket }: { socket: GameSocket }) {
   const finalMultiplier = useAppStore((state) => state.finalMultiplier);
   const scores = useAppStore((state) => state.scores);
   const playerHands = useAppStore((state) => state.playerHands);
+  const settlementSyncError = useAppStore((state) => state.settlementSyncError);
   const readyPending = useAppStore((state) => Boolean(state.pendingCommands.ready));
   const leavePending = useAppStore((state) => Boolean(state.pendingCommands['leave-room']));
+
+  if (settlementSyncError) {
+    return (
+      <main className="result-screen">
+        <section className="result-panel" role="alert">
+          <h1>结算同步失败</h1>
+          <p>{settlementSyncError}</p>
+          <div className="room-actions">
+            <button className="secondary-action" disabled={leavePending} onClick={() => dispatchCommand(socket, { kind: 'leave-room' })}>
+              {leavePending ? '返回中...' : '返回大厅'}
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="result-screen">

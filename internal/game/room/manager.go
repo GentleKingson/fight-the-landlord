@@ -1,7 +1,6 @@
 package room
 
 import (
-	"context"
 	"log"
 	"time"
 
@@ -13,26 +12,67 @@ import (
 
 // CreateRoom 创建房间
 func (rm *RoomManager) CreateRoom(client types.ClientInterface) (*Room, error) {
+	return rm.createRoom(client, false)
+}
+
+// CreateRoomWithResponse publishes the creator's success response before the
+// room can accept a join whose PlayerJoined event would otherwise overtake it.
+func (rm *RoomManager) CreateRoomWithResponse(client types.ClientInterface) (*Room, error) {
+	return rm.createRoom(client, true)
+}
+
+func (rm *RoomManager) createRoom(client types.ClientInterface, publishResponse bool) (*Room, error) {
 	creator := newRoomPlayer(client, 0)
 	rm.mu.Lock()
 	code := rm.generateRoomCode()
 	room := newRoom(code, time.Now())
+	room.publishMu.Lock()
+	if !types.CompareAndSetRoom(client, creator.ID, "", code) {
+		room.publishMu.Unlock()
+		rm.mu.Unlock()
+		return nil, apperrors.ErrNotInRoom
+	}
 	room.players[creator.ID] = creator
 	room.playerOrder = append(room.playerOrder, creator.ID)
-	client.SetRoom(code)
 	rm.rooms[code] = room
 	rm.mu.Unlock()
+	if publishResponse {
+		message := codec.MustNewMessage(protocol.MsgRoomCreated, protocol.RoomCreatedPayload{
+			RoomCode: room.Code,
+			Player: protocol.PlayerInfo{
+				ID:     creator.ID,
+				Name:   creator.Name,
+				Seat:   creator.Seat,
+				Online: true,
+				IsBot:  creator.IsBot,
+			},
+		})
+		if _, err := rm.sendIfCurrentMemberPublished(room, creator.ID, client, message); err != nil {
+			log.Printf("发送房间 %s 创建结果给玩家 %s 失败: %v", room.Code, creator.ID, err)
+		}
+	}
+	room.publishMu.Unlock()
 
 	// 保存到 Redis
 	rm.saveRoomAsync(room)
 
-	log.Printf("🏠 房间 %s 已创建，玩家 %s", code, client.GetName())
+	log.Printf("🏠 房间 %s 已创建，玩家 %s", code, creator.Name)
 
 	return room, nil
 }
 
 // JoinRoom 加入房间
 func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Room, error) {
+	return rm.joinRoom(client, code, false)
+}
+
+// JoinRoomWithResponse commits membership and publishes the joining player's
+// full roster before any later room mutation can publish an incremental event.
+func (rm *RoomManager) JoinRoomWithResponse(client types.ClientInterface, code string) (*Room, error) {
+	return rm.joinRoom(client, code, true)
+}
+
+func (rm *RoomManager) joinRoom(client types.ClientInterface, code string, publishResponse bool) (*Room, error) {
 	joining := newRoomPlayer(client, 0)
 	rm.mu.RLock()
 	room, exists := rm.rooms[code]
@@ -40,39 +80,62 @@ func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Roo
 		rm.mu.RUnlock()
 		return nil, apperrors.ErrRoomNotFound
 	}
+	room.publishMu.Lock()
 
 	room.mu.Lock()
 	if len(room.players) >= 3 {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.RUnlock()
 		return nil, apperrors.ErrRoomFull
 	}
 
 	if room.state != RoomStateWaiting {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.RUnlock()
 		return nil, apperrors.ErrGameStarted
 	}
 
 	if _, duplicate := room.players[joining.ID]; duplicate {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
+		rm.mu.RUnlock()
+		return nil, apperrors.ErrNotInRoom
+	}
+	if !types.CompareAndSetRoom(client, joining.ID, "", code) {
+		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.RUnlock()
 		return nil, apperrors.ErrNotInRoom
 	}
 	joining.Seat = room.nextAvailableSeatLocked()
 	room.players[joining.ID] = joining
 	room.insertPlayerOrderLocked(joining.ID)
-	client.SetRoom(code)
 	joinedInfo, _ := room.playerInfoLocked(joining.ID)
-	recipients := room.snapshotRecipientsLocked(joining.ID)
+	recipients := room.snapshotDeliveryRecipientsLocked(joining.ID)
+	var joinedMessage *protocol.Message
+	if publishResponse {
+		joinedMessage = codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
+			RoomCode: room.Code,
+			Player:   joinedInfo,
+			Players:  room.allPlayersInfoLocked(),
+		})
+	}
 	room.mu.Unlock()
 	rm.mu.RUnlock()
 
-	log.Printf("👤 玩家 %s 加入房间 %s", client.GetName(), code)
+	log.Printf("👤 玩家 %s 加入房间 %s", joining.Name, code)
+	if joinedMessage != nil {
+		if _, err := rm.sendIfCurrentMemberPublished(room, joining.ID, client, joinedMessage); err != nil {
+			log.Printf("发送房间 %s 加入结果给玩家 %s 失败: %v", room.Code, joining.ID, err)
+		}
+	}
 
-	sendToRecipients(recipients, codec.MustNewMessage(protocol.MsgPlayerJoined, protocol.PlayerJoinedPayload{
+	rm.sendToCurrentRoomPublished(room, recipients, codec.MustNewMessage(protocol.MsgPlayerJoined, protocol.PlayerJoinedPayload{
 		Player: joinedInfo,
 	}))
+	room.publishMu.Unlock()
 
 	// 保存到 Redis
 	rm.saveRoomAsync(room)
@@ -113,6 +176,7 @@ func (r *Room) insertPlayerOrderLocked(playerID string) {
 // LeaveRoom 离开房间。返回值表示客户端的房间身份是否已被权威清除。
 func (rm *RoomManager) LeaveRoom(client types.ClientInterface) bool {
 	roomCode := client.GetRoom()
+	playerID := client.GetID()
 	if roomCode == "" {
 		return false
 	}
@@ -123,40 +187,45 @@ func (rm *RoomManager) LeaveRoom(client types.ClientInterface) bool {
 		rm.mu.Unlock()
 		return false
 	}
+	room.publishMu.Lock()
 	room.mu.Lock()
 
-	player, exists := room.players[client.GetID()]
+	player, exists := room.players[playerID]
 	if !exists || player == nil || player.Client != client {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.Unlock()
 		return false
 	}
 	if room.state != RoomStateWaiting {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.Unlock()
 		return false
 	}
-	client.SetRoom("")
-	removed, _ := room.removePlayerLocked(client.GetID())
-
-	empty := len(room.players) == 0
+	removed := snapshotPlayer(player)
+	empty := len(room.players) == 1
+	var removal roomRemovalDispatch
 	if empty {
-		delete(rm.rooms, roomCode)
+		removal, _ = rm.removePublishedRoomLocked(room, RoomRemovalLeft)
+	} else {
+		types.CompareAndSetRoom(client, removed.ID, roomCode, "")
+		room.removePlayerLocked(removed.ID)
 	}
-	recipients := room.snapshotRecipientsLocked(client.GetID())
+	recipients := room.snapshotDeliveryRecipientsLocked(removed.ID)
 	room.mu.Unlock()
 	rm.mu.Unlock()
 
-	sendToRecipients(recipients, codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
+	rm.sendToCurrentRoomPublished(room, recipients, codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
 		PlayerID:   removed.ID,
 		PlayerName: removed.Name,
 	}))
+	room.publishMu.Unlock()
 	log.Printf("👋 玩家 %s 离开房间 %s (座位 %d)", removed.Name, roomCode, removed.Seat)
 
 	// 如果房间空了，删除房间
 	if empty {
-		// 从 Redis 删除
-		rm.deleteRoomAsync(roomCode)
+		rm.dispatchRoomRemoval(removal)
 		log.Printf("🏠 房间 %s 已解散", roomCode)
 	} else {
 		rm.saveRoomAsync(room)
@@ -178,27 +247,32 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 		rm.mu.RUnlock()
 		return apperrors.ErrRoomNotFound
 	}
+	room.publishMu.Lock()
 
 	room.mu.Lock()
 	player, exists := room.players[client.GetID()]
 	if !exists || player == nil || player.Client != client {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.RUnlock()
 		return apperrors.ErrNotInRoom
 	}
 	if room.state != RoomStateWaiting {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.RUnlock()
 		return apperrors.ErrGameStarted
 	}
 
 	player.Ready = ready
-	recipients := room.snapshotRecipientsLocked("")
+	playerID := player.ID
+	recipients := room.snapshotDeliveryRecipientsLocked("")
 	shouldStart := room.checkAllReadyLocked()
 	var startPlayers []PlayerSnapshot
 	if shouldStart {
 		if err := room.startGameLocked(); err != nil {
 			room.mu.Unlock()
+			room.publishMu.Unlock()
 			rm.mu.RUnlock()
 			return err
 		}
@@ -208,10 +282,11 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	room.mu.Unlock()
 	rm.mu.RUnlock()
 
-	sendToRecipients(recipients, codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
-		PlayerID: client.GetID(),
+	rm.sendToCurrentRoomPublished(room, recipients, codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
+		PlayerID: playerID,
 		Ready:    ready,
 	}))
+	room.publishMu.Unlock()
 
 	if shouldStart {
 		// The callback may acquire GameSession.mu and therefore must never run
@@ -225,30 +300,6 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	}
 
 	return nil
-}
-
-func (rm *RoomManager) saveRoomAsync(room *Room) {
-	if rm.redisStore == nil || !rm.redisStore.IsReady() {
-		return
-	}
-	code := room.Code
-	data := room.ToRoomData()
-	go func() {
-		if err := rm.redisStore.SaveRoom(context.Background(), code, data); err != nil {
-			log.Printf("保存房间 %s 到 Redis 失败: %v", code, err)
-		}
-	}()
-}
-
-func (rm *RoomManager) deleteRoomAsync(code string) {
-	if rm.redisStore == nil || !rm.redisStore.IsReady() {
-		return
-	}
-	go func() {
-		if err := rm.redisStore.DeleteRoom(context.Background(), code); err != nil {
-			log.Printf("从 Redis 删除房间 %s 失败: %v", code, err)
-		}
-	}()
 }
 
 func (rm *RoomManager) SetOnGameStart(callback func(*Room, []PlayerSnapshot)) {

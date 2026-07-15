@@ -104,6 +104,87 @@ describe('authoritative snapshot restoration', () => {
     expect(useAppStore.getState().playedCardsLedger).toBe(firstLedger);
     expect(useAppStore.getState().recentActions).toBe(firstActions);
   });
+
+  it('restores the complete authoritative settlement after GameOver reconnect', () => {
+    const restored = restoreGameSnapshot(snapshot({
+      phase: 'ended',
+      settlement: {
+        winner_id: 'p1',
+        winner_name: '青竹',
+        winner_is_landlord: true,
+        multiplier: 4,
+        scores: [
+          { player_id: 'p1', player_name: '青竹', is_landlord: true, score: -8 },
+          { player_id: 'p2', player_name: '山月', is_landlord: false, score: 4 },
+          { player_id: 'p3', player_name: '松风', is_landlord: false, score: 4 }
+        ],
+        player_hands: [
+          { player_id: 'p1', player_name: '青竹', cards: [card(0, 3)] },
+          { player_id: 'p2', player_name: '山月', cards: [] },
+          { player_id: 'p3', player_name: '松风', cards: [card(1, 4)] }
+        ]
+      }
+    }), { currentPlayerId: 'p1', receivedAt: 9_000 });
+
+    expect(restored).toMatchObject({
+      phase: 'game_over',
+      winnerId: 'p1',
+      winnerName: '青竹',
+      winnerIsLandlord: true,
+      finalMultiplier: 4,
+      settlementSyncError: ''
+    });
+    expect(restored.scores).toHaveLength(3);
+    expect(restored.playerHands).toHaveLength(3);
+  });
+
+  it('marks a legacy ended snapshot without settlement as unsynchronized', () => {
+    const restored = restoreGameSnapshot(snapshot({ phase: 'ended' }), {
+      currentPlayerId: 'p1',
+      receivedAt: 9_000
+    });
+
+    expect(restored).toMatchObject({
+      phase: 'game_over',
+      winnerId: '',
+      winnerName: '',
+      scores: [],
+      playerHands: [],
+      settlementSyncError: '结算数据缺失，请重新连接同步本局结果'
+    });
+  });
+
+  it.each([
+    {
+      winner_id: '',
+      winner_name: '',
+      winner_is_landlord: false,
+      multiplier: 0,
+      scores: [],
+      player_hands: []
+    },
+    {
+      winner_id: 'p1',
+      winner_name: '青竹',
+      winner_is_landlord: true,
+      multiplier: 2,
+      scores: [{ player_id: 'p1', player_name: '青竹', is_landlord: true, score: 4 }],
+      player_hands: [{ player_id: 'p1', player_name: '青竹', cards: [] }]
+    }
+  ])('rejects a present but incomplete settlement instead of inventing a winner', (settlement) => {
+    const restored = restoreGameSnapshot(snapshot({ phase: 'ended', settlement }), {
+      currentPlayerId: 'p1',
+      receivedAt: 9_000
+    });
+
+    expect(restored).toMatchObject({
+      winnerId: '',
+      winnerName: '',
+      scores: [],
+      playerHands: [],
+      settlementSyncError: '结算数据缺失，请重新连接同步本局结果'
+    });
+  });
 });
 
 describe('authoritative event ordering', () => {

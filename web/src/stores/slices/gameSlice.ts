@@ -51,6 +51,7 @@ export interface GameSlice {
   finalMultiplier: number;
   scores: PlayerScore[];
   playerHands: PlayerHand[];
+  settlementSyncError: string;
   playedCardsLedger: PlayedCardLedger;
   cardCounter: Record<number, number>;
   recentActions: TableAction[];
@@ -86,6 +87,7 @@ export const initialGameSlice: GameSlice = {
   finalMultiplier: 1,
   scores: [],
   playerHands: [],
+  settlementSyncError: '',
   playedCardsLedger: {},
   cardCounter: {},
   recentActions: [],
@@ -291,6 +293,7 @@ function reduceAcceptedGameMessage(
         multiplier: payload.multiplier ?? state.multiplier,
         scores: payload.scores ?? [],
         playerHands: payload.player_hands ?? [],
+        settlementSyncError: '',
         drawer: 'none'
       }, ['bid', 'play', 'pass']);
     }
@@ -355,6 +358,29 @@ export function restoreGameSnapshot(
   const turnId = context.event?.turn_id ?? dto.turn_id ?? 0;
   const turnDeadlineMs = context.event?.turn_deadline_ms ?? dto.turn_deadline_ms ?? 0;
   const serverTimeMs = context.event?.server_time_ms ?? dto.server_time_ms ?? 0;
+  const settlement = phase === 'game_over' && hasCompleteSettlement(dto)
+    ? dto.settlement
+    : undefined;
+  const settlementPatch: Partial<GameSlice> = phase !== 'game_over'
+    ? {}
+    : settlement
+      ? {
+          winnerId: settlement.winner_id,
+          winnerName: settlement.winner_name,
+          winnerIsLandlord: settlement.winner_is_landlord,
+          finalMultiplier: settlement.multiplier,
+          multiplier: settlement.multiplier,
+          scores: settlement.scores ?? [],
+          playerHands: settlement.player_hands ?? [],
+          settlementSyncError: ''
+        }
+      : {
+          winnerId: '',
+          winnerName: '',
+          scores: [],
+          playerHands: [],
+          settlementSyncError: '结算数据缺失，请重新连接同步本局结果'
+        };
 
   return {
     ...initialGameSlice,
@@ -392,8 +418,34 @@ export function restoreGameSnapshot(
     recentActions: lastPlayed.length > 0
       ? [{ type: 'play', player_id: lastPlayedBy, player_name: lastPlayedName, cards: lastPlayed, hand_type: lastHandType, label: '上一手' }]
       : [],
-    selectedCards: new Set()
+    selectedCards: new Set(),
+    ...settlementPatch
   };
+}
+
+function hasCompleteSettlement(dto: GameStateDTO): boolean {
+  const settlement = dto.settlement;
+  if (!settlement
+    || !settlement.winner_id
+    || !settlement.winner_name
+    || !Number.isSafeInteger(settlement.multiplier)
+    || settlement.multiplier <= 0) {
+    return false;
+  }
+
+  const playerIds = new Set((dto.players ?? []).map((player) => player.id).filter(Boolean));
+  if (playerIds.size === 0
+    || settlement.scores.length !== playerIds.size
+    || settlement.player_hands.length !== playerIds.size
+    || !playerIds.has(settlement.winner_id)) {
+    return false;
+  }
+
+  const scoreIds = new Set(settlement.scores.map((score) => score.player_id).filter(Boolean));
+  const handIds = new Set(settlement.player_hands.map((hand) => hand.player_id).filter(Boolean));
+  return scoreIds.size === playerIds.size
+    && handIds.size === playerIds.size
+    && [...playerIds].every((playerId) => scoreIds.has(playerId) && handIds.has(playerId));
 }
 
 function mapSnapshotPhase(phase: string): RoomSlice['phase'] {

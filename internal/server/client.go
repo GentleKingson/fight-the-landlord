@@ -205,12 +205,75 @@ func (c *Client) WritePump() {
 func (c *Client) SendMessage(msg *protocol.Message) error {
 	c.initializeLifecycle()
 
+	data, err := encodeClientMessage(msg)
+	if err != nil {
+		return err
+	}
+	sendErr := c.enqueueEncodedMessage(data)
+	c.handleSendError(sendErr)
+	return sendErr
+}
+
+// SendMessageIfRoom enqueues msg only while the physical connection still has
+// expectedRoom. Holding c.mu through the bounded enqueue gives SetRoom a
+// single ordering boundary: either this message is queued first, or the room
+// binding wins and the stale message is skipped.
+func (c *Client) SendMessageIfRoom(expectedRoom string, msg *protocol.Message) (bool, error) {
+	c.initializeLifecycle()
+
+	data, err := encodeClientMessage(msg)
+	if err != nil {
+		return false, err
+	}
+
+	c.mu.RLock()
+	if c.RoomID != expectedRoom {
+		c.mu.RUnlock()
+		return false, nil
+	}
+	sendErr := c.enqueueEncodedMessage(data)
+	c.mu.RUnlock()
+
+	// Slow-client disconnect reads identity and may close the connection. Keep
+	// it outside c.mu so a full queue cannot deadlock room rebinding.
+	c.handleSendError(sendErr)
+	return sendErr == nil, sendErr
+}
+
+// SendMessageIfIdentity enqueues msg only while this physical connection is
+// still bound to the exact logical player and room. RebindClient uses the same
+// mutex, so an old private delivery and a new identity have one deterministic
+// ordering boundary.
+func (c *Client) SendMessageIfIdentity(expectedPlayerID, expectedRoom string, msg *protocol.Message) (bool, error) {
+	c.initializeLifecycle()
+
+	data, err := encodeClientMessage(msg)
+	if err != nil {
+		return false, err
+	}
+
+	c.mu.RLock()
+	if c.ID != expectedPlayerID || c.RoomID != expectedRoom {
+		c.mu.RUnlock()
+		return false, nil
+	}
+	sendErr := c.enqueueEncodedMessage(data)
+	c.mu.RUnlock()
+
+	c.handleSendError(sendErr)
+	return sendErr == nil, sendErr
+}
+
+func encodeClientMessage(msg *protocol.Message) ([]byte, error) {
 	data, err := codec.Encode(msg)
 	if err != nil {
 		log.Printf("消息编码错误: %v", err)
-		return fmt.Errorf("encode client message: %w", err)
+		return nil, fmt.Errorf("encode client message: %w", err)
 	}
+	return data, nil
+}
 
+func (c *Client) enqueueEncodedMessage(data []byte) error {
 	c.lifecycleMu.RLock()
 	if c.closed.Load() {
 		c.lifecycleMu.RUnlock()
@@ -227,11 +290,13 @@ func (c *Client) SendMessage(msg *protocol.Message) error {
 		sendErr = ErrClientSendBufferFull
 	}
 	c.lifecycleMu.RUnlock()
+	return sendErr
+}
 
-	if errors.Is(sendErr, ErrClientSendBufferFull) {
+func (c *Client) handleSendError(err error) {
+	if errors.Is(err, ErrClientSendBufferFull) {
 		c.disconnectSlowClient()
 	}
-	return sendErr
 }
 
 func (c *Client) disconnectSlowClient() {
@@ -267,11 +332,6 @@ func (c *Client) handleDisconnect() {
 	// 如果在房间中，通知房间玩家掉线（但不移除）
 	if roomID != "" && c.server.roomManager != nil {
 		c.server.roomManager.NotifyPlayerOffline(c)
-		if c.server.handler != nil {
-			if gameSession := c.server.handler.GetGameSession(roomID); gameSession != nil {
-				gameSession.PlayerOffline(playerID)
-			}
-		}
 	}
 }
 
@@ -306,11 +366,27 @@ func (c *Client) SetRoom(roomID string) {
 	c.mu.Lock()
 	c.RoomID = roomID
 	playerID := c.ID
-	c.mu.Unlock()
-
 	if c.server != nil && c.server.sessionManager != nil {
 		c.server.sessionManager.SetRoom(playerID, roomID)
 	}
+	c.mu.Unlock()
+}
+
+// CompareAndSetRoom binds or clears room ownership without allowing identity
+// rebinding to slip between validation and mutation.
+func (c *Client) CompareAndSetRoom(expectedPlayerID, expectedRoom, newRoom string) bool {
+	c.mu.Lock()
+	if c.ID != expectedPlayerID || c.RoomID != expectedRoom {
+		c.mu.Unlock()
+		return false
+	}
+	c.RoomID = newRoom
+	playerID := c.ID
+	if c.server != nil && c.server.sessionManager != nil {
+		c.server.sessionManager.SetRoom(playerID, newRoom)
+	}
+	c.mu.Unlock()
+	return true
 }
 
 // GetRoom 获取客户端所在房间
@@ -345,6 +421,18 @@ func (c *Client) rebindIdentity(playerID, playerName, roomID string) {
 	c.ID = playerID
 	c.Name = playerName
 	c.RoomID = roomID
+}
+
+func (c *Client) rebindIdentityIfUnbound(expectedTemporaryID, playerID, playerName, roomID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ID != expectedTemporaryID || c.RoomID != "" {
+		return false
+	}
+	c.ID = playerID
+	c.Name = playerName
+	c.RoomID = roomID
+	return true
 }
 
 func (c *Client) IsBot() bool { return false }

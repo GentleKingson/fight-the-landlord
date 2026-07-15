@@ -108,6 +108,7 @@ func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 		Multiplier:          int64(gs.Multiplier),
 		BaseScore:           int64(gs.BaseScore),
 		PlayedCards:         PlayerPlayedCardsToProto(gs.PlayedCards),
+		Settlement:          GameSettlementDTOToProto(gs.Settlement),
 	}
 }
 
@@ -134,6 +135,35 @@ func ProtoToGameStateDTO(pb *pb.GameStateDTO) *protocol.GameStateDTO {
 		Multiplier:          int(pb.Multiplier),
 		BaseScore:           int(pb.BaseScore),
 		PlayedCards:         ProtoToPlayerPlayedCards(pb.PlayedCards),
+		Settlement:          ProtoToGameSettlementDTO(pb.Settlement),
+	}
+}
+
+func GameSettlementDTOToProto(settlement *protocol.GameSettlementDTO) *pb.GameSettlementDTO {
+	if settlement == nil {
+		return nil
+	}
+	return &pb.GameSettlementDTO{
+		WinnerId:         settlement.WinnerID,
+		WinnerName:       settlement.WinnerName,
+		WinnerIsLandlord: settlement.WinnerIsLandlord,
+		Multiplier:       int64(settlement.Multiplier),
+		Scores:           PlayerScoresToProto(settlement.Scores),
+		PlayerHands:      PlayerHandsToProto(settlement.PlayerHands),
+	}
+}
+
+func ProtoToGameSettlementDTO(settlement *pb.GameSettlementDTO) *protocol.GameSettlementDTO {
+	if settlement == nil {
+		return nil
+	}
+	return &protocol.GameSettlementDTO{
+		WinnerID:         settlement.WinnerId,
+		WinnerName:       settlement.WinnerName,
+		WinnerIsLandlord: settlement.WinnerIsLandlord,
+		Multiplier:       int(settlement.Multiplier),
+		Scores:           ProtoToPlayerScores(settlement.Scores),
+		PlayerHands:      ProtoToPlayerHands(settlement.PlayerHands),
 	}
 }
 

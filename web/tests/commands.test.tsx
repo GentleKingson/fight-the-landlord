@@ -292,6 +292,43 @@ describe('observable command dispatch', () => {
     expect(useAppStore.getState().roomCode).toBe('');
   });
 
+  it('ignores a stale RoomLeft after a replacement room has been bound', () => {
+    useAppStore.setState({
+      phase: 'waiting',
+      roomCode: 'new-room',
+      players: [{
+        id: 'p1', name: '青竹', seat: 0, ready: false, is_landlord: false,
+        cards_count: 0, online: true, is_bot: false
+      }]
+    });
+
+    act(() => useAppStore.getState().handleMessage({
+      type: MsgType.RoomLeft,
+      payload: { room_code: 'old-room' }
+    }));
+
+    expect(useAppStore.getState().phase).toBe('waiting');
+    expect(useAppStore.getState().roomCode).toBe('new-room');
+    expect(useAppStore.getState().players).toHaveLength(1);
+  });
+
+  it('ignores an old RoomLeft after reconnect has returned to matching', () => {
+    useAppStore.setState({
+      phase: 'matching',
+      roomCode: '',
+      matchDeadlineMs: Date.now() + 30_000,
+      matchPractice: false
+    });
+
+    act(() => useAppStore.getState().handleMessage({
+      type: MsgType.RoomLeft,
+      payload: { room_code: 'retired-room' }
+    }));
+
+    expect(useAppStore.getState().phase).toBe('matching');
+    expect(useAppStore.getState().matchDeadlineMs).toBeGreaterThan(0);
+  });
+
   it('correlates chat acknowledgement by stable message_id', () => {
     const command = createChatCommand('你好', 'lobby');
     const result = dispatchCommand(socket, command);

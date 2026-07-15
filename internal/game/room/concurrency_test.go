@@ -388,3 +388,181 @@ func waitForRoomSignal(t *testing.T, signal <-chan struct{}, failure string) {
 		t.Fatal(failure)
 	}
 }
+
+type publicationBarrierClient struct {
+	id   string
+	name string
+
+	mu        sync.Mutex
+	roomCode  string
+	messages  []*protocol.Message
+	blockType protocol.MessageType
+	entered   chan struct{}
+	release   chan struct{}
+	enterOnce sync.Once
+}
+
+func newPublicationBarrierClient(id string) *publicationBarrierClient {
+	return &publicationBarrierClient{id: id, name: "Player " + id}
+}
+
+func (c *publicationBarrierClient) GetID() string   { return c.id }
+func (c *publicationBarrierClient) GetName() string { return c.name }
+func (c *publicationBarrierClient) GetRoom() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.roomCode
+}
+func (c *publicationBarrierClient) SetRoom(code string) {
+	c.mu.Lock()
+	c.roomCode = code
+	c.mu.Unlock()
+}
+func (c *publicationBarrierClient) SendMessage(message *protocol.Message) error {
+	_, err := c.SendMessageIfIdentity(c.id, c.GetRoom(), message)
+	return err
+}
+func (c *publicationBarrierClient) SendMessageIfIdentity(expectedPlayerID, expectedRoom string, message *protocol.Message) (bool, error) {
+	c.mu.Lock()
+	if c.id != expectedPlayerID || c.roomCode != expectedRoom {
+		c.mu.Unlock()
+		return false, nil
+	}
+	c.messages = append(c.messages, message)
+	shouldBlock := c.blockType == message.Type
+	entered, release := c.entered, c.release
+	c.mu.Unlock()
+	if shouldBlock {
+		c.enterOnce.Do(func() { close(entered) })
+		<-release
+	}
+	return true, nil
+}
+func (c *publicationBarrierClient) Close()      {}
+func (c *publicationBarrierClient) IsBot() bool { return false }
+
+func (c *publicationBarrierClient) resetMessagesAndBlock(messageType protocol.MessageType) (<-chan struct{}, chan<- struct{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.messages = nil
+	c.blockType = messageType
+	c.entered = make(chan struct{})
+	c.release = make(chan struct{})
+	c.enterOnce = sync.Once{}
+	return c.entered, c.release
+}
+
+func (c *publicationBarrierClient) messageTypes() []protocol.MessageType {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	types := make([]protocol.MessageType, len(c.messages))
+	for index, message := range c.messages {
+		types[index] = message.Type
+	}
+	return types
+}
+
+func TestCreateResponsePrecedesFirstPlayerJoined(t *testing.T) {
+	rm := NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	creator := newPublicationBarrierClient("creator")
+	entered, release := creator.resetMessagesAndBlock(protocol.MsgRoomCreated)
+	created := make(chan *Room, 1)
+	createErr := make(chan error, 1)
+	go func() {
+		gameRoom, err := rm.CreateRoomWithResponse(creator)
+		created <- gameRoom
+		createErr <- err
+	}()
+	waitForRoomSignal(t, entered, "RoomCreated did not reach publication barrier")
+
+	gameRoom := rm.GetRoom(creator.GetRoom())
+	require.NotNil(t, gameRoom)
+	joiner := newPublicationBarrierClient("joiner")
+	joinDone := make(chan error, 1)
+	go func() {
+		_, err := rm.JoinRoomWithResponse(joiner, gameRoom.Code)
+		joinDone <- err
+	}()
+	require.Len(t, gameRoom.SnapshotPlayers(), 1)
+
+	close(release)
+	require.NoError(t, <-createErr)
+	require.Same(t, gameRoom, <-created)
+	require.NoError(t, <-joinDone)
+	require.Equal(t, []protocol.MessageType{
+		protocol.MsgRoomCreated,
+		protocol.MsgPlayerJoined,
+	}, creator.messageTypes())
+}
+
+func TestJoinResponsePrecedesLaterRoomMutation(t *testing.T) {
+	rm := NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	host := newPublicationBarrierClient("host")
+	gameRoom, err := rm.CreateRoom(host)
+	require.NoError(t, err)
+	joining := newPublicationBarrierClient("joining")
+	entered, release := joining.resetMessagesAndBlock(protocol.MsgRoomJoined)
+	joinDone := make(chan error, 1)
+	go func() {
+		_, joinErr := rm.JoinRoomWithResponse(joining, gameRoom.Code)
+		joinDone <- joinErr
+	}()
+	waitForRoomSignal(t, entered, "RoomJoined did not reach publication barrier")
+
+	third := newPublicationBarrierClient("third")
+	thirdDone := make(chan error, 1)
+	go func() {
+		_, joinErr := rm.JoinRoomWithResponse(third, gameRoom.Code)
+		thirdDone <- joinErr
+	}()
+	require.Len(t, gameRoom.SnapshotPlayers(), 2)
+
+	close(release)
+	require.NoError(t, <-joinDone)
+	require.NoError(t, <-thirdDone)
+	require.Equal(t, []protocol.MessageType{
+		protocol.MsgRoomJoined,
+		protocol.MsgPlayerJoined,
+	}, joining.messageTypes())
+}
+
+func TestOfflineReconnectPublishesInCommitOrder(t *testing.T) {
+	rm := NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	host := newPublicationBarrierClient("host")
+	observer := newPublicationBarrierClient("observer")
+	disconnected := newPublicationBarrierClient("reconnecting")
+	gameRoom, err := rm.CreateRoom(host)
+	require.NoError(t, err)
+	_, err = rm.JoinRoom(observer, gameRoom.Code)
+	require.NoError(t, err)
+	_, err = rm.JoinRoom(disconnected, gameRoom.Code)
+	require.NoError(t, err)
+	entered, release := observer.resetMessagesAndBlock(protocol.MsgPlayerOffline)
+
+	offlineDone := make(chan struct{})
+	go func() {
+		rm.NotifyPlayerOffline(disconnected)
+		close(offlineDone)
+	}()
+	waitForRoomSignal(t, entered, "PlayerOffline did not reach publication barrier")
+	replacement := newPublicationBarrierClient(disconnected.GetID())
+	reconnectDone := make(chan error, 1)
+	go func() {
+		reconnectDone <- rm.ReconnectPlayer(disconnected.GetID(), gameRoom.Code, replacement)
+	}()
+
+	close(release)
+	waitForRoomSignal(t, offlineDone, "offline publication did not complete")
+	require.NoError(t, <-reconnectDone)
+	require.Equal(t, []protocol.MessageType{
+		protocol.MsgPlayerOffline,
+		protocol.MsgPlayerOnline,
+	}, observer.messageTypes())
+	recipient, online := gameRoom.PrivateRecipient(disconnected.GetID())
+	require.True(t, online)
+	require.Same(t, replacement, recipient)
+
+	before := observer.messageTypes()
+	rm.NotifyPlayerOffline(disconnected)
+	require.Equal(t, before, observer.messageTypes(), "stale disconnect emitted PlayerOffline after replacement won")
+}

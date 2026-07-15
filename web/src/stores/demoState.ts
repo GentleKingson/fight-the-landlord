@@ -93,7 +93,8 @@ export function seedDemoState(mode: string): void {
     winnerId: 'p1',
     winnerName: '青竹',
     winnerIsLandlord: false,
-    finalMultiplier: 3
+    finalMultiplier: 3,
+    settlementSyncError: ''
   });
 }
 

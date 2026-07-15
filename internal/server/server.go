@@ -134,8 +134,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		BotEngine:           botEngine,
 		BotConfig:           cfg.BOT,
 		ResolveActiveClient: s.GetClientByID,
-		RegisterSession: func(roomCode string, gs *session.GameSession) {
-			s.handler.SetGameSession(roomCode, gs)
+		RegisterSession: func(roomCode string, gs *session.GameSession) bool {
+			return s.handler.SetGameSession(roomCode, gs)
 		},
 	})
 
@@ -152,6 +152,9 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	// 设置房间游戏开始回调
 	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot) {
 		gs := session.NewGameSessionWithPlayers(r, players, s.leaderboard, s.config.Game)
+		if !s.handler.SetGameSession(r.Code, gs) {
+			return
+		}
 		for _, player := range players {
 			if player.Client == nil {
 				continue
@@ -160,7 +163,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 				botClient.SetSession(gs)
 			}
 		}
-		s.handler.SetGameSession(r.Code, gs)
 		gs.Start()
 	})
 

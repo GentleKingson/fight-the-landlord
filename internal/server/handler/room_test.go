@@ -52,6 +52,46 @@ func (c *synchronizedClient) sentMessages() []*protocol.Message {
 	return append([]*protocol.Message(nil), c.messages...)
 }
 
+func TestHandler_CreateRoomPublishesOneAuthoritativeResponse(t *testing.T) {
+	server := new(testutil.MockServer)
+	server.On("IsMaintenanceMode").Return(false)
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	client := testutil.NewSimpleClient("creator", "Creator")
+	h := NewHandler(HandlerDeps{Server: server, RoomManager: roomManager})
+
+	h.handleCreateRoom(client)
+
+	require.Len(t, client.SentMessages(), 1)
+	require.Equal(t, protocol.MsgRoomCreated, client.SentMessages()[0].Type)
+	payload, err := codec.ParsePayload[protocol.RoomCreatedPayload](client.SentMessages()[0])
+	require.NoError(t, err)
+	require.Equal(t, client.GetRoom(), payload.RoomCode)
+	require.Equal(t, client.GetID(), payload.Player.ID)
+	server.AssertExpectations(t)
+}
+
+func TestHandler_JoinRoomPublishesOneSnapshotBeforeIncrementalNotice(t *testing.T) {
+	server := new(testutil.MockServer)
+	server.On("IsMaintenanceMode").Return(false)
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	host := testutil.NewSimpleClient("host", "Host")
+	gameRoom, err := roomManager.CreateRoom(host)
+	require.NoError(t, err)
+	joining := testutil.NewSimpleClient("joining", "Joining")
+	h := NewHandler(HandlerDeps{Server: server, RoomManager: roomManager})
+
+	h.handleJoinRoom(joining, codec.MustNewMessage(protocol.MsgJoinRoom, protocol.JoinRoomPayload{RoomCode: gameRoom.Code}))
+
+	require.Len(t, joining.SentMessages(), 1)
+	require.Equal(t, protocol.MsgRoomJoined, joining.SentMessages()[0].Type)
+	joined, err := codec.ParsePayload[protocol.RoomJoinedPayload](joining.SentMessages()[0])
+	require.NoError(t, err)
+	require.Len(t, joined.Players, 2)
+	require.Len(t, host.SentMessages(), 1)
+	require.Equal(t, protocol.MsgPlayerJoined, host.SentMessages()[0].Type)
+	server.AssertExpectations(t)
+}
+
 func TestHandler_QuickMatchCanBeCancelled(t *testing.T) {
 	server := new(testutil.MockServer)
 	server.On("IsMaintenanceMode").Return(false)

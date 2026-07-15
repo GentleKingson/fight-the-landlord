@@ -5,6 +5,7 @@ export type {
   CardInfo,
   ChatPayload,
   EventMeta,
+  GameSettlementDTO,
   GameStateDTO,
   LeaderboardEntry,
   PlayerHand,

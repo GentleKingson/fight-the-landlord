@@ -1,13 +1,18 @@
 package session
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/game/rule"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
@@ -45,6 +50,169 @@ func TestStartGame_DealCards(t *testing.T) {
 		totalCards += len(p.Hand)
 	}
 	assert.Equal(t, 54, totalCards)
+}
+
+func TestRetireBeforeStartPreventsSessionActivation(t *testing.T) {
+	t.Parallel()
+
+	clients := []*testutil.SimpleClient{
+		testutil.NewSimpleClient("p1", "Player1"),
+		testutil.NewSimpleClient("p2", "Player2"),
+		testutil.NewSimpleClient("p3", "Player3"),
+	}
+	r := room.NewMockRoom("RETIRED", clients[0])
+	r.AddPlayerForTest(clients[1], 1, true)
+	r.AddPlayerForTest(clients[2], 2, true)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
+	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
+
+	gs.Retire()
+	gs.Retire()
+	gs.Start()
+
+	assert.Equal(t, GameStateInit, gs.state)
+	assert.Equal(t, room.RoomStateWaiting, r.State())
+	gs.timerMu.Lock()
+	assert.Nil(t, gs.turnTimer)
+	gs.timerMu.Unlock()
+	for _, client := range clients {
+		assert.Empty(t, client.SentMessages())
+	}
+}
+
+func TestRetiredSessionRejectsLateActionsAndTimerCallbacks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("bid timer", func(t *testing.T) {
+		gs := newRetirementTestSession(t, "RETIRED-BID")
+		gs.Start()
+		playerID := gs.players[gs.currentBidder].ID
+		turnID := gs.turnID
+		version := gs.snapshotVersion
+		gs.Retire()
+
+		assert.ErrorIs(t, gs.handleBid(playerID, false, turnID), apperrors.ErrGameNotStart)
+		assert.Equal(t, version, gs.snapshotVersion)
+	})
+
+	t.Run("play timer", func(t *testing.T) {
+		gs := newRetirementTestSession(t, "RETIRED-PLAY")
+		playingCard := card.Card{Suit: card.Spade, Rank: card.Rank3, Color: card.Black}
+		gs.mu.Lock()
+		gs.state = GameStatePlaying
+		gs.currentPlayer = 0
+		gs.lastPlayerIdx = 0
+		gs.turnID = 17
+		gs.players[0].Hand = []card.Card{playingCard}
+		version := gs.snapshotVersion
+		gs.mu.Unlock()
+		gs.Retire()
+
+		assert.ErrorIs(t, gs.handlePlayCards("p1", []protocol.CardInfo{{Suit: int(playingCard.Suit), Rank: int(playingCard.Rank), Color: int(playingCard.Color)}}, 17), apperrors.ErrGameNotStart)
+		gs.mu.RLock()
+		assert.Equal(t, version, gs.snapshotVersion)
+		assert.Equal(t, []card.Card{playingCard}, gs.players[0].Hand)
+		gs.mu.RUnlock()
+	})
+
+	t.Run("late pass", func(t *testing.T) {
+		gs := newRetirementTestSession(t, "RETIRED-PASS")
+		gs.mu.Lock()
+		gs.state = GameStatePlaying
+		gs.currentPlayer = 0
+		gs.lastPlayerIdx = 1
+		gs.turnID = 23
+		gs.lastPlayedHand = rule.ParsedHand{Type: rule.Single, KeyRank: card.Rank4, Length: 1}
+		version := gs.snapshotVersion
+		gs.mu.Unlock()
+		gs.Retire()
+
+		assert.ErrorIs(t, gs.handlePass("p1", 23), apperrors.ErrGameNotStart)
+		gs.mu.RLock()
+		assert.Equal(t, version, gs.snapshotVersion)
+		assert.Equal(t, 0, gs.currentPlayer)
+		gs.mu.RUnlock()
+	})
+}
+
+func TestRetirePreventsStalePresenceCallbacksFromRearmingTimers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("offline after retirement", func(t *testing.T) {
+		gs := newRetirementTestSession(t, "RETIRED-OFFLINE")
+		gs.Start()
+		player := gs.players[gs.currentBidder]
+		gs.Retire()
+
+		gs.PlayerOffline(player.ID)
+
+		assert.False(t, player.IsOffline)
+		gs.timerMu.Lock()
+		assert.Nil(t, gs.turnTimer)
+		assert.Nil(t, gs.offlineWaitTimer)
+		gs.timerMu.Unlock()
+	})
+
+	t.Run("online after retirement", func(t *testing.T) {
+		gs := newRetirementTestSession(t, "RETIRED-ONLINE")
+		gs.Start()
+		player := gs.players[gs.currentBidder]
+		gs.PlayerOffline(player.ID)
+		gs.Retire()
+
+		gs.PlayerOnline(player.ID)
+
+		assert.True(t, player.IsOffline)
+		gs.timerMu.Lock()
+		assert.Nil(t, gs.turnTimer)
+		assert.Nil(t, gs.offlineWaitTimer)
+		gs.timerMu.Unlock()
+	})
+}
+
+func TestRetireConcurrentWithPlayerOfflineLeavesNoTimer(t *testing.T) {
+	for iteration := range 64 {
+		gs := newRetirementTestSession(t, "RETIRED-RACE")
+		gs.Start()
+		playerID := gs.players[gs.currentBidder].ID
+		start := make(chan struct{})
+		var workers sync.WaitGroup
+		workers.Add(2)
+		go func() {
+			defer workers.Done()
+			<-start
+			gs.Retire()
+		}()
+		go func() {
+			defer workers.Done()
+			<-start
+			gs.PlayerOffline(playerID)
+		}()
+		close(start)
+		workers.Wait()
+
+		gs.PlayerOffline(playerID)
+		gs.timerMu.Lock()
+		assert.Nil(t, gs.turnTimer, "iteration %d", iteration)
+		assert.Nil(t, gs.offlineWaitTimer, "iteration %d", iteration)
+		gs.timerMu.Unlock()
+	}
+}
+
+func newRetirementTestSession(t *testing.T, code string) *GameSession {
+	t.Helper()
+	clients := []*testutil.SimpleClient{
+		testutil.NewSimpleClient("p1", "Player1"),
+		testutil.NewSimpleClient("p2", "Player2"),
+		testutil.NewSimpleClient("p3", "Player3"),
+	}
+	r := room.NewMockRoom(code, clients[0])
+	r.AddPlayerForTest(clients[1], 1, true)
+	r.AddPlayerForTest(clients[2], 2, true)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
+	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15, OfflineWaitTimeout: 30})
+	t.Cleanup(gs.StopAllTimers)
+	return gs
 }
 
 func TestStartGame_CardsAreSorted(t *testing.T) {

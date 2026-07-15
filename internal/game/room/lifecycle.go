@@ -53,53 +53,75 @@ func (rm *RoomManager) NotifyPlayerOffline(client types.ClientInterface) {
 		rm.mu.Unlock()
 		return
 	}
+	room.publishMu.Lock()
 
 	room.mu.Lock()
-	player, exists := room.players[client.GetID()]
+	playerID := client.GetID()
+	player, exists := room.players[playerID]
 	if !exists || player == nil || player.Client != client {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.Unlock()
 		return
 	}
-	player.Client = nil
-
 	allOffline := true
-	for _, player := range room.players {
-		if player != nil && player.Client != nil {
+	for _, current := range room.players {
+		if current != nil && current.Client != nil && current.Client != client {
 			allOffline = false
 		}
 	}
-	recipients := room.snapshotRecipientsLocked("")
-
+	playerName := player.Name
+	var recipients []roomRecipient
+	var removal roomRemovalDispatch
 	if allOffline {
 		log.Printf("🧹 房间 %s 所有玩家已断开连接，清理房间", roomCode)
-		room.state = RoomStateEnded
-		delete(rm.rooms, roomCode)
+		removal, _ = rm.removePublishedRoomLocked(room, RoomRemovalAllOffline)
+	} else {
+		player.Client = nil
+		recipients = room.snapshotDeliveryRecipientsLocked("")
 	}
+	presenceCallback := rm.onPresence
 	room.mu.Unlock()
 	rm.mu.Unlock()
+	if presenceCallback != nil {
+		presenceCallback(room, playerID, false)
+	}
 
 	if allOffline {
-		rm.deleteRoomAsync(roomCode)
+		room.publishMu.Unlock()
+		rm.dispatchRoomRemoval(removal)
 		return
 	}
 
-	sendToRecipients(recipients, codec.MustNewMessage(protocol.MsgPlayerOffline, protocol.PlayerOfflinePayload{
-		PlayerID:   client.GetID(),
-		PlayerName: client.GetName(),
+	rm.sendToCurrentRoomPublished(room, recipients, codec.MustNewMessage(protocol.MsgPlayerOffline, protocol.PlayerOfflinePayload{
+		PlayerID:   playerID,
+		PlayerName: playerName,
 		Timeout:    rm.gameConfig.OfflineWaitTimeout,
 	}))
+	room.publishMu.Unlock()
 
-	log.Printf("📴 玩家 %s 在房间 %s 中掉线", client.GetName(), roomCode)
+	log.Printf("📴 玩家 %s 在房间 %s 中掉线", playerName, roomCode)
 }
 
 // ReconnectPlayer 玩家重连到房间
 func (rm *RoomManager) ReconnectPlayer(oldPlayerID, roomCode string, newClient types.ClientInterface) error {
+	_, _, err := rm.ReconnectPlayerWithResponse(oldPlayerID, roomCode, newClient, nil)
+	return err
+}
+
+// ReconnectPlayerWithResponse attaches one physical client, updates the game
+// presence projection, publishes PlayerOnline, and optionally enqueues the
+// authoritative reconnect snapshot under one room publication boundary.
+func (rm *RoomManager) ReconnectPlayerWithResponse(
+	oldPlayerID, roomCode string,
+	newClient types.ClientInterface,
+	buildResponse func(*Room) *protocol.Message,
+) (*Room, bool, error) {
 	if roomCode == "" {
-		return nil // 不在房间中，无需重连
+		return nil, false, nil // 不在房间中，无需重连
 	}
 	if newClient.GetID() != oldPlayerID {
-		return apperrors.ErrNotInRoom
+		return nil, false, apperrors.ErrNotInRoom
 	}
 	playerName, isBot := newClient.GetName(), newClient.IsBot()
 
@@ -107,32 +129,63 @@ func (rm *RoomManager) ReconnectPlayer(oldPlayerID, roomCode string, newClient t
 	room, exists := rm.rooms[roomCode]
 	if !exists {
 		rm.mu.RUnlock()
-		return apperrors.ErrRoomNotFound
+		return nil, false, apperrors.ErrRoomNotFound
 	}
+	room.publishMu.Lock()
 
 	room.mu.Lock()
 	player, exists := room.players[oldPlayerID]
 	if !exists || player == nil {
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 		rm.mu.RUnlock()
-		return apperrors.ErrNotInRoom
+		return nil, false, apperrors.ErrNotInRoom
 	}
 
+	if !types.CompareAndSetRoom(newClient, oldPlayerID, roomCode, roomCode) &&
+		!types.CompareAndSetRoom(newClient, oldPlayerID, "", roomCode) {
+		room.mu.Unlock()
+		room.publishMu.Unlock()
+		rm.mu.RUnlock()
+		return nil, false, apperrors.ErrNotInRoom
+	}
 	player.Name = playerName
 	player.IsBot = isBot
-	newClient.SetRoom(roomCode)
 	player.Client = newClient
-	recipients := room.snapshotRecipientsLocked(oldPlayerID)
+	recipients := room.snapshotDeliveryRecipientsLocked(oldPlayerID)
+	presenceCallback := rm.onPresence
 	room.mu.Unlock()
 	rm.mu.RUnlock()
-	sendToRecipients(recipients, codec.MustNewMessage(protocol.MsgPlayerOnline, protocol.PlayerOnlinePayload{
+	if presenceCallback != nil {
+		presenceCallback(room, oldPlayerID, true)
+	}
+	rm.sendToCurrentRoomPublished(room, recipients, codec.MustNewMessage(protocol.MsgPlayerOnline, protocol.PlayerOnlinePayload{
 		PlayerID:   oldPlayerID,
 		PlayerName: playerName,
 	}))
+	responseSent := false
+	if buildResponse != nil {
+		if response := buildResponse(room); response != nil {
+			var sendErr error
+			responseSent, sendErr = rm.sendIfCurrentMemberPublished(room, oldPlayerID, newClient, response)
+			if sendErr != nil {
+				log.Printf("发送玩家 %s 的重连快照失败: %v", oldPlayerID, sendErr)
+			}
+		}
+	}
+	room.publishMu.Unlock()
 
 	log.Printf("📶 玩家 %s 重连到房间 %s", playerName, roomCode)
 
-	return nil
+	return room, responseSent, nil
+}
+
+// SetOnPresenceChanged installs a callback that mirrors exact room presence
+// into the registered GameSession before the corresponding wire event.
+func (rm *RoomManager) SetOnPresenceChanged(callback func(*Room, string, bool)) {
+	rm.mu.Lock()
+	rm.onPresence = callback
+	rm.mu.Unlock()
 }
 
 // generateRoomCode 生成房间号
@@ -150,7 +203,8 @@ func (rm *RoomManager) generateRoomCode() string {
 		}
 		_, published := rm.rooms[codeStr]
 		_, pending := rm.pendingRooms[codeStr]
-		if !published && !pending {
+		_, retiring := rm.retiringRooms[codeStr]
+		if !published && !pending && !retiring {
 			return codeStr
 		}
 	}
@@ -171,33 +225,41 @@ func (rm *RoomManager) cleanup() {
 	rm.mu.Lock()
 	now := time.Now()
 	type expiredRoom struct {
-		code       string
-		recipients []types.ClientInterface
+		removal roomRemovalDispatch
 	}
 	expired := make([]expiredRoom, 0)
 
-	for code, room := range rm.rooms {
+	for _, room := range rm.rooms {
+		room.publishMu.Lock()
 		room.mu.Lock()
 		if room.state == RoomStateWaiting && now.Sub(room.CreatedAt) > rm.roomTimeout {
-			room.state = RoomStateEnded
-			for _, player := range room.players {
-				if player != nil && player.Client != nil {
-					player.Client.SetRoom("")
-				}
+			removal, removed := rm.removePublishedRoomLocked(room, RoomRemovalTimeout)
+			if !removed {
+				room.mu.Unlock()
+				room.publishMu.Unlock()
+				continue
 			}
-			expired = append(expired, expiredRoom{
-				code:       code,
-				recipients: room.snapshotRecipientsLocked(""),
-			})
-			delete(rm.rooms, code)
+			expired = append(expired, expiredRoom{removal: removal})
 		}
 		room.mu.Unlock()
+		room.publishMu.Unlock()
 	}
 	rm.mu.Unlock()
 
 	for _, removed := range expired {
-		sendToRecipients(removed.recipients, codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))
-		rm.deleteRoomAsync(removed.code)
-		log.Printf("🏠 房间 %s 超时已清理", removed.code)
+		rm.dispatchRoomRemoval(removed.removal)
+		sendRemovalMessageIfUnbound(removed.removal.removal, codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))
+		log.Printf("🏠 房间 %s 超时已清理", removed.removal.removal.Code)
+	}
+}
+
+func sendRemovalMessageIfUnbound(removal RoomRemoval, message *protocol.Message) {
+	for _, player := range removal.Players {
+		if player.Client == nil || player.IsBot {
+			continue
+		}
+		if _, err := types.SendMessageIfIdentity(player.Client, player.ID, "", message); err != nil {
+			log.Printf("发送房间 %s 移除通知给玩家 %s 失败: %v", removal.Code, player.ID, err)
+		}
 	}
 }

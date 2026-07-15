@@ -101,6 +101,10 @@ func (gs *GameSession) BuildGameStateDTO(playerID string, sessionManager *Sessio
 	}
 	turnDeadlineMS := gs.turnDeadlineMS()
 	serverTimeMS := time.Now().UnixMilli()
+	var settlement *protocol.GameSettlementDTO
+	if gs.state == GameStateEnded {
+		settlement = cloneGameSettlement(gs.settlement)
+	}
 
 	return &protocol.GameStateDTO{
 		Phase:               phase,
@@ -124,7 +128,27 @@ func (gs *GameSession) BuildGameStateDTO(playerID string, sessionManager *Sessio
 		Multiplier:          gs.currentMultiplier(),
 		BaseScore:           baseScore,
 		PlayedCards:         playedCards,
+		Settlement:          settlement,
 	}
+}
+
+func cloneGameSettlement(settlement *protocol.GameSettlementDTO) *protocol.GameSettlementDTO {
+	if settlement == nil {
+		return nil
+	}
+	cloned := &protocol.GameSettlementDTO{
+		WinnerID:         settlement.WinnerID,
+		WinnerName:       settlement.WinnerName,
+		WinnerIsLandlord: settlement.WinnerIsLandlord,
+		Multiplier:       settlement.Multiplier,
+		Scores:           append([]protocol.PlayerScore(nil), settlement.Scores...),
+		PlayerHands:      make([]protocol.PlayerHand, len(settlement.PlayerHands)),
+	}
+	for index, playerHand := range settlement.PlayerHands {
+		cloned.PlayerHands[index] = playerHand
+		cloned.PlayerHands[index].Cards = append([]protocol.CardInfo(nil), playerHand.Cards...)
+	}
+	return cloned
 }
 
 func (gs *GameSession) validPlayerIndex(index int) bool {

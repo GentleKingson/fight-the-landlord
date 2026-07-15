@@ -51,10 +51,28 @@ test('three browser clients complete a real authoritative game', async ({ browse
     await expect(pages[2].getByLabel('斗地主牌桌')).toBeVisible();
 
     await driveToGameOver(pages);
-    const resultPage = await pageWithVisible(pages, '返回大厅');
-    await expect(resultPage.locator('.result-panel')).toContainText(/获胜/);
-    await resultPage.getByRole('button', { name: '返回大厅', exact: true }).click();
-    await expect(resultPage.getByRole('button', { name: /创建房间/ })).toBeVisible();
+    await Promise.all(pages.map(async (page) => {
+      await expect(page.locator('.result-panel')).toContainText(/获胜/);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+    }));
+    const settlement = await readSettlement(pages[0]);
+    await Promise.all(pages.slice(1).map(async (page) => expect(await readSettlement(page)).toEqual(settlement)));
+
+    await pages[0].reload();
+    await expect(pages[0].locator('.result-panel')).toContainText(/获胜/);
+    expect(await readSettlement(pages[0])).toEqual(settlement);
+
+    for (let index = 0; index < pages.length; index += 1) {
+      pages[index] = await reconnectPage(contexts[index], pages[index]);
+      await expect(pages[index].locator('.result-panel')).toContainText(/获胜/);
+      await expect(pages[index].getByRole('alert')).toHaveCount(0);
+      expect(await readSettlement(pages[index])).toEqual(settlement);
+    }
+
+    for (const page of pages) {
+      await page.getByRole('button', { name: '再来一局', exact: true }).click();
+    }
+    await Promise.all(pages.map((page) => expect(page.getByLabel('叫地主操作')).toBeVisible()));
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
   }
@@ -69,15 +87,23 @@ async function clickEnabled(pages: Page[], name: RegExp): Promise<Page> {
   });
 }
 
+async function readSettlement(page: Page): Promise<string> {
+  const result = page.locator('.result-panel');
+  const parts = await Promise.all([
+    result.locator('.result-badge').textContent(),
+    result.locator('h1').textContent(),
+    result.locator('p').first().textContent(),
+    result.locator('.score-list').textContent(),
+    result.locator('.remaining-hands').textContent()
+  ]);
+  return parts.map((part) => part?.replace(/\s+/g, ' ').trim() ?? '').join('|');
+}
+
 async function pageWithEnabled(pages: Page[], name: string): Promise<Page> {
   return pollPages(pages, async (page) => {
     const button = page.getByRole('button', { name, exact: true });
     return await button.isVisible().catch(() => false) && await button.isEnabled().catch(() => false);
   });
-}
-
-async function pageWithVisible(pages: Page[], name: string): Promise<Page> {
-  return pollPages(pages, async (page) => page.getByRole('button', { name, exact: true }).isVisible().catch(() => false), 120_000);
 }
 
 async function pollPages(

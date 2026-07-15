@@ -20,6 +20,10 @@ func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.Car
 	gs.actionMu.Lock()
 	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
+	if gs.retired {
+		gs.mu.Unlock()
+		return apperrors.ErrGameNotStart
+	}
 
 	if gs.state != GameStatePlaying {
 		gs.mu.Unlock()
@@ -129,6 +133,10 @@ func (gs *GameSession) handlePass(playerID string, expectedTurnID int64) error {
 	gs.actionMu.Lock()
 	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
+	if gs.retired {
+		gs.mu.Unlock()
+		return apperrors.ErrGameNotStart
+	}
 
 	if gs.state != GameStatePlaying {
 		gs.mu.Unlock()

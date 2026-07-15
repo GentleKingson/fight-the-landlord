@@ -46,6 +46,16 @@ message PlayerScore {
   int64 score = 4;      // 本局得分（输为负，赢为正）
 }
 
+// GameSettlementDTO 完整的权威结算快照（用于结束态重连恢复）
+message GameSettlementDTO {
+  string winner_id = 1;
+  string winner_name = 2;
+  bool winner_is_landlord = 3;
+  int64 multiplier = 4;
+  repeated PlayerScore scores = 5;
+  repeated PlayerHand player_hands = 6;
+}
+
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）
 message GameStateDTO {
   string phase = 1;                      // waiting/bidding/playing/ended
@@ -69,6 +79,7 @@ message GameStateDTO {
   int64 multiplier = 19;                 // 当前倍数
   int64 base_score = 20;                 // 本局底分
   repeated PlayerPlayedCards played_cards = 21; // 已公开出牌账本
+  optional GameSettlementDTO settlement = 22; // 结束态的完整权威结算
 }
 
 // ChatPayload 聊天请求和服务端聊天事件的统一协议。

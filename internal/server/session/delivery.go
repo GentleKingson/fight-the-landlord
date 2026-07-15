@@ -5,6 +5,8 @@ import (
 	"log"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
+	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
 type pendingDelivery struct {
@@ -54,6 +56,20 @@ func (gs *GameSession) takePendingWorkLocked() pendingWork {
 func (gs *GameSession) dispatchPendingWork(work pendingWork) {
 	for _, delivery := range work.deliveries {
 		if delivery.playerID == "" {
+			if manager := gs.roomManager.Load(); manager != nil {
+				if delivery.message.Type == protocol.MsgGameStart {
+					manager.BroadcastBuiltIfCurrentRoom(gs.room, func() *protocol.Message {
+						message := codec.MustNewMessage(protocol.MsgGameStart, protocol.GameStartPayload{
+							Players: gs.room.GetAllPlayersInfo(),
+						})
+						message.Event = delivery.message.Event
+						return message
+					})
+				} else {
+					manager.BroadcastIfCurrentRoom(gs.room, delivery.message)
+				}
+				continue
+			}
 			gs.room.Broadcast(delivery.message)
 			continue
 		}
@@ -61,7 +77,13 @@ func (gs *GameSession) dispatchPendingWork(work pendingWork) {
 		if !online {
 			continue
 		}
-		if err := client.SendMessage(delivery.message); err != nil {
+		var err error
+		if manager := gs.roomManager.Load(); manager != nil {
+			_, err = manager.SendIfCurrentMember(gs.room, delivery.playerID, client, delivery.message)
+		} else {
+			_, err = types.SendMessageIfIdentity(client, delivery.playerID, gs.room.Code, delivery.message)
+		}
+		if err != nil {
 			log.Printf("发送玩家 %s 的私有游戏消息失败: %v", delivery.playerID, err)
 		}
 	}

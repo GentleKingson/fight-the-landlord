@@ -23,7 +23,7 @@ const encodeDynamic = encodeMessage as (
 
 describe('Go/TypeScript protobuf golden fixtures', () => {
   it('covers every canonical non-unknown message type', () => {
-    expect(manifest.map((entry) => entry.type).sort()).toEqual([...Object.values(MsgType)].sort());
+    expect([...new Set(manifest.map((entry) => entry.type))].sort()).toEqual([...Object.values(MsgType)].sort());
   });
 
   it('encodes the committed TypeScript-to-Go fixture corpus', () => {

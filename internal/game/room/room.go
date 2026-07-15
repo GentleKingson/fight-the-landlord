@@ -1,6 +1,7 @@
 package room
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -38,6 +39,28 @@ type PlayerSnapshot struct {
 	IsLandlord bool
 }
 
+// RoomRemovalReason identifies the authoritative transition that retired a
+// published room.
+type RoomRemovalReason string
+
+const (
+	RoomRemovalLeft       RoomRemovalReason = "left"
+	RoomRemovalAllOffline RoomRemovalReason = "all_offline"
+	RoomRemovalTimeout    RoomRemovalReason = "timeout"
+	RoomRemovalRollback   RoomRemovalReason = "rollback"
+	RoomRemovalShutdown   RoomRemovalReason = "shutdown"
+)
+
+// RoomRemoval carries both the room code and exact in-memory identity. The
+// pointer prevents delayed callbacks from retiring a replacement that reused
+// the same code.
+type RoomRemoval struct {
+	Code    string
+	Room    *Room
+	Players []PlayerSnapshot
+	Reason  RoomRemovalReason
+}
+
 // Room 游戏房间
 type Room struct {
 	Code      string    // 房间号
@@ -49,7 +72,11 @@ type Room struct {
 
 	// Lock order is GameSession.mu -> Room.mu. Room methods never call back into
 	// GameSession, and no network delivery is performed while this lock is held.
-	mu sync.RWMutex
+	// RoomManager ownership is acquired before publishMu. publishMu serializes
+	// one room mutation with its immutable outbound events, while room.mu is
+	// released before any client method is called.
+	publishMu sync.Mutex
+	mu        sync.RWMutex
 }
 
 func newRoom(code string, createdAt time.Time) *Room {
@@ -74,24 +101,34 @@ func newRoomPlayer(client types.ClientInterface, seat int) *RoomPlayer {
 
 // RoomManager 房间管理器
 type RoomManager struct {
-	redisStore   *storage.RedisStore
-	roomTimeout  time.Duration
-	gameConfig   config.GameConfig
-	onGameStart  func(*Room, []PlayerSnapshot)
-	rooms        map[string]*Room
-	pendingRooms map[string]*MatchRoomTransaction
-	roomCodeFunc func() string
-	mu           sync.RWMutex
+	redisStore    *storage.RedisStore
+	roomTimeout   time.Duration
+	gameConfig    config.GameConfig
+	onGameStart   func(*Room, []PlayerSnapshot)
+	onRoomRemoved func(RoomRemoval)
+	onPresence    func(*Room, string, bool)
+	rooms         map[string]*Room
+	pendingRooms  map[string]*MatchRoomTransaction
+	retiringRooms map[string]*Room
+	roomCodeFunc  func() string
+	mu            sync.RWMutex
+
+	persistenceMu     sync.Mutex
+	persistenceQueues map[string]*roomPersistenceQueue
+	saveRoomFunc      func(context.Context, string, *storage.RoomData) error
+	deleteRoomFunc    func(context.Context, string) error
 }
 
 // NewRoomManager 创建房间管理器
 func NewRoomManager(rs *storage.RedisStore, gameConfig config.GameConfig) *RoomManager {
 	rm := &RoomManager{
-		redisStore:   rs,
-		roomTimeout:  gameConfig.RoomTimeoutDuration(),
-		gameConfig:   gameConfig,
-		rooms:        make(map[string]*Room),
-		pendingRooms: make(map[string]*MatchRoomTransaction),
+		redisStore:        rs,
+		roomTimeout:       gameConfig.RoomTimeoutDuration(),
+		gameConfig:        gameConfig,
+		rooms:             make(map[string]*Room),
+		pendingRooms:      make(map[string]*MatchRoomTransaction),
+		retiringRooms:     make(map[string]*Room),
+		persistenceQueues: make(map[string]*roomPersistenceQueue),
 	}
 
 	// 启动房间清理协程

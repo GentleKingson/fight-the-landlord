@@ -10,6 +10,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
@@ -59,8 +60,30 @@ func (c *deliveryBarrierClient) SendMessage(message *protocol.Message) error {
 	}
 	return nil
 }
+func (c *deliveryBarrierClient) SendMessageIfIdentity(expectedPlayerID, expectedRoom string, message *protocol.Message) (bool, error) {
+	c.mu.Lock()
+	if c.id != expectedPlayerID || c.roomCode != expectedRoom {
+		c.mu.Unlock()
+		return false, nil
+	}
+	c.messages = append(c.messages, message.Type)
+	shouldBlock := c.blockType == message.Type
+	c.mu.Unlock()
+	if shouldBlock {
+		c.enterOnce.Do(func() { close(c.entered) })
+		<-c.release
+	}
+	return true, nil
+}
 func (c *deliveryBarrierClient) Close()      {}
 func (c *deliveryBarrierClient) IsBot() bool { return false }
+
+func (c *deliveryBarrierClient) rebindIdentityForTest(playerID string) {
+	c.mu.Lock()
+	c.id = playerID
+	c.name = "Player " + playerID
+	c.mu.Unlock()
+}
 
 func (c *deliveryBarrierClient) blockOn(messageType protocol.MessageType) {
 	c.mu.Lock()
@@ -139,6 +162,57 @@ func TestStartGameSkipsPrivateDealForOfflinePlayer(t *testing.T) {
 	require.NotPanics(t, gameSession.Start)
 }
 
+func TestPrivateDeliveryRejectsSameRoomPhysicalClientReboundToAnotherPlayer(t *testing.T) {
+	manager, gameRoom, clients := newBarrierDeliveryRoom(t, config.GameConfig{RoomTimeout: 60})
+	gameSession := NewGameSession(gameRoom, nil, config.GameConfig{})
+	gameSession.SetRoomManager(manager)
+	initialDeals := clients[0].messageCount(protocol.MsgDealCards)
+
+	clients[0].rebindIdentityForTest("replacement-player")
+	gameSession.dispatchPendingWork(pendingWork{deliveries: []pendingDelivery{{
+		playerID: "p1",
+		message:  &protocol.Message{Type: protocol.MsgDealCards},
+	}}})
+
+	require.Equal(t, initialDeals, clients[0].messageCount(protocol.MsgDealCards))
+}
+
+func TestDelayedGameStartRebuildsRosterAtPublication(t *testing.T) {
+	gameConfig := config.GameConfig{TurnTimeout: 3600, BidTimeout: 3600, RoomTimeout: 60}
+	manager, gameRoom, clients := newOfflineDeliveryRoom(t, gameConfig)
+	gameSession := NewGameSession(gameRoom, nil, gameConfig)
+	gameSession.SetRoomManager(manager)
+	t.Cleanup(gameSession.StopAllTimers)
+
+	gameSession.mu.Lock()
+	gameSession.startBiddingRound()
+	work := gameSession.takePendingWorkLocked()
+	gameSession.mu.Unlock()
+	manager.NotifyPlayerOffline(clients[1])
+	gameSession.dispatchPendingWork(work)
+
+	var gameStart *protocol.Message
+	for _, message := range clients[0].SentMessages() {
+		if message.Type == protocol.MsgGameStart {
+			gameStart = message
+		}
+	}
+	require.NotNil(t, gameStart)
+	payload, err := codec.ParsePayload[protocol.GameStartPayload](gameStart)
+	require.NoError(t, err)
+	foundOffline := false
+	for _, player := range payload.Players {
+		if player.ID == clients[1].GetID() {
+			foundOffline = true
+			require.False(t, player.Online)
+		}
+	}
+	require.True(t, foundOffline)
+	for _, message := range clients[1].SentMessages() {
+		require.NotEqual(t, protocol.MsgDealCards, message.Type)
+	}
+}
+
 func TestLandlordPrivateHandUpdateSkipsOfflinePlayer(t *testing.T) {
 	gameConfig := config.GameConfig{
 		TurnTimeout: 30,
@@ -180,7 +254,7 @@ func TestCallerDisconnectBeforeLandlordDecisionSkipsPrivateHand(t *testing.T) {
 	require.Equal(t, initialDeals, clients[callerIndex].messageCount(protocol.MsgDealCards))
 }
 
-func TestPlayerDisconnectDuringDealDoesNotBlockStateOrReceivePrivateHand(t *testing.T) {
+func TestPlayerDisconnectDuringDealSerializesPublicationWithoutBlockingState(t *testing.T) {
 	gameConfig := config.GameConfig{TurnTimeout: 30, BidTimeout: 15, RoomTimeout: 10, OfflineWaitTimeout: 30}
 	manager, gameRoom, clients := newBarrierDeliveryRoom(t, gameConfig)
 	clients[0].blockOn(protocol.MsgGameStart)
@@ -194,7 +268,11 @@ func TestPlayerDisconnectDuringDealDoesNotBlockStateOrReceivePrivateHand(t *test
 	}()
 	waitForSignal(t, clients[0].entered, "game start delivery did not reach the barrier")
 
-	manager.NotifyPlayerOffline(clients[1])
+	offlineDone := make(chan struct{})
+	go func() {
+		manager.NotifyPlayerOffline(clients[1])
+		close(offlineDone)
+	}()
 	stateRead := make(chan struct{})
 	go func() {
 		_ = gameSession.GetPlayerCardsCount("p1")
@@ -204,7 +282,14 @@ func TestPlayerDisconnectDuringDealDoesNotBlockStateOrReceivePrivateHand(t *test
 
 	close(clients[0].release)
 	waitForSignal(t, startDone, "game start did not complete after releasing delivery")
-	require.Zero(t, clients[1].messageCount(protocol.MsgDealCards))
+	waitForSignal(t, offlineDone, "offline publication did not complete after game start")
+
+	dealsAfterOffline := clients[1].messageCount(protocol.MsgDealCards)
+	gameSession.dispatchPendingWork(pendingWork{deliveries: []pendingDelivery{{
+		playerID: "p2",
+		message:  &protocol.Message{Type: protocol.MsgDealCards},
+	}}})
+	require.Equal(t, dealsAfterOffline, clients[1].messageCount(protocol.MsgDealCards))
 }
 
 func TestLandlordDisconnectDuringAnnouncementSkipsPrivateHandUpdate(t *testing.T) {
@@ -227,10 +312,21 @@ func TestLandlordDisconnectDuringAnnouncementSkipsPrivateHandUpdate(t *testing.T
 	}()
 	waitForSignal(t, clients[1].entered, "landlord announcement did not reach the barrier")
 
-	manager.NotifyPlayerOffline(clients[0])
+	offlineDone := make(chan struct{})
+	go func() {
+		manager.NotifyPlayerOffline(clients[0])
+		close(offlineDone)
+	}()
 	close(clients[1].release)
 	waitForSignal(t, deliveryDone, "landlord delivery did not complete")
-	require.Equal(t, initialDeals, clients[0].messageCount(protocol.MsgDealCards))
+	waitForSignal(t, offlineDone, "landlord offline publication did not complete")
+	dealsAfterOffline := clients[0].messageCount(protocol.MsgDealCards)
+	require.GreaterOrEqual(t, dealsAfterOffline, initialDeals)
+	gameSession.dispatchPendingWork(pendingWork{deliveries: []pendingDelivery{{
+		playerID: "p1",
+		message:  &protocol.Message{Type: protocol.MsgDealCards},
+	}}})
+	require.Equal(t, dealsAfterOffline, clients[0].messageCount(protocol.MsgDealCards))
 }
 
 func TestRedealSkipsOfflinePlayerPrivateHand(t *testing.T) {
@@ -271,7 +367,10 @@ func TestGameOverDeliveryConcurrentWithReconnect(t *testing.T) {
 	waitForSignal(t, clients[1].entered, "game-over delivery did not reach the barrier")
 
 	replacement := newDeliveryBarrierClient("p1")
-	require.NoError(t, manager.ReconnectPlayer("p1", gameRoom.Code, replacement))
+	reconnectDone := make(chan error, 1)
+	go func() {
+		reconnectDone <- manager.ReconnectPlayer("p1", gameRoom.Code, replacement)
+	}()
 	stateRead := make(chan struct{})
 	go func() {
 		_ = gameSession.BuildGameStateDTO("p1", nil)
@@ -281,6 +380,12 @@ func TestGameOverDeliveryConcurrentWithReconnect(t *testing.T) {
 
 	close(clients[1].release)
 	waitForSignal(t, deliveryDone, "game-over delivery did not complete")
+	select {
+	case err := <-reconnectDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("reconnect did not complete after game-over publication")
+	}
 	recipient, ok := gameRoom.PrivateRecipient("p1")
 	require.True(t, ok)
 	require.Same(t, replacement, recipient)

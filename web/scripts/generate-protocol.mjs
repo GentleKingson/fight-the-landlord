@@ -59,6 +59,7 @@ const optionalFields = new Set([
   'GameStateDTO.multiplier',
   'GameStateDTO.base_score',
   'GameStateDTO.played_cards',
+  'GameStateDTO.settlement',
   'ChatPayload.sender_id',
   'ChatPayload.sender_name',
   'ChatPayload.time',
@@ -136,7 +137,7 @@ lines.push(
   '  [K in N]: { type: K; payload: PayloadByName[K]; event?: EventMeta }',
   '}[N];',
   '',
-  `const schema = ${JSON.stringify(sortObject(root.toJSON()), null, 2)} as const;`,
+  `const schema = ${JSON.stringify(sortObject(root.toJSON()), null, 2)} satisfies protobuf.INamespace;`,
   '',
   'export const protocolRoot = protobuf.Root.fromJSON(schema);'
 );
