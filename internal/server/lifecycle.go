@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,29 +15,53 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 )
 
+const httpShutdownTimeout = 5 * time.Second
+
+func (s *Server) startMonitorStats() {
+	if s == nil || s.runtimeCtx == nil {
+		return
+	}
+	s.monitorOnce.Do(func() {
+		s.monitorWG.Add(1)
+		go func() {
+			defer s.monitorWG.Done()
+			s.monitorStats(s.runtimeCtx)
+		}()
+	})
+}
+
 // monitorStats 定期监控服务器状态
-func (s *Server) monitorStats() {
+func (s *Server) monitorStats(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	var lastOnline, lastGoroutines, lastActiveConns int
+	var lastSlowClientDisconnects int64
 
-	for range ticker.C {
-		onlineCount := s.GetOnlineCount()
-		goroutines := runtime.NumGoroutine()
-		activeConns := len(s.semaphore)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			onlineCount := s.GetOnlineCount()
+			goroutines := runtime.NumGoroutine()
+			activeConns := s.activeConnectionLimiter().activeCount()
+			slowClientDisconnects := s.slowClientDisconnects.Load()
 
-		if onlineCount == lastOnline && goroutines == lastGoroutines && activeConns == lastActiveConns {
-			continue
+			if onlineCount == lastOnline && goroutines == lastGoroutines && activeConns == lastActiveConns && slowClientDisconnects == lastSlowClientDisconnects {
+				continue
+			}
+
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Printf("📊 [监控] 在线: %d | Goroutines: %d | 活跃连接: %d/%d | 慢客户端断开: %d | 内存: %.2f MB",
+				onlineCount, goroutines, activeConns, s.maxConnections,
+				slowClientDisconnects,
+				float64(m.Alloc)/1024/1024)
+
+			lastOnline, lastGoroutines, lastActiveConns = onlineCount, goroutines, activeConns
+			lastSlowClientDisconnects = slowClientDisconnects
 		}
-
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		log.Printf("📊 [监控] 在线: %d | Goroutines: %d | 活跃连接: %d/%d | 内存: %.2f MB",
-			onlineCount, goroutines, activeConns, s.maxConnections,
-			float64(m.Alloc)/1024/1024)
-
-		lastOnline, lastGoroutines, lastActiveConns = onlineCount, goroutines, activeConns
 	}
 }
 
@@ -64,6 +89,7 @@ func (s *Server) IsMaintenanceMode() bool {
 
 // GracefulShutdown 优雅关闭服务器
 func (s *Server) GracefulShutdown(timeout time.Duration) {
+	s.shuttingDown.Store(true)
 	// 1. 进入维护模式
 	s.EnterMaintenanceMode()
 
@@ -155,17 +181,102 @@ func (s *Server) sendShutdownNotification() {
 
 // Shutdown 关闭服务器
 func (s *Server) Shutdown() {
-	time.Sleep(s.config.Game.RoomCleanupDelayDuration())
+	if s == nil {
+		return
+	}
+	s.shutdownOnce.Do(s.shutdown)
+}
 
-	// 关闭所有客户端连接
-	s.clientsMu.Lock()
-	for _, client := range s.clients {
+func (s *Server) shutdown() {
+	s.shuttingDown.Store(true)
+	s.stopClientPumps()
+	s.stopHTTPServer()
+	if s.runtimeCancel != nil {
+		s.runtimeCancel()
+	}
+
+	// Stop authoritative queue deadlines, bot-fill work, and room assembly
+	// before closing the clients and backing services they may reference.
+	s.closeMatcher()
+	if s.config != nil {
+		time.Sleep(s.config.Game.RoomCleanupDelayDuration())
+	}
+
+	for _, client := range s.connectionSnapshot() {
 		client.Close()
 	}
-	s.clientsMu.Unlock()
+	s.clientPumpsWG.Wait()
 
-	// 关闭 Redis
-	_ = s.redis.Close()
-
+	s.closeRuntimeManagers()
+	s.monitorWG.Wait()
+	s.closeRedis()
 	log.Println("服务器已关闭")
+}
+
+func (s *Server) stopClientPumps() {
+	s.clientPumpsMu.Lock()
+	s.clientPumpsClosed = true
+	s.clientPumpsMu.Unlock()
+}
+
+func (s *Server) closeMatcher() {
+	if s.matcher == nil {
+		return
+	}
+	if err := s.matcher.Close(); err != nil {
+		log.Printf("关闭匹配器失败: %v", err)
+	}
+}
+
+func (s *Server) connectionSnapshot() []*Client {
+	// Client.Close must not run while Server client ownership is held.
+	s.clientsMu.RLock()
+	clients := make([]*Client, 0, len(s.clients))
+	for _, client := range s.clients {
+		clients = append(clients, client)
+	}
+	s.clientsMu.RUnlock()
+	return clients
+}
+
+func (s *Server) closeRuntimeManagers() {
+	if s.roomManager != nil {
+		if err := s.roomManager.Close(); err != nil {
+			log.Printf("关闭房间管理器失败: %v", err)
+		}
+	}
+	if s.sessionManager != nil {
+		if err := s.sessionManager.Close(); err != nil {
+			log.Printf("关闭会话管理器失败: %v", err)
+		}
+	}
+	if s.rateLimiter != nil {
+		if err := s.rateLimiter.Close(); err != nil {
+			log.Printf("关闭速率限制器失败: %v", err)
+		}
+	}
+}
+
+func (s *Server) closeRedis() {
+	// Redis remains available until room persistence workers have exited.
+	if s.redis == nil {
+		return
+	}
+	if err := s.redis.Close(); err != nil {
+		log.Printf("关闭 Redis 失败: %v", err)
+	}
+}
+
+func (s *Server) stopHTTPServer() {
+	s.httpServerMu.Lock()
+	httpServer := s.httpServer
+	s.httpServerMu.Unlock()
+	if httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+		if err := httpServer.Shutdown(ctx); err != nil {
+			log.Printf("关闭 HTTP 服务失败: %v", err)
+		}
+		cancel()
+	}
+	s.httpServeWG.Wait()
 }

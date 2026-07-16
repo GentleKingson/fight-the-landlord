@@ -8,6 +8,15 @@ import "internal/protocol/proto/common.proto";
 
 // ========== 客户端请求消息 ==========
 
+// HelloPayload is the mandatory first application frame on every physical
+// WebSocket connection.
+message HelloPayload {
+  string protocol_version = 1;
+  string client_version = 2;
+  repeated string capabilities = 3;
+  string client_kind = 4;
+}
+
 // ReconnectPayload 断线重连请求
 message ReconnectPayload {
   string token = 1;

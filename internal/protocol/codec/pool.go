@@ -43,6 +43,8 @@ func PutMessage(msg *protocol.Message) {
 	// Reset fields to avoid holding references
 	msg.Type = ""
 	msg.Payload = nil
+	msg.Event = nil
+	msg.Command = nil
 	messagePool.Put(msg)
 }
 

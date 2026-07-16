@@ -2,6 +2,13 @@ package protocol
 
 // --- 客户端请求 Payloads ---
 
+type HelloPayload struct {
+	ProtocolVersion string   `json:"protocol_version"`
+	ClientVersion   string   `json:"client_version"`
+	Capabilities    []string `json:"capabilities"`
+	ClientKind      string   `json:"client_kind"`
+}
+
 // ReconnectPayload 断线重连请求
 type ReconnectPayload struct {
 	Token    string `json:"token"`     // 重连令牌
@@ -37,6 +44,30 @@ type GetLeaderboardPayload struct {
 
 // --- 服务端响应 Payloads ---
 
+type NegotiatedPayload struct {
+	ProtocolVersion string   `json:"protocol_version"`
+	ServerVersion   string   `json:"server_version"`
+	Capabilities    []string `json:"capabilities"`
+	ClientKind      string   `json:"client_kind"`
+}
+
+type ProtocolRejectedPayload struct {
+	RequestID                string `json:"request_id"`
+	Reason                   string `json:"reason"`
+	SupportedProtocolVersion string `json:"supported_protocol_version"`
+	MinClientVersion         string `json:"min_client_version,omitempty"`
+}
+
+type CommandAckPayload struct {
+	RequestID   string      `json:"request_id"`
+	CommandType MessageType `json:"command_type"`
+}
+
+type WarningPayload struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
 // ConnectedPayload 连接成功响应
 type ConnectedPayload struct {
 	PlayerID       string `json:"player_id"`
@@ -46,23 +77,53 @@ type ConnectedPayload struct {
 
 // ReconnectedPayload 重连成功响应
 type ReconnectedPayload struct {
-	PlayerID   string        `json:"player_id"`
-	PlayerName string        `json:"player_name"`
-	RoomCode   string        `json:"room_code,omitempty"`  // 如果在房间中
-	GameState  *GameStateDTO `json:"game_state,omitempty"` // 如果在游戏中
+	PlayerID       string        `json:"player_id"`
+	PlayerName     string        `json:"player_name"`
+	RoomCode       string        `json:"room_code,omitempty"`       // 如果在房间中
+	GameState      *GameStateDTO `json:"game_state,omitempty"`      // 如果在游戏中
+	ReconnectToken string        `json:"reconnect_token,omitempty"` // 服务端确认并旋转后的令牌
 }
 
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）
 type GameStateDTO struct {
-	Phase        string       `json:"phase"`          // bidding/playing
-	Players      []PlayerInfo `json:"players"`        // 所有玩家信息
-	Hand         []CardInfo   `json:"hand"`           // 自己的手牌
-	BottomCards  []CardInfo   `json:"bottom_cards"`   // 底牌
-	CurrentTurn  string       `json:"current_turn"`   // 当前回合玩家 ID
-	LastPlayed   []CardInfo   `json:"last_played"`    // 上家出的牌
-	LastPlayerID string       `json:"last_player_id"` // 上家 ID
-	MustPlay     bool         `json:"must_play"`      // 是否必须出牌
-	CanBeat      bool         `json:"can_beat"`       // 是否能打过
+	Phase               string              `json:"phase"`                 // waiting/bidding/playing/ended
+	Players             []PlayerInfo        `json:"players"`               // 所有玩家信息
+	Hand                []CardInfo          `json:"hand"`                  // 自己的手牌
+	BottomCards         []CardInfo          `json:"bottom_cards"`          // 已公开的底牌
+	CurrentTurn         string              `json:"current_turn"`          // 当前回合玩家 ID
+	LastPlayed          []CardInfo          `json:"last_played"`           // 有效上一手
+	LastPlayerID        string              `json:"last_player_id"`        // 有效上一手玩家 ID
+	MustPlay            bool                `json:"must_play"`             // 是否必须出牌
+	CanBeat             bool                `json:"can_beat"`              // 是否能打过
+	SnapshotVersion     int64               `json:"snapshot_version"`      // 单调递增版本
+	GameID              string              `json:"game_id"`               // 当前牌局 ID
+	BottomCardsRevealed bool                `json:"bottom_cards_revealed"` // 底牌是否公开
+	TurnID              int64               `json:"turn_id"`               // 当前回合序号
+	TurnDeadlineMS      int64               `json:"turn_deadline_ms"`      // 服务端绝对截止时间
+	ServerTimeMS        int64               `json:"server_time_ms"`        // 快照生成时间
+	LastPlayerName      string              `json:"last_player_name"`      // 有效上一手玩家名称
+	LastHandType        string              `json:"last_hand_type"`        // 有效上一手牌型
+	IsGrab              bool                `json:"is_grab"`               // 是否处于抢地主阶段
+	Multiplier          int                 `json:"multiplier"`            // 当前倍数
+	BaseScore           int                 `json:"base_score"`            // 本局底分
+	PlayedCards         []PlayerPlayedCards `json:"played_cards"`          // 已公开出牌账本
+	Settlement          *GameSettlementDTO  `json:"settlement,omitempty"`  // 结束态的完整权威结算
+}
+
+// GameSettlementDTO 完整的权威结算快照（用于结束态重连恢复）。
+type GameSettlementDTO struct {
+	WinnerID         string        `json:"winner_id"`
+	WinnerName       string        `json:"winner_name"`
+	WinnerIsLandlord bool          `json:"winner_is_landlord"`
+	Multiplier       int           `json:"multiplier"`
+	Scores           []PlayerScore `json:"scores"`
+	PlayerHands      []PlayerHand  `json:"player_hands"`
+}
+
+// PlayerPlayedCards 某位玩家本局已经公开打出的牌。
+type PlayerPlayedCards struct {
+	PlayerID string     `json:"player_id"`
+	Cards    []CardInfo `json:"cards"`
 }
 
 // PongPayload 心跳响应
@@ -117,6 +178,25 @@ type PlayerLeftPayload struct {
 type PlayerReadyPayload struct {
 	PlayerID string `json:"player_id"`
 	Ready    bool   `json:"ready"`
+}
+
+// MatchQueuedPayload 匹配请求已由服务端接受。
+type MatchQueuedPayload struct {
+	DeadlineMS int64 `json:"deadline_ms"`
+	Practice   bool  `json:"practice"`
+}
+
+// MatchCancelledPayload 匹配请求已由服务端取消。
+type MatchCancelledPayload struct {
+	Reason string `json:"reason"`
+}
+
+// MatchCancelReason is the established wire value for an explicit cancellation.
+const MatchCancelReason = "cancel" + "led"
+
+// RoomLeftPayload 玩家已从服务端房间状态中移除。
+type RoomLeftPayload struct {
+	RoomCode string `json:"room_code"`
 }
 
 // GameStartPayload 游戏开始通知
@@ -215,8 +295,10 @@ type MaintenanceStatusPayload struct {
 
 // ErrorPayload 错误响应
 type ErrorPayload struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code        int         `json:"code"`
+	Message     string      `json:"message"`
+	CommandType MessageType `json:"command_type,omitempty"`
+	RequestID   string      `json:"request_id,omitempty"`
 }
 
 // StatsResultPayload 个人统计结果
@@ -270,9 +352,13 @@ type ChatPayload struct {
 	SenderID   string `json:"sender_id,omitempty"`   // 发送者 ID (服务端填充)
 	SenderName string `json:"sender_name,omitempty"` // 发送者名字 (服务端填充)
 	Content    string `json:"content"`               // 消息内容
-	Scope      string `json:"scope"`                 // "lobby" or "room"
-	Time       int64  `json:"time,omitempty"`        // 发送时间 (服务端填充)
+	Scope      string `json:"scope"`                 // lobby/room/game
+	Time       int64  `json:"time,omitempty"`        // 兼容字段，Unix 秒
 	IsSystem   bool   `json:"is_system,omitempty"`   // 是否是系统消息
+	MessageID  string `json:"message_id,omitempty"`  // 客户端生成、服务端回显的稳定 ID
+	RoomCode   string `json:"room_code,omitempty"`   // 服务端确认的房间
+	GameID     string `json:"game_id,omitempty"`     // 服务端确认的牌局
+	ServerTime int64  `json:"server_time,omitempty"` // 服务端 Unix 毫秒
 }
 
 // --- 通用数据结构 ---

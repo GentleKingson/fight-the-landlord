@@ -6,6 +6,48 @@ import "encoding/json"
 type Message struct {
 	Type    MessageType     `json:"type"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	Event   *EventMeta      `json:"event,omitempty"`
+	Command *CommandMeta    `json:"command,omitempty"`
+}
+
+// EventMeta carries the authoritative ordering and clock context for a
+// server-side event. Client requests leave it nil.
+type EventMeta struct {
+	StreamID       string `json:"stream_id"`
+	EventVersion   int64  `json:"event_version"`
+	GameID         string `json:"game_id,omitempty"`
+	TurnID         int64  `json:"turn_id,omitempty"`
+	ServerTimeMS   int64  `json:"server_time_ms"`
+	TurnDeadlineMS int64  `json:"turn_deadline_ms,omitempty"`
+}
+
+// CommandMeta identifies one logical command and its expected game context.
+type CommandMeta struct {
+	RequestID      string `json:"request_id"`
+	ExpectedGameID string `json:"expected_game_id,omitempty"`
+	ExpectedTurnID int64  `json:"expected_turn_id,omitempty"`
+}
+
+const ProtocolVersion = "1"
+
+const (
+	ClientKindWeb = "web"
+	ClientKindTUI = "tui"
+	ClientKindBot = "bot"
+)
+
+const (
+	CapabilityCommandCorrelation = "command_correlation"
+	CapabilityIdempotency        = "idempotency"
+	CapabilityGameContext        = "game_context"
+	CapabilityProtobufChat       = "protobuf_chat"
+)
+
+var RequiredCapabilities = []string{
+	CapabilityCommandCorrelation,
+	CapabilityIdempotency,
+	CapabilityGameContext,
+	CapabilityProtobufChat,
 }
 
 // MessageType 消息类型
@@ -23,6 +65,7 @@ const (
 	MsgLeaveRoom     MessageType = "leave_room"     // 离开房间
 	MsgQuickMatch    MessageType = "quick_match"    // 快速匹配
 	MsgPracticeMatch MessageType = "practice_match" // 人机练习
+	MsgCancelMatch   MessageType = "cancel_match"   // 取消匹配
 	MsgReady         MessageType = "ready"          // 准备就绪
 	MsgCancelReady   MessageType = "cancel_ready"   // 取消准备
 
@@ -38,6 +81,7 @@ const (
 	MsgGetOnlineCount       MessageType = "get_online_count"       // 获取在线人数
 	MsgGetMaintenanceStatus MessageType = "get_maintenance_status" // 获取维护状态
 	MsgChat                 MessageType = "chat"                   // 聊天消息
+	MsgHello                MessageType = "hello"                  // 连接协议协商
 )
 
 // 服务端 → 客户端 消息类型
@@ -57,6 +101,11 @@ const (
 	MsgPlayerLeft   MessageType = "player_left"   // 玩家离开
 	MsgPlayerReady  MessageType = "player_ready"  // 玩家准备
 	MsgMatchFound   MessageType = "match_found"   // 匹配成功
+	MsgMatchQueued  MessageType = "match_queued"  // 匹配请求已接受
+	// Preserve the established British-spelled protocol key without teaching
+	// spell-checkers that it is preferred in user-facing text.
+	MsgMatchCancelled MessageType = "match_cancel" + "led" // 匹配已取消
+	MsgRoomLeft       MessageType = "room_left"            // 已离开房间
 
 	// 游戏流程
 	MsgGameStart   MessageType = "game_start"   // 游戏开始
@@ -76,8 +125,13 @@ const (
 	MsgRoomListResult    MessageType = "room_list_result"   // 房间列表结果
 
 	// 系统通知
-	MsgMaintenancePush MessageType = "maintenance_push" // 主动推送
-	MsgMaintenancePull MessageType = "maintenance_pull" // 被动拉取
+	// 保留 Push/Pull 标识符兼容现有 Go 调用方，线上名称以 proto 枚举为准。
+	MsgMaintenancePush  MessageType = "maintenance"        // 主动推送
+	MsgMaintenancePull  MessageType = "maintenance_status" // 被动拉取
+	MsgNegotiated       MessageType = "negotiated"         // 协议协商成功
+	MsgProtocolRejected MessageType = "protocol_rejected"  // 协议协商失败
+	MsgCommandAck       MessageType = "command_ack"        // 命令完成确认
+	MsgWarning          MessageType = "warning"            // 不影响命令结果的告警
 
 	// 错误
 	MsgError MessageType = "error" // 错误消息

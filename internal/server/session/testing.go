@@ -3,8 +3,24 @@
 package session
 
 import (
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/stretchr/testify/mock"
 )
+
+func (gs *GameSession) IsRetiredForTest() bool {
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
+	return gs.retired
+}
+
+func (gs *GameSession) EndWithSettlementForTest(settlement *protocol.GameSettlementDTO) {
+	gs.mu.Lock()
+	gs.state = GameStateEnded
+	gs.settlement = cloneGameSettlement(settlement)
+	gs.room.ResetAfterGame()
+	gs.mu.Unlock()
+	gs.stopTimer()
+}
 
 // MockGameSessionStore 游戏会话存储 mock
 type MockGameSessionStore struct {

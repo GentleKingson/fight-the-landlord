@@ -3,6 +3,8 @@
 package room
 
 import (
+	"time"
+
 	"github.com/stretchr/testify/mock"
 
 	"github.com/palemoky/fight-the-landlord/internal/types"
@@ -63,18 +65,57 @@ func (m *MockMatcher) AddToQueue(client types.ClientInterface) {
 
 // NewMockRoom 创建测试用的 Room
 func NewMockRoom(code string, client types.ClientInterface) *Room {
-	room := &Room{
-		Code:    code,
-		Players: make(map[string]*RoomPlayer),
-	}
+	room := newRoom(code, time.Now())
 	if client != nil {
-		room.Players[client.GetID()] = &RoomPlayer{
-			Client: client,
-			Seat:   0,
-			Ready:  false,
-		}
+		player := newRoomPlayer(client, 0)
+		room.players[player.ID] = player
+		room.playerOrder = append(room.playerOrder, player.ID)
 	}
 	return room
+}
+
+func (r *Room) AddPlayerForTest(client types.ClientInterface, seat int, ready bool) {
+	player := newRoomPlayer(client, seat)
+	player.Ready = ready
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.players[player.ID]; !exists {
+		r.playerOrder = append(r.playerOrder, player.ID)
+	}
+	r.players[player.ID] = player
+}
+
+func (r *Room) SetPlayerOrderForTest(playerOrder []string) {
+	r.mu.Lock()
+	r.playerOrder = append([]string(nil), playerOrder...)
+	r.mu.Unlock()
+}
+
+func (r *Room) SetPlayerReadyForTest(playerID string, ready bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	player, ok := r.players[playerID]
+	if !ok || player == nil {
+		return false
+	}
+	player.Ready = ready
+	return true
+}
+
+func (r *Room) PlayerForTest(playerID string) (PlayerSnapshot, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	player, ok := r.players[playerID]
+	if !ok || player == nil {
+		return PlayerSnapshot{}, false
+	}
+	return snapshotPlayer(player), true
+}
+
+func (r *Room) SetCreatedAtForTest(createdAt time.Time) {
+	r.mu.Lock()
+	r.CreatedAt = createdAt
+	r.mu.Unlock()
 }
 
 // AddRoomForTest 添加房间用于测试

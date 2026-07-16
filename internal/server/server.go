@@ -2,11 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -55,10 +58,28 @@ type Server struct {
 	messageLimiter *MessageRateLimiter
 	chatLimiter    *ChatRateLimiter
 	ipFilter       *IPFilter
+	ipResolver     *ClientIPResolver
 
 	// 连接控制
-	maxConnections int
-	semaphore      chan struct{} // 信号量控制并发连接数
+	maxConnections        int
+	connectionLimiterOnce sync.Once
+	connectionLimiter     *connectionLimiter
+	slowClientDisconnects atomic.Int64
+	commandCacheOnce      sync.Once
+	commandCache          *commandCache
+	readinessCheck        func(context.Context) error
+	shuttingDown          atomic.Bool
+	runtimeCtx            context.Context
+	runtimeCancel         context.CancelFunc
+	monitorOnce           sync.Once
+	monitorWG             sync.WaitGroup
+	shutdownOnce          sync.Once
+	httpServerMu          sync.Mutex
+	httpServer            *http.Server
+	httpServeWG           sync.WaitGroup
+	clientPumpsMu         sync.Mutex
+	clientPumpsClosed     bool
+	clientPumpsWG         sync.WaitGroup
 
 	// 维护模式
 	maintenanceMode bool
@@ -67,29 +88,60 @@ type Server struct {
 
 // NewServer 创建服务器实例
 func NewServer(cfg *config.Config) (*Server, error) {
-	// 初始化 Redis 客户端
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
+	if cfg == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	ipResolver, err := NewClientIPResolver(cfg.Security.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
+	}
+	rdb, err := connectRedis(cfg)
+	if err != nil {
+		return nil, err
+	}
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background()) //nolint:gosec // Server.Shutdown owns runtimeCancel.
+	s := newServerRuntime(cfg, rdb, ipResolver, runtimeCtx, runtimeCancel)
+	s.initializeGameRuntime(cfg)
 
-	// 测试 Redis 连接
+	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 聊天限制=%d/s, 最大连接数=%d",
+		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)
+	log.Printf("🔒 WebSocket Origin 白名单: %s", strings.Join(cfg.Security.AllowedOrigins, ", "))
+	return s, nil
+}
+
+func connectRedis(cfg *config.Config) (*redis.Client, error) {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB,
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
+		_ = rdb.Close()
 		return nil, fmt.Errorf("redis 连接失败: %w", err)
 	}
+	return rdb, nil
+}
 
+func newServerRuntime(
+	cfg *config.Config,
+	rdb *redis.Client,
+	ipResolver *ClientIPResolver,
+	runtimeCtx context.Context,
+	runtimeCancel context.CancelFunc,
+) *Server {
 	s := &Server{
 		config:         cfg,
 		redis:          rdb,
 		redisStore:     storage.NewRedisStore(rdb),
 		leaderboard:    storage.NewLeaderboardManager(rdb),
 		clients:        make(map[string]*Client),
-		sessionManager: session.NewSessionManager(),
+		sessionManager: session.NewSessionManagerWithContext(runtimeCtx),
 		// 初始化安全组件
-		rateLimiter: NewRateLimiter(
+		rateLimiter: NewRateLimiterWithContext(
+			runtimeCtx,
 			cfg.Security.RateLimit.MaxPerSecond,
 			cfg.Security.RateLimit.MaxPerMinute,
 			cfg.Security.RateLimit.BanDurationTime(),
@@ -101,41 +153,35 @@ func NewServer(cfg *config.Config) (*Server, error) {
 			cfg.Security.ChatLimit.MaxPerMinute,
 			cfg.Security.ChatLimit.CooldownDuration(),
 		),
-		ipFilter: NewIPFilter(),
+		ipFilter:   NewIPFilter(),
+		ipResolver: ipResolver,
 		// 初始化连接控制
-		maxConnections: cfg.Server.MaxConnections,
-		semaphore:      make(chan struct{}, cfg.Server.MaxConnections),
+		maxConnections:    cfg.Server.MaxConnections,
+		connectionLimiter: newConnectionLimiter(cfg.Server.MaxConnections),
+		commandCache:      newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL),
+		runtimeCtx:        runtimeCtx,
+		runtimeCancel:     runtimeCancel,
 	}
+	s.readinessCheck = func(ctx context.Context) error { return rdb.Ping(ctx).Err() }
+	return s
+}
 
-	// 初始化房间管理器
-	s.roomManager = room.NewRoomManager(s.redisStore, cfg.Game)
-
-	// 初始化机器人 (未启用时为 nil）
-	var botEngine bot.DecisionEngine
-	if cfg.BOT.Enabled {
-		if cfg.BOT.DouZeroEnabled {
-			botEngine = bot.NewDouZeroEngine(cfg.BOT.DouZeroURL)
-			log.Printf("🎮 DouZero 引擎已启用（服务地址: %s，等待超时: %ds）", cfg.BOT.DouZeroURL, cfg.BOT.BotFillTimeout)
-		} else {
-			botEngine = bot.NewHeuristicEngine()
-			log.Printf("🤖 规则启发式机器人已启用（等待超时: %ds）", cfg.BOT.BotFillTimeout)
-		}
-	}
-
-	// 初始化匹配器
+func (s *Server) initializeGameRuntime(cfg *config.Config) {
+	s.roomManager = room.NewRoomManagerWithContext(s.runtimeCtx, s.redisStore, cfg.Game)
+	botEngine := configuredBotEngine(cfg)
 	s.matcher = match.NewMatcher(match.MatcherDeps{
-		RoomManager: s.roomManager,
-		RedisStore:  s.redisStore,
-		Leaderboard: s.leaderboard,
-		GameConfig:  cfg.Game,
-		BotEngine:   botEngine,
-		BotConfig:   cfg.BOT,
-		RegisterSession: func(roomCode string, gs *session.GameSession) {
-			s.handler.SetGameSession(roomCode, gs)
+		Context:             s.runtimeCtx,
+		RoomManager:         s.roomManager,
+		RedisStore:          s.redisStore,
+		Leaderboard:         s.leaderboard,
+		GameConfig:          cfg.Game,
+		BotEngine:           botEngine,
+		BotConfig:           cfg.BOT,
+		ResolveActiveClient: s.GetClientByID,
+		RegisterSession: func(roomCode string, gs *session.GameSession) bool {
+			return s.handler.SetGameSession(roomCode, gs)
 		},
 	})
-
-	// 初始化消息处理器
 	s.handler = handler.NewHandler(handler.HandlerDeps{
 		Server:         s,
 		RoomManager:    s.roomManager,
@@ -144,39 +190,87 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		Leaderboard:    s.leaderboard,
 		SessionManager: s.sessionManager,
 	})
-
-	// 设置房间游戏开始回调
-	s.roomManager.SetOnGameStart(func(r *room.Room) {
-		gs := session.NewGameSession(r, s.leaderboard, s.config.Game)
-		s.handler.SetGameSession(r.Code, gs)
+	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot) {
+		gs := session.NewGameSessionWithPlayers(r, players, s.leaderboard, s.config.Game)
+		if !s.handler.SetGameSession(r.Code, gs) {
+			return
+		}
+		for _, player := range players {
+			if player.Client == nil {
+				continue
+			}
+			if botClient, ok := player.Client.(*bot.BotClient); ok {
+				botClient.SetSession(gs)
+			}
+		}
 		gs.Start()
 	})
+}
 
-	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 聊天限制=%d/s, 最大连接数=%d",
-		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)
+func configuredBotEngine(cfg *config.Config) bot.DecisionEngine {
+	if !cfg.BOT.Enabled {
+		return nil
+	}
+	if cfg.BOT.DouZeroEnabled {
+		log.Printf("🎮 DouZero 引擎已启用（服务地址: %s，等待超时: %ds）", cfg.BOT.DouZeroURL, cfg.BOT.BotFillTimeout)
+		return bot.NewDouZeroEngine(cfg.BOT.DouZeroURL)
+	}
+	log.Printf("🤖 规则启发式机器人已启用（等待超时: %ds）", cfg.BOT.BotFillTimeout)
+	return bot.NewHeuristicEngine()
+}
 
-	return s, nil
+func (s *Server) activeCommandCache() *commandCache {
+	s.commandCacheOnce.Do(func() {
+		if s.commandCache == nil {
+			s.commandCache = newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL)
+		}
+	})
+	return s.commandCache
+}
+
+func (s *Server) LegacyChatMessages() int64 {
+	if s == nil || s.handler == nil {
+		return 0
+	}
+	return s.handler.LegacyChatMessages()
 }
 
 // Start 启动服务器
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
-
-	http.HandleFunc("/ws", s.handleWebSocket)
-	http.HandleFunc("/health", s.handleHealth)
-	http.HandleFunc("/version", s.handleVersion)
-
-	// 启动监控 goroutine
-	go s.monitorStats()
+	handler := s.httpHandler(loadWebAssets())
 
 	log.Printf("🚀 服务器启动在 ws://%s/ws (CPU核心数: %d)", addr, runtime.NumCPU())
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           nil,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second, // 防止 Slowloris 攻击
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	return server.ListenAndServe()
+
+	s.httpServerMu.Lock()
+	if s.shuttingDown.Load() {
+		s.httpServerMu.Unlock()
+		return nil
+	}
+	s.httpServer = httpServer
+	s.httpServeWG.Add(1)
+	s.startMonitorStats()
+	s.httpServerMu.Unlock()
+	defer func() {
+		s.httpServerMu.Lock()
+		if s.httpServer == httpServer {
+			s.httpServer = nil
+		}
+		s.httpServerMu.Unlock()
+		s.httpServeWG.Done()
+	}()
+
+	err := httpServer.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }

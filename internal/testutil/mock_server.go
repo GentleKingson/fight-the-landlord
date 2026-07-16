@@ -40,6 +40,21 @@ func (m *MockServer) RegisterClient(id string, client types.ClientInterface) {
 	m.Called(id, client)
 }
 
-func (m *MockServer) UnregisterClient(id string) {
-	m.Called(id)
+func (m *MockServer) UnregisterClient(id string, client types.ClientInterface) bool {
+	args := m.Called(id, client)
+	return args.Bool(0)
+}
+
+func (m *MockServer) RebindClient(temporaryID, playerID, playerName, roomCode string, client types.ClientInterface) (types.ClientInterface, error) {
+	args := m.Called(temporaryID, playerID, playerName, roomCode, client)
+	var previous types.ClientInterface
+	if args.Get(0) != nil {
+		previous = args.Get(0).(types.ClientInterface)
+	}
+	return previous, args.Error(1)
+}
+
+func (m *MockServer) RollbackRebindClient(temporaryID, temporaryName, playerID, roomCode string, client, previous types.ClientInterface) error {
+	args := m.Called(temporaryID, temporaryName, playerID, roomCode, client, previous)
+	return args.Error(0)
 }

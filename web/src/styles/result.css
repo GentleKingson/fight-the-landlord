@@ -1,0 +1,70 @@
+/* End-of-game result screen and score presentation. */
+
+.result-panel {
+  width: min(100%, 940px);
+  margin: auto;
+  border-radius: var(--radius-lg);
+  background: var(--panel-dark);
+  color: var(--text-light);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  text-align: center;
+}
+
+.score-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.1);
+}
+
+.result-screen {
+  height: 100dvh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: linear-gradient(180deg, #72b7e8 0 120px, #237145 121px 100%);
+  overflow-y: auto;
+}
+
+.result-panel h1,
+.result-panel p {
+  margin: 0;
+}
+
+.result-badge {
+  width: fit-content;
+  margin: auto;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(248, 206, 85, .16);
+  color: #ffe092;
+  font-weight: 900;
+}
+
+.score-row strong.is-positive {
+  color: #83f0a2;
+}
+
+.score-row strong.is-negative {
+  color: #ff9b92;
+}
+
+.remaining-hands {
+  display: grid;
+  gap: 12px;
+  text-align: left;
+}
+
+.score-list {
+  display: grid;
+  gap: 8px;
+}

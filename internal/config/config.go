@@ -1,20 +1,27 @@
 package config
 
 import (
-	"log"
+	"fmt"
+	"math"
+	"net"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 )
 
 // 默认配置值
 const (
 	defaultHost                  = "0.0.0.0"
+	defaultEnvironment           = "development"
 	defaultPort                  = 1780
 	defaultMaxConnections        = 10000
 	defaultRedisAddr             = "localhost:6379"
@@ -32,7 +39,11 @@ const (
 	defaultChatLimitPerSecond    = 1
 	defaultChatLimitPerMinute    = 30
 	defaultChatCooldown          = 5
+	defaultBotFillTimeout        = 30
+	defaultDouZeroURL            = "http://localhost:2021"
 )
+
+var semanticVersionPattern = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 
 // Config 服务端配置
 type Config struct {
@@ -55,9 +66,10 @@ type BotConfig struct {
 
 // ServerConfig WebSocket 服务器配置
 type ServerConfig struct {
+	Environment    string `yaml:"environment"`
 	Host           string `yaml:"host"`
 	Port           int    `yaml:"port"`
-	MaxConnections int    `yaml:"max_connections"` // 最大并发连接数，0 表示无限制
+	MaxConnections int    `yaml:"max_connections"` // 最大并发连接数，<= 0 表示无限制
 	// 要求的最低客户端版本（如 v1.2.0），空表示不限制。
 	// 低于该版本的客户端启动时会被强制自动升级，用于发布不兼容变更时保证版本一致。
 	MinClientVersion string `yaml:"min_client_version"`
@@ -83,10 +95,11 @@ type GameConfig struct {
 
 // SecurityConfig 安全配置
 type SecurityConfig struct {
-	AllowedOrigins []string           `yaml:"allowed_origins"` // 允许的来源
-	RateLimit      RateLimitConfig    `yaml:"rate_limit"`      // 连接速率限制
-	MessageLimit   MessageLimitConfig `yaml:"message_limit"`   // 消息速率限制
-	ChatLimit      ChatLimitConfig    `yaml:"chat_limit"`      // 聊天消息速率限制
+	AllowedOrigins    []string           `yaml:"allowed_origins"`     // 允许的来源
+	TrustedProxyCIDRs []string           `yaml:"trusted_proxy_cidrs"` // 允许提供转发 IP 头的代理网段
+	RateLimit         RateLimitConfig    `yaml:"rate_limit"`          // 连接速率限制
+	MessageLimit      MessageLimitConfig `yaml:"message_limit"`       // 消息速率限制
+	ChatLimit         ChatLimitConfig    `yaml:"chat_limit"`          // 聊天消息速率限制
 }
 
 // RateLimitConfig 连接速率限制配置
@@ -152,147 +165,377 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+	// Decode over a complete default value so omitted fields inherit defaults
+	// while explicit zero values retain their domain meaning.
+	cfg := defaultConfig()
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("decode config: %w", err)
 	}
-
-	setDefaults(&cfg)
 
 	// 本地开发便利：自动加载 .env.local（仅本地，已 gitignore）。
 	// .env 是 Docker 专用（含 REDIS_ADDR=redis:6379 等容器内地址），
 	if err := godotenv.Load(".env.local"); err != nil && !os.IsNotExist(err) {
-		log.Printf("⚠️  加载 .env.local 失败: %v", err)
+		return nil, fmt.Errorf("load .env.local: %w", err)
 	}
-	loadFromEnv(&cfg)
+	if err := loadFromEnv(cfg); err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
 // --- 环境变量辅助函数 ---
 
-func getEnvStr(key string, target *string) {
-	if v := os.Getenv(key); v != "" {
-		*target = v
+func getEnvStr(key string, target *string, allowEmpty bool) error {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return nil
 	}
+	if !allowEmpty && strings.TrimSpace(v) == "" {
+		return fmt.Errorf("%s must not be empty", key)
+	}
+	*target = v
+	return nil
 }
 
-func getEnvInt(key string, target *int) {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			*target = n
+func getEnvInt(key string, target *int) error {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+	*target = n
+	return nil
+}
+
+func getEnvStrSlice(key string, target *[]string, allowEmpty bool) error {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return nil
+	}
+	if strings.TrimSpace(v) == "" {
+		if !allowEmpty {
+			return fmt.Errorf("%s must not be empty", key)
 		}
+		*target = nil
+		return nil
 	}
+
+	parts := strings.Split(v, ",")
+	values := make([]string, len(parts))
+	for i, value := range parts {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return fmt.Errorf("%s contains an empty item", key)
+		}
+		values[i] = value
+	}
+	*target = values
+	return nil
 }
 
-func getEnvStrSlice(key string, target *[]string) {
-	if v := os.Getenv(key); v != "" {
-		*target = strings.Split(v, ",")
+func getEnvBool(key string, target *bool) error {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return nil
 	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		return fmt.Errorf("%s must be a boolean: %w", key, err)
+	}
+	*target = parsed
+	return nil
 }
 
 // loadFromEnv 从环境变量加载配置（覆盖文件配置）
-func loadFromEnv(cfg *Config) {
-	// Server
-	getEnvStr("SERVER_HOST", &cfg.Server.Host)
-	getEnvInt("SERVER_PORT", &cfg.Server.Port)
-	getEnvInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
-	getEnvStr("SERVER_MIN_CLIENT_VERSION", &cfg.Server.MinClientVersion)
-
-	// Redis
-	getEnvStr("REDIS_ADDR", &cfg.Redis.Addr)
-	getEnvStr("REDIS_PASSWORD", &cfg.Redis.Password)
-	getEnvInt("REDIS_DB", &cfg.Redis.DB)
-
-	// Game
-	getEnvInt("GAME_TURN_TIMEOUT", &cfg.Game.TurnTimeout)
-	getEnvInt("GAME_BID_TIMEOUT", &cfg.Game.BidTimeout)
-	getEnvInt("GAME_ROOM_TIMEOUT", &cfg.Game.RoomTimeout)
-	getEnvInt("GAME_SHUTDOWN_TIMEOUT", &cfg.Game.ShutdownTimeout)
-	getEnvInt("GAME_SHUTDOWN_CHECK_INTERVAL", &cfg.Game.ShutdownCheckInterval)
-	getEnvInt("GAME_ROOM_CLEANUP_DELAY", &cfg.Game.RoomCleanupDelay)
-
-	// BOT
-	if v := os.Getenv("BOT_ENABLED"); v == "true" || v == "1" {
-		cfg.BOT.Enabled = true
+func loadFromEnv(cfg *Config) error {
+	loaders := []func() error{
+		func() error { return getEnvStr("SERVER_ENV", &cfg.Server.Environment, false) },
+		func() error { return getEnvStr("SERVER_HOST", &cfg.Server.Host, false) },
+		func() error { return getEnvInt("SERVER_PORT", &cfg.Server.Port) },
+		func() error { return getEnvInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections) },
+		func() error { return getEnvStr("SERVER_MIN_CLIENT_VERSION", &cfg.Server.MinClientVersion, true) },
+		func() error { return getEnvStr("REDIS_ADDR", &cfg.Redis.Addr, false) },
+		func() error { return getEnvStr("REDIS_PASSWORD", &cfg.Redis.Password, true) },
+		func() error { return getEnvInt("REDIS_DB", &cfg.Redis.DB) },
+		func() error { return getEnvInt("GAME_TURN_TIMEOUT", &cfg.Game.TurnTimeout) },
+		func() error { return getEnvInt("GAME_BID_TIMEOUT", &cfg.Game.BidTimeout) },
+		func() error { return getEnvInt("GAME_ROOM_TIMEOUT", &cfg.Game.RoomTimeout) },
+		func() error { return getEnvInt("GAME_SHUTDOWN_TIMEOUT", &cfg.Game.ShutdownTimeout) },
+		func() error { return getEnvInt("GAME_SHUTDOWN_CHECK_INTERVAL", &cfg.Game.ShutdownCheckInterval) },
+		func() error { return getEnvInt("GAME_ROOM_CLEANUP_DELAY", &cfg.Game.RoomCleanupDelay) },
+		func() error { return getEnvInt("GAME_OFFLINE_WAIT_TIMEOUT", &cfg.Game.OfflineWaitTimeout) },
+		func() error { return getEnvBool("BOT_ENABLED", &cfg.BOT.Enabled) },
+		func() error { return getEnvInt("BOT_FILL_TIMEOUT", &cfg.BOT.BotFillTimeout) },
+		func() error { return getEnvBool("DOUZERO_ENABLED", &cfg.BOT.DouZeroEnabled) },
+		func() error { return getEnvStr("DOUZERO_URL", &cfg.BOT.DouZeroURL, false) },
+		func() error { return getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins, false) },
+		func() error {
+			return getEnvStrSlice("SECURITY_TRUSTED_PROXY_CIDRS", &cfg.Security.TrustedProxyCIDRs, true)
+		},
+		func() error { return getEnvInt("SECURITY_RATE_LIMIT_PER_SECOND", &cfg.Security.RateLimit.MaxPerSecond) },
+		func() error { return getEnvInt("SECURITY_RATE_LIMIT_PER_MINUTE", &cfg.Security.RateLimit.MaxPerMinute) },
+		func() error {
+			return getEnvInt("SECURITY_RATE_LIMIT_BAN_DURATION", &cfg.Security.RateLimit.BanDuration)
+		},
+		func() error {
+			return getEnvInt("SECURITY_MESSAGE_LIMIT_PER_SECOND", &cfg.Security.MessageLimit.MaxPerSecond)
+		},
+		func() error { return getEnvInt("SECURITY_CHAT_LIMIT_PER_SECOND", &cfg.Security.ChatLimit.MaxPerSecond) },
+		func() error { return getEnvInt("SECURITY_CHAT_LIMIT_PER_MINUTE", &cfg.Security.ChatLimit.MaxPerMinute) },
+		func() error { return getEnvInt("SECURITY_CHAT_COOLDOWN", &cfg.Security.ChatLimit.Cooldown) },
 	}
-	getEnvInt("BOT_FILL_TIMEOUT", &cfg.BOT.BotFillTimeout)
-	if v := os.Getenv("DOUZERO_ENABLED"); v == "true" || v == "1" {
-		cfg.BOT.DouZeroEnabled = true
+	for _, load := range loaders {
+		if err := load(); err != nil {
+			return err
+		}
 	}
-	getEnvStr("DOUZERO_URL", &cfg.BOT.DouZeroURL)
-
-	// Security
-	getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins)
-	getEnvInt("SECURITY_RATE_LIMIT_PER_SECOND", &cfg.Security.RateLimit.MaxPerSecond)
-	getEnvInt("SECURITY_MESSAGE_LIMIT_PER_SECOND", &cfg.Security.MessageLimit.MaxPerSecond)
+	return nil
 }
 
 // --- 默认值辅助函数 ---
 
-func setDefaultStr(target *string, defaultVal string) {
-	if *target == "" {
-		*target = defaultVal
+func defaultConfig() *Config {
+	return &Config{
+		Server: ServerConfig{
+			Environment:    defaultEnvironment,
+			Host:           defaultHost,
+			Port:           defaultPort,
+			MaxConnections: defaultMaxConnections,
+		},
+		Redis: RedisConfig{Addr: defaultRedisAddr},
+		Game: GameConfig{
+			TurnTimeout:           defaultTurnTimeout,
+			BidTimeout:            defaultBidTimeout,
+			RoomTimeout:           defaultRoomTimeout,
+			ShutdownTimeout:       defaultShutdownTimeout,
+			ShutdownCheckInterval: defaultShutdownCheckInterval,
+			RoomCleanupDelay:      defaultRoomCleanupDelay,
+			OfflineWaitTimeout:    defaultOfflineWaitTimeout,
+		},
+		Security: SecurityConfig{
+			AllowedOrigins: []string{"*"},
+			RateLimit: RateLimitConfig{
+				MaxPerSecond: defaultRateLimitPerSecond,
+				MaxPerMinute: defaultRateLimitPerMinute,
+				BanDuration:  defaultBanDuration,
+			},
+			MessageLimit: MessageLimitConfig{MaxPerSecond: defaultMessageLimitPerSecond},
+			ChatLimit: ChatLimitConfig{
+				MaxPerSecond: defaultChatLimitPerSecond,
+				MaxPerMinute: defaultChatLimitPerMinute,
+				Cooldown:     defaultChatCooldown,
+			},
+		},
+		BOT: BotConfig{
+			BotFillTimeout: defaultBotFillTimeout,
+			DouZeroURL:     defaultDouZeroURL,
+		},
 	}
-}
-
-func setDefaultInt(target *int, defaultVal int) {
-	if *target == 0 {
-		*target = defaultVal
-	}
-}
-
-func setDefaultStrSlice(target *[]string, defaultVal []string) {
-	if len(*target) == 0 {
-		*target = defaultVal
-	}
-}
-
-// setDefaults 设置默认值
-func setDefaults(cfg *Config) {
-	// Server
-	setDefaultStr(&cfg.Server.Host, defaultHost)
-	setDefaultInt(&cfg.Server.Port, defaultPort)
-	setDefaultInt(&cfg.Server.MaxConnections, defaultMaxConnections)
-
-	// Redis
-	setDefaultStr(&cfg.Redis.Addr, defaultRedisAddr)
-
-	// Game
-	setDefaultInt(&cfg.Game.TurnTimeout, defaultTurnTimeout)
-	setDefaultInt(&cfg.Game.BidTimeout, defaultBidTimeout)
-	setDefaultInt(&cfg.Game.RoomTimeout, defaultRoomTimeout)
-	setDefaultInt(&cfg.Game.ShutdownTimeout, defaultShutdownTimeout)
-	setDefaultInt(&cfg.Game.ShutdownCheckInterval, defaultShutdownCheckInterval)
-	setDefaultInt(&cfg.Game.RoomCleanupDelay, defaultRoomCleanupDelay)
-	setDefaultInt(&cfg.Game.OfflineWaitTimeout, defaultOfflineWaitTimeout)
-
-	// Security
-	setDefaultStrSlice(&cfg.Security.AllowedOrigins, []string{"*"})
-	setDefaultInt(&cfg.Security.RateLimit.MaxPerSecond, defaultRateLimitPerSecond)
-	setDefaultInt(&cfg.Security.RateLimit.MaxPerMinute, defaultRateLimitPerMinute)
-	setDefaultInt(&cfg.Security.RateLimit.BanDuration, defaultBanDuration)
-	setDefaultInt(&cfg.Security.MessageLimit.MaxPerSecond, defaultMessageLimitPerSecond)
-	setDefaultInt(&cfg.Security.ChatLimit.MaxPerSecond, defaultChatLimitPerSecond)
-	setDefaultInt(&cfg.Security.ChatLimit.MaxPerMinute, defaultChatLimitPerMinute)
-	setDefaultInt(&cfg.Security.ChatLimit.Cooldown, defaultChatCooldown)
-
-	// Bot
-	setDefaultInt(&cfg.BOT.BotFillTimeout, 30)
-	setDefaultStr(&cfg.BOT.DouZeroURL, "http://localhost:2021")
 }
 
 // Default 返回默认配置
 func Default() *Config {
-	// 尝试加载默认配置文件
-	if cfg, err := Load("config.yaml"); err == nil {
-		return cfg
-	} else {
-		log.Printf("无法加载默认配置文件，使用最小默认值: %v", err)
-	}
+	return defaultConfig()
+}
 
-	// 使用 setDefaults 设置的默认值
-	cfg := &Config{}
-	setDefaults(cfg)
-	return cfg
+// Validate rejects configuration values that cannot be used safely at runtime.
+func (c *Config) Validate() error {
+	if c == nil {
+		return fmt.Errorf("config must not be nil")
+	}
+	environment, err := validateServerConfig(c.Server)
+	if err != nil {
+		return err
+	}
+	if err := validateConfiguredDurations(c); err != nil {
+		return err
+	}
+	if err := validateDependencies(c, environment); err != nil {
+		return err
+	}
+	if err := validateSecurityConfig(c.Security, environment); err != nil {
+		return err
+	}
+	return validatePositiveLimits(c.Security)
+}
+
+func validateServerConfig(server ServerConfig) (string, error) {
+	environment := strings.ToLower(strings.TrimSpace(server.Environment))
+	if environment != "development" && environment != "production" && environment != "test" {
+		return "", fmt.Errorf("server.environment must be development, production, or test")
+	}
+	if strings.TrimSpace(server.Host) == "" || server.Host != strings.TrimSpace(server.Host) {
+		return "", fmt.Errorf("server.host must not be empty")
+	}
+	if server.Port < 1 || server.Port > 65535 {
+		return "", fmt.Errorf("server.port must be between 1 and 65535")
+	}
+	// MaxConnections <= 0 intentionally means unlimited.
+	return environment, nil
+}
+
+func validateConfiguredDurations(c *Config) error {
+	durations := []struct {
+		name  string
+		value int
+		unit  time.Duration
+		zero  bool
+	}{
+		{name: "game.turn_timeout", value: c.Game.TurnTimeout, unit: time.Second},
+		{name: "game.bid_timeout", value: c.Game.BidTimeout, unit: time.Second},
+		{name: "game.room_timeout", value: c.Game.RoomTimeout, unit: time.Minute},
+		{name: "game.shutdown_timeout", value: c.Game.ShutdownTimeout, unit: time.Minute},
+		{name: "game.shutdown_check_interval", value: c.Game.ShutdownCheckInterval, unit: time.Second},
+		{name: "game.room_cleanup_delay", value: c.Game.RoomCleanupDelay, unit: time.Second, zero: true},
+		{name: "game.offline_wait_timeout", value: c.Game.OfflineWaitTimeout, unit: time.Second},
+		{name: "bot.bot_fill_timeout", value: c.BOT.BotFillTimeout, unit: time.Second},
+		{name: "security.rate_limit.ban_duration", value: c.Security.RateLimit.BanDuration, unit: time.Second},
+		{name: "security.chat_limit.cooldown", value: c.Security.ChatLimit.Cooldown, unit: time.Second, zero: true},
+	}
+	for _, duration := range durations {
+		if err := validateDuration(duration.name, duration.value, duration.unit, duration.zero); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateDependencies(c *Config, environment string) error {
+	if err := validateRedisAddress(c.Redis.Addr); err != nil {
+		return fmt.Errorf("redis.addr: %w", err)
+	}
+	if c.Redis.DB < 0 {
+		return fmt.Errorf("redis.db must not be negative")
+	}
+	if environment == "production" && strings.TrimSpace(c.Redis.Password) == "" {
+		return fmt.Errorf("redis.password must not be empty in production")
+	}
+	if err := validateHTTPURL(c.BOT.DouZeroURL); err != nil {
+		return fmt.Errorf("bot.douzero_url: %w", err)
+	}
+	if c.Server.MinClientVersion != "" && !isSemanticVersion(c.Server.MinClientVersion) {
+		return fmt.Errorf("server.min_client_version must be a semantic version")
+	}
+	return nil
+}
+
+func validateSecurityConfig(security SecurityConfig, environment string) error {
+	if len(security.AllowedOrigins) == 0 {
+		return fmt.Errorf("security.allowed_origins must not be empty")
+	}
+	for _, origin := range security.AllowedOrigins {
+		if origin == "*" {
+			if environment == "production" {
+				return fmt.Errorf("security.allowed_origins must not contain wildcard in production")
+			}
+			continue
+		}
+		if err := validateOrigin(origin); err != nil {
+			return fmt.Errorf("security.allowed_origins: %w", err)
+		}
+	}
+	for _, cidr := range security.TrustedProxyCIDRs {
+		if _, err := netip.ParsePrefix(cidr); err != nil {
+			return fmt.Errorf("security.trusted_proxy_cidrs contains invalid CIDR %q: %w", cidr, err)
+		}
+	}
+	return nil
+}
+
+func validatePositiveLimits(security SecurityConfig) error {
+	positiveLimits := []struct {
+		name  string
+		value int
+	}{
+		{name: "security.rate_limit.max_per_second", value: security.RateLimit.MaxPerSecond},
+		{name: "security.rate_limit.max_per_minute", value: security.RateLimit.MaxPerMinute},
+		{name: "security.message_limit.max_per_second", value: security.MessageLimit.MaxPerSecond},
+		{name: "security.chat_limit.max_per_second", value: security.ChatLimit.MaxPerSecond},
+		{name: "security.chat_limit.max_per_minute", value: security.ChatLimit.MaxPerMinute},
+	}
+	for _, limit := range positiveLimits {
+		if limit.value <= 0 {
+			return fmt.Errorf("%s must be greater than zero", limit.name)
+		}
+	}
+	return nil
+}
+
+func validateDuration(name string, value int, unit time.Duration, allowZero bool) error {
+	if value < 0 || (!allowZero && value == 0) {
+		if allowZero {
+			return fmt.Errorf("%s must not be negative", name)
+		}
+		return fmt.Errorf("%s must be greater than zero", name)
+	}
+	if int64(value) > math.MaxInt64/int64(unit) {
+		return fmt.Errorf("%s exceeds the maximum supported duration", name)
+	}
+	return nil
+}
+
+func isSemanticVersion(value string) bool {
+	if !semanticVersionPattern.MatchString(value) {
+		return false
+	}
+	if !strings.HasPrefix(value, "v") {
+		value = "v" + value
+	}
+	return semver.IsValid(value)
+}
+
+func validateRedisAddress(address string) error {
+	if address != strings.TrimSpace(address) {
+		return fmt.Errorf("must not contain surrounding whitespace")
+	}
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("must be a host:port address: %w", err)
+	}
+	if strings.TrimSpace(host) == "" {
+		return fmt.Errorf("host must not be empty")
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	return nil
+}
+
+func validateHTTPURL(value string) error {
+	if value != strings.TrimSpace(value) {
+		return fmt.Errorf("must not contain surrounding whitespace")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return err
+	}
+	if (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) || parsed.Hostname() == "" {
+		return fmt.Errorf("must be an absolute http or https URL")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("must not contain credentials, a query, or a fragment")
+	}
+	return nil
+}
+
+func validateOrigin(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("invalid origin %q: %w", value, err)
+	}
+	if (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) || parsed.Hostname() == "" {
+		return fmt.Errorf("invalid origin %q", value)
+	}
+	if parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("origin %q must contain only scheme and authority", value)
+	}
+	return nil
 }

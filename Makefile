@@ -1,4 +1,4 @@
-.PHONY: help release test coverage lint fmt clean build install proto
+.PHONY: help release test coverage lint fmt clean build install proto proto-check
 
 # 默认目标
 .DEFAULT_GOAL := help
@@ -43,11 +43,18 @@ proto:  ## Regenerate Protocol Buffer and message type mapping code
 		echo "$(YELLOW)Install it with: brew install protobuf$(NC)"; \
 		exit 1; \
 	fi
-	protoc --proto_path=. --go_out=. --go_opt=module=github.com/palemoky/fight-the-landlord internal/protocol/proto/*.proto
+	protoc --experimental_allow_proto3_optional --proto_path=. --go_out=. --go_opt=module=github.com/palemoky/fight-the-landlord internal/protocol/proto/*.proto
 	@echo "$(GREEN)✓ Protocol Buffer code regenerated$(NC)"
 	@echo "$(BLUE)Generating MessageType mapping code...$(NC)"
 	@cd internal/protocol/convert/msgtype && go run gen.go
+	gofmt -w internal/protocol/convert/msgtype/mapping.go
 	@echo "$(GREEN)✓ MessageType mapping code generated$(NC)"
+	npm --prefix web run proto:generate
+	@echo "$(GREEN)✓ Web protocol codec generated from canonical schema$(NC)"
+
+## proto-check: 验证所有 protobuf 生成物已提交且为最新
+proto-check: proto
+	git diff --exit-code -- internal/protocol/pb internal/protocol/convert/msgtype/mapping.go web/src/protocol/generated.ts web/src/protocol/generated-runtime.js web/src/protocol/generated-runtime.d.ts
 
 ## release: 创建并推送版本标签
 release:  ## Create and push version tag

@@ -8,9 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -87,60 +88,20 @@ func checkAt(ctx context.Context, currentVersion, url string) (*Result, error) {
 
 // CompareVersions 比较两个语义化版本号（形如 v1.2.3）
 //
-// 返回值：a < b 时为负数，a == b 时为 0，a > b 时为正数。无法解析的部分按 0 处理，预发布后缀（如 -rc.1）在主体版本相同时视为较旧。
+// 返回值：a < b 时为负数，a == b 时为 0，a > b 时为正数。无法解析的版本按 v0.0.0 处理。
 func CompareVersions(a, b string) int {
-	aMain, aPre := splitVersion(a)
-	bMain, bPre := splitVersion(b)
-
-	aParts := parseParts(aMain)
-	bParts := parseParts(bMain)
-
-	for i := range 3 {
-		if aParts[i] != bParts[i] {
-			if aParts[i] < bParts[i] {
-				return -1
-			}
-			return 1
-		}
-	}
-
-	// 主体版本一致：有预发布后缀的版本视为较旧。
-	switch {
-	case aPre == "" && bPre == "":
-		return 0
-	case aPre == "" && bPre != "":
-		return 1
-	case aPre != "" && bPre == "":
-		return -1
-	default:
-		return strings.Compare(aPre, bPre)
-	}
+	return semver.Compare(comparableVersion(a), comparableVersion(b))
 }
 
-// splitVersion 去除前缀 v 并分离预发布后缀，返回 (主体, 预发布)
-func splitVersion(v string) (mainPart, preRelease string) {
+func comparableVersion(v string) string {
 	v = strings.TrimSpace(v)
-	v = strings.TrimPrefix(v, "v")
-	v = strings.TrimPrefix(v, "V")
-	if main, pre, found := strings.Cut(v, "-"); found {
-		return main, pre
+	if strings.HasPrefix(v, "V") {
+		v = "v" + strings.TrimPrefix(v, "V")
+	} else if !strings.HasPrefix(v, "v") {
+		v = "v" + v
 	}
-	return v, ""
-}
-
-// parseParts 将 "1.2.3" 解析为 [3]int，缺失或非法部分按 0 处理
-func parseParts(main string) [3]int {
-	var parts [3]int
-	for i, s := range strings.SplitN(main, ".", 3) {
-		n, _ := strconv.Atoi(strings.TrimSpace(s))
-		switch i {
-		case 0:
-			parts[0] = n
-		case 1:
-			parts[1] = n
-		case 2:
-			parts[2] = n
-		}
+	if !semver.IsValid(v) {
+		return "v0.0.0"
 	}
-	return parts
+	return v
 }

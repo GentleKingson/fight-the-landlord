@@ -22,6 +22,13 @@ message PlayerInfo {
   bool is_landlord = 5;  // 是否是地主
   int64 cards_count = 6; // 手牌数量
   bool online = 7;       // 是否在线
+  bool is_bot = 8;       // 是否是机器人
+}
+
+// PlayerPlayedCards 某位玩家本局已经公开打出的牌
+message PlayerPlayedCards {
+  string player_id = 1;
+  repeated CardInfo cards = 2;
 }
 
 // PlayerHand 玩家手牌信息（用于游戏结束展示）
@@ -39,17 +46,55 @@ message PlayerScore {
   int64 score = 4;      // 本局得分（输为负，赢为正）
 }
 
+// GameSettlementDTO 完整的权威结算快照（用于结束态重连恢复）
+message GameSettlementDTO {
+  string winner_id = 1;
+  string winner_name = 2;
+  bool winner_is_landlord = 3;
+  int64 multiplier = 4;
+  repeated PlayerScore scores = 5;
+  repeated PlayerHand player_hands = 6;
+}
+
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）
 message GameStateDTO {
-  string phase = 1;                      // bidding/playing
+  string phase = 1;                      // waiting/bidding/playing/ended
   repeated PlayerInfo players = 2;       // 所有玩家信息
   repeated CardInfo hand = 3;            // 自己的手牌
-  repeated CardInfo bottom_cards = 4;  // 底牌
+  repeated CardInfo bottom_cards = 4;    // 已公开的底牌
   string current_turn = 5;               // 当前回合玩家 ID
   repeated CardInfo last_played = 6;     // 上家出的牌
   string last_player_id = 7;             // 上家 ID
   bool must_play = 8;                    // 是否必须出牌
   bool can_beat = 9;                     // 是否能打过
+  int64 snapshot_version = 10;           // 单调递增的快照/事件版本
+  string game_id = 11;                   // 当前牌局 ID
+  bool bottom_cards_revealed = 12;       // 底牌是否已经公开
+  int64 turn_id = 13;                    // 当前回合序号
+  int64 turn_deadline_ms = 14;           // 服务端绝对截止时间
+  int64 server_time_ms = 15;             // 生成快照时的服务端时间
+  string last_player_name = 16;          // 有效上一手玩家名称
+  string last_hand_type = 17;            // 有效上一手牌型
+  bool is_grab = 18;                     // 是否处于抢地主阶段
+  int64 multiplier = 19;                 // 当前倍数
+  int64 base_score = 20;                 // 本局底分
+  repeated PlayerPlayedCards played_cards = 21; // 已公开出牌账本
+  optional GameSettlementDTO settlement = 22; // 结束态的完整权威结算
+}
+
+// ChatPayload 聊天请求和服务端聊天事件的统一协议。
+// 字段 1-6 与早期 Web JSON contract 保持一致；新增字段由服务端确认。
+message ChatPayload {
+  string sender_id = 1;
+  string sender_name = 2;
+  string content = 3;
+  string scope = 4;       // lobby/room/game
+  int64 time = 5;         // 兼容字段，Unix 秒
+  bool is_system = 6;
+  string message_id = 7;
+  string room_code = 8;
+  string game_id = 9;
+  int64 server_time = 10; // Unix 毫秒
 }
 
 // LeaderboardEntry 排行榜条目

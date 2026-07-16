@@ -68,7 +68,7 @@ func main() {
 
 	logger.LogInfo("Connecting to server: %s", serverURL)
 
-	model := ui.NewOnlineModel(serverURL)
+	model := ui.NewOnlineModel(serverURL, version)
 
 	p := tea.NewProgram(model)
 	if _, err := p.Run(); err != nil {

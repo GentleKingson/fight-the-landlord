@@ -2,11 +2,13 @@ package payload
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/convert/msgtype"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/pb"
 )
 
@@ -26,14 +28,32 @@ func DecodePayload(msgType protocol.MessageType, data []byte, target any) error 
 		return err
 	}
 
-	// 未知类型，回退到 JSON
-	return json.Unmarshal(data, target)
+	return fmt.Errorf("unsupported protobuf payload for message type %q", msgType)
 }
 
 // decodeClientPayload 解码客户端发送的消息
 // 返回 (是否处理了该消息类型, 错误)
 func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
+	if ok, err := decodeClientConnectionPayload(msgType, data, target); ok {
+		return true, err
+	}
+	return decodeClientCommandPayload(msgType, data, target)
+}
+
+func decodeClientConnectionPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
 	switch msgType {
+	case protocol.MsgHello:
+		var pbMsg pb.HelloPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.HelloPayload) = protocol.HelloPayload{
+			ProtocolVersion: pbMsg.ProtocolVersion,
+			ClientVersion:   pbMsg.ClientVersion,
+			Capabilities:    append([]string(nil), pbMsg.Capabilities...),
+			ClientKind:      pbMsg.ClientKind,
+		}
+		return true, nil
 	case protocol.MsgReconnect:
 		var pbMsg pb.ReconnectPayload
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
@@ -53,6 +73,30 @@ func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) 
 			Timestamp: pbMsg.Timestamp,
 		}
 		return true, nil
+	case protocol.MsgChat:
+		var pbMsg pb.ChatPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.ChatPayload) = protocol.ChatPayload{
+			SenderID:   pbMsg.SenderId,
+			SenderName: pbMsg.SenderName,
+			Content:    pbMsg.Content,
+			Scope:      pbMsg.Scope,
+			Time:       pbMsg.Time,
+			IsSystem:   pbMsg.IsSystem,
+			MessageID:  pbMsg.MessageId,
+			RoomCode:   pbMsg.RoomCode,
+			GameID:     pbMsg.GameId,
+			ServerTime: pbMsg.ServerTime,
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func decodeClientCommandPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
+	switch msgType {
 	case protocol.MsgJoinRoom:
 		var pbMsg pb.JoinRoomPayload
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
@@ -95,6 +139,23 @@ func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) 
 	return false, nil
 }
 
+// DecodeChatPayload accepts the canonical protobuf payload and, during the
+// migration window, the former JSON bytes embedded in the protobuf envelope.
+func DecodeChatPayload(data []byte, target *protocol.ChatPayload) (legacy bool, err error) {
+	if target == nil {
+		return false, fmt.Errorf("chat payload target is nil")
+	}
+	if _, decodeErr := decodeClientPayload(protocol.MsgChat, data, target); decodeErr == nil {
+		return false, nil
+	}
+	var fallback protocol.ChatPayload
+	if err := json.Unmarshal(data, &fallback); err != nil {
+		return false, err
+	}
+	*target = fallback
+	return true, nil
+}
+
 // decodeServerPayload 解码服务端发送的消息
 // 返回 (是否处理了该消息类型, 错误)
 func decodeServerPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
@@ -118,6 +179,60 @@ func decodeServerPayload(msgType protocol.MessageType, data []byte, target any) 
 
 // decodeConnectionMessages 解码连接相关消息
 func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target any) (bool, error) {
+	if ok, err := decodeNegotiationMessages(msgType, data, target); ok {
+		return true, err
+	}
+	return decodeSessionMessages(msgType, data, target)
+}
+
+func decodeNegotiationMessages(msgType protocol.MessageType, data []byte, target any) (bool, error) {
+	switch msgType {
+	case protocol.MsgNegotiated:
+		var pbMsg pb.NegotiatedPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.NegotiatedPayload) = protocol.NegotiatedPayload{
+			ProtocolVersion: pbMsg.ProtocolVersion,
+			ServerVersion:   pbMsg.ServerVersion,
+			Capabilities:    append([]string(nil), pbMsg.Capabilities...),
+			ClientKind:      pbMsg.ClientKind,
+		}
+		return true, nil
+	case protocol.MsgProtocolRejected:
+		var pbMsg pb.ProtocolRejectedPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.ProtocolRejectedPayload) = protocol.ProtocolRejectedPayload{
+			RequestID:                pbMsg.RequestId,
+			Reason:                   pbMsg.Reason,
+			SupportedProtocolVersion: pbMsg.SupportedProtocolVersion,
+			MinClientVersion:         pbMsg.MinClientVersion,
+		}
+		return true, nil
+	case protocol.MsgCommandAck:
+		var pbMsg pb.CommandAckPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.CommandAckPayload) = protocol.CommandAckPayload{
+			RequestID:   pbMsg.RequestId,
+			CommandType: protocol.MessageType(msgtype.ProtoMessageTypeToString(pbMsg.CommandType)),
+		}
+		return true, nil
+	case protocol.MsgWarning:
+		var pbMsg pb.WarningPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.WarningPayload) = protocol.WarningPayload{Code: int(pbMsg.Code), Message: pbMsg.Message}
+		return true, nil
+	}
+	return false, nil
+}
+
+func decodeSessionMessages(msgType protocol.MessageType, data []byte, target any) (bool, error) {
 	switch msgType {
 	case protocol.MsgConnected:
 		var pbMsg pb.ConnectedPayload
@@ -150,10 +265,11 @@ func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target 
 			gameState = convert.ProtoToGameStateDTO(pbMsg.GameState)
 		}
 		*target.(*protocol.ReconnectedPayload) = protocol.ReconnectedPayload{
-			PlayerID:   pbMsg.PlayerId,
-			PlayerName: pbMsg.PlayerName,
-			RoomCode:   pbMsg.RoomCode,
-			GameState:  gameState,
+			PlayerID:       pbMsg.PlayerId,
+			PlayerName:     pbMsg.PlayerName,
+			RoomCode:       pbMsg.RoomCode,
+			GameState:      gameState,
+			ReconnectToken: pbMsg.ReconnectToken,
 		}
 		return true, nil
 	case protocol.MsgError:
@@ -161,9 +277,15 @@ func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target 
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
 			return true, err
 		}
+		var commandType protocol.MessageType
+		if pbMsg.CommandType != pb.MessageType_MSG_UNKNOWN {
+			commandType = protocol.MessageType(msgtype.ProtoMessageTypeToString(pbMsg.CommandType))
+		}
 		*target.(*protocol.ErrorPayload) = protocol.ErrorPayload{
-			Code:    int(pbMsg.Code),
-			Message: pbMsg.Message,
+			Code:        int(pbMsg.Code),
+			Message:     pbMsg.Message,
+			CommandType: commandType,
+			RequestID:   pbMsg.RequestId,
 		}
 		return true, nil
 	}
@@ -333,6 +455,30 @@ func decodeRoomStateMessages(msgType protocol.MessageType, data []byte, target a
 		*target.(*protocol.RoomListResultPayload) = protocol.RoomListResultPayload{
 			Rooms: convert.ProtoToRoomListItems(pbMsg.Rooms),
 		}
+		return true, nil
+	case protocol.MsgMatchQueued:
+		var pbMsg pb.MatchQueuedPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.MatchQueuedPayload) = protocol.MatchQueuedPayload{
+			DeadlineMS: pbMsg.DeadlineMs,
+			Practice:   pbMsg.Practice,
+		}
+		return true, nil
+	case protocol.MsgMatchCancelled:
+		var pbMsg pb.MatchCancelledPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.MatchCancelledPayload) = protocol.MatchCancelledPayload{Reason: pbMsg.Reason}
+		return true, nil
+	case protocol.MsgRoomLeft:
+		var pbMsg pb.RoomLeftPayload
+		if err := proto.Unmarshal(data, &pbMsg); err != nil {
+			return true, err
+		}
+		*target.(*protocol.RoomLeftPayload) = protocol.RoomLeftPayload{RoomCode: pbMsg.RoomCode}
 		return true, nil
 	}
 	return false, nil

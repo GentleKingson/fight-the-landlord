@@ -72,9 +72,6 @@ type HandAnalysis struct {
 	ones  []card.Rank
 }
 
-// handChecker 牌型检查函数类型
-type handChecker func(HandAnalysis, ParsedHand) bool
-
 // analyzeCards 分析手牌，返回一个包含所有统计信息的结构
 func analyzeCards(cards []card.Card) HandAnalysis {
 	analysis := HandAnalysis{
@@ -134,20 +131,6 @@ func (h HandType) String() string {
 	return "无效"
 }
 
-// handCheckers 牌型检查函数映射表
-var handCheckers = map[HandType]handChecker{
-	Single:           func(a HandAnalysis, h ParsedHand) bool { return findWinningSingle(a, h) },
-	Pair:             func(a HandAnalysis, h ParsedHand) bool { return findWinningPair(a, h) },
-	Trio:             func(a HandAnalysis, h ParsedHand) bool { return findWinningTrio(a, h, 0) },
-	TrioWithSingle:   func(a HandAnalysis, h ParsedHand) bool { return findWinningTrio(a, h, 1) },
-	TrioWithPair:     func(a HandAnalysis, h ParsedHand) bool { return findWinningTrio(a, h, 2) },
-	Straight:         func(a HandAnalysis, h ParsedHand) bool { return findWinningStraight(a, h) },
-	PairStraight:     func(a HandAnalysis, h ParsedHand) bool { return findWinningPairStraight(a, h) },
-	Plane:            func(a HandAnalysis, h ParsedHand) bool { return findWinningPlane(a, h, 0) },
-	PlaneWithSingles: func(a HandAnalysis, h ParsedHand) bool { return findWinningPlane(a, h, 1) },
-	PlaneWithPairs:   func(a HandAnalysis, h ParsedHand) bool { return findWinningPlane(a, h, 2) },
-}
-
 // ParseHand 解析牌型
 func ParseHand(cards []card.Card) (ParsedHand, error) {
 	if len(cards) == 0 {
@@ -180,11 +163,11 @@ func ParseHand(cards []card.Card) (ParsedHand, error) {
 // CanBeat 判断 newHand 是否能大过 lastHand
 func CanBeat(newHand, lastHand ParsedHand) bool {
 	// 王炸最大
-	if newHand.Type == Rocket {
-		return true
-	}
 	if lastHand.Type == Rocket {
 		return false
+	}
+	if newHand.Type == Rocket {
+		return true
 	}
 
 	// 炸弹可以大过任何非炸弹和非王炸的牌
@@ -208,25 +191,8 @@ func CanBeat(newHand, lastHand ParsedHand) bool {
 
 // CanBeatWithHand 检查一个玩家的整手牌中是否存在任何可以打过 opponentHand 的组合
 func CanBeatWithHand(playerHand []card.Card, opponentHand ParsedHand) bool {
-	// 1. 如果是新一轮，总是有牌可出
 	if opponentHand.IsEmpty() {
-		return true
+		return FindSmallestBeatingCards(playerHand, opponentHand) != nil
 	}
-
-	analysis := analyzeCards(playerHand)
-
-	// 2. 检查是否有炸弹或王炸 (它们几乎可以打任何牌)
-	if hasWinningBombOrRocket(analysis, opponentHand) {
-		return true
-	}
-
-	if opponentHand.Type == Bomb || opponentHand.Type == Rocket {
-		return false
-	}
-
-	// 3. 检查是否有同类型的、更大的牌
-	if checker, ok := handCheckers[opponentHand.Type]; ok {
-		return checker(analysis, opponentHand)
-	}
-	return false
+	return len(ListLegalResponses(playerHand, opponentHand)) > 0
 }

@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"log"
 	"time"
 
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
@@ -14,11 +16,12 @@ import (
 func (h *Handler) handlePing(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.PingPayload](msg)
 	if err != nil {
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgPing))
 		return
 	}
 
 	// 立即回复 pong
-	client.SendMessage(codec.MustNewMessage(protocol.MsgPong, protocol.PongPayload{
+	sendMessage(client, codec.MustNewMessage(protocol.MsgPong, protocol.PongPayload{
 		ClientTimestamp: payload.Timestamp,
 		ServerTimestamp: time.Now().UnixMilli(),
 	}))
@@ -28,81 +31,251 @@ func (h *Handler) handlePing(client types.ClientInterface, msg *protocol.Message
 func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.ReconnectPayload](msg)
 	if err != nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgReconnect))
 		return
 	}
 
-	// 验证重连令牌
-	if !h.sessionManager.CanReconnect(payload.Token, payload.PlayerID) {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "重连令牌无效或已过期"))
+	// Rebinding a connection that already owns a room membership would leave
+	// that room holding the same physical Client under the old logical player.
+	// Reject before consuming either reconnect credential; clients must leave
+	// their provisional room before restoring another identity.
+	if client.GetRoom() != "" {
+		sendMessage(client, codec.NewCommandErrorMessageWithText(
+			protocol.ErrCodeReconnectInvalid,
+			"当前连接已加入房间，无法恢复其他身份",
+			protocol.MsgReconnect,
+		))
 		return
 	}
 
-	// 获取旧会话
-	session := h.sessionManager.GetSession(payload.PlayerID)
-	if session == nil {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "会话不存在"))
+	temporaryID := client.GetID()
+	temporaryName := client.GetName()
+	restored, ok := h.restoreReconnectSession(client, payload, temporaryID)
+	if !ok {
 		return
 	}
-
-	// 注意：由于ClientInterface不允许修改ID/Name，我们需要通过Server层面处理
-	// 这里我们假设client已经是正确的类型，可以进行类型断言
-	oldID := client.GetID()
-
-	// 从旧 ID 注销，用新 ID 注册
-	h.server.UnregisterClient(oldID)
-	h.server.RegisterClient(session.PlayerID, client)
-
-	// 标记会话上线
-	h.sessionManager.SetOnline(session.PlayerID)
-
+	previous, ok := h.rebindRestoredClient(client, restored, temporaryID)
+	if !ok {
+		return
+	}
 	// 构建重连响应
 	reconnectPayload := protocol.ReconnectedPayload{
-		PlayerID:   session.PlayerID,
-		PlayerName: session.PlayerName,
+		PlayerID:       restored.PlayerID,
+		PlayerName:     restored.PlayerName,
+		ReconnectToken: restored.ReconnectToken,
 	}
 
-	// 如果在房间中，尝试恢复房间信息
-	if session.RoomCode != "" {
-		h.tryRestoreRoomState(client, session, &reconnectPayload)
+	// A replaced connection may finish its disconnect cleanup concurrently.
+	// Reassert online status after identity migration; exact room presence is
+	// updated inside the room publication transaction below.
+	h.sessionManager.SetOnline(restored.PlayerID)
+
+	restoredRoom, responseSent, restoreErr := h.restoreReconnectRoom(client, restored, &reconnectPayload)
+	if errors.Is(restoreErr, room.ErrReconnectResponseDelivery) {
+		h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName)
+		return
+	}
+	if restoredRoom == nil {
+		sent, sendErr := h.sendReconnected(client, restored, nil, &reconnectPayload)
+		if sendErr != nil || !sent {
+			h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName)
+			return
+		}
+	} else if !responseSent {
+		h.closeSkippedReconnect(client, previous, restored.PlayerID)
+		return
 	}
 
-	// 发送重连成功消息
-	client.SendMessage(codec.MustNewMessage(protocol.MsgReconnected, reconnectPayload))
+	// Publish the rotated identity and reconnect token before migrating queued
+	// matcher work. ReplaceClient may immediately enqueue MatchQueued or let an
+	// inflight match publish RoomJoined; neither may overtake Reconnected.
+	if h.matcher != nil && previous != nil && previous != client {
+		h.matcher.ReplaceClient(previous, client)
+	}
+	if previous != nil && previous != client {
+		previous.Close()
+	}
 
-	// 快照恢复后，若正轮到该玩家，补发当前回合通知，恢复其操作提示与倒计时（快照本身不含 IsGrab / 剩余时间等回合信息）。须在 MsgReconnected 之后发送，确保客户端先应用快照、再设置回合提示。
-	if reconnectPayload.GameState != nil && reconnectPayload.GameState.CurrentTurn == session.PlayerID {
-		if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
-			gameSession.ResendTurnTo(client)
+	log.Printf("🔄 玩家 %s (%s) 重连成功", restored.PlayerName, restored.PlayerID)
+}
+
+func (h *Handler) restoreReconnectSession(
+	client types.ClientInterface,
+	payload *protocol.ReconnectPayload,
+	temporaryID string,
+) (*session.RestoredSession, bool) {
+	restored, err := h.sessionManager.RestoreSession(payload.Token, payload.PlayerID, temporaryID)
+	if err == nil {
+		return restored, true
+	}
+	code := protocol.ErrCodeReconnectInvalid
+	if errors.Is(err, session.ErrReconnectExpired) {
+		code = protocol.ErrCodeReconnectExpired
+	}
+	sendMessage(client, codec.NewCommandErrorMessage(code, protocol.MsgReconnect))
+	return nil, false
+}
+
+func (h *Handler) rebindRestoredClient(
+	client types.ClientInterface,
+	restored *session.RestoredSession,
+	temporaryID string,
+) (types.ClientInterface, bool) {
+	previous, err := h.server.RebindClient(
+		temporaryID, restored.PlayerID, restored.PlayerName, restored.RoomCode, client,
+	)
+	if err == nil {
+		return previous, true
+	}
+	if !h.sessionManager.RollbackRestore(restored) {
+		h.sessionManager.SetOffline(restored.PlayerID)
+	}
+	log.Printf("重连身份绑定失败: %v", err)
+	sendMessage(client, codec.NewCommandErrorMessageWithText(
+		protocol.ErrCodeUnknown, "重连身份恢复失败", protocol.MsgReconnect,
+	))
+	client.Close()
+	return nil, false
+}
+
+func (h *Handler) restoreReconnectRoom(
+	client types.ClientInterface,
+	restored *session.RestoredSession,
+	payload *protocol.ReconnectedPayload,
+) (*room.Room, bool, error) {
+	if restored.RoomCode == "" || h.roomManager == nil {
+		return nil, false, nil
+	}
+	restoredRoom, responseSent, err := h.roomManager.ReconnectPlayerWithResponse(
+		restored.PlayerID,
+		restored.RoomCode,
+		client,
+		func(gameRoom *room.Room) *protocol.Message {
+			return h.buildReconnectedMessage(client, restored, gameRoom, payload)
+		},
+	)
+	if err == nil {
+		return restoredRoom, responseSent, nil
+	}
+	log.Printf("重连到房间失败: %v", err)
+	if errors.Is(err, room.ErrReconnectResponseDelivery) {
+		return nil, false, err
+	}
+	types.CompareAndSetRoom(client, restored.PlayerID, restored.RoomCode, "")
+	return nil, false, nil
+}
+
+func (h *Handler) rollbackReconnect(
+	client, previous types.ClientInterface,
+	restored *session.RestoredSession,
+	temporaryID, temporaryName string,
+) {
+	if err := h.server.RollbackRebindClient(
+		temporaryID, temporaryName, restored.PlayerID, restored.RoomCode, client, previous,
+	); err != nil {
+		log.Printf("重连身份回滚失败: %v", err)
+		h.sessionManager.SetOffline(restored.PlayerID)
+		client.Close()
+		return
+	}
+	if !h.sessionManager.RollbackRestore(restored) {
+		log.Printf("重连凭据回滚失败: player=%s", restored.PlayerID)
+		h.sessionManager.SetOffline(restored.PlayerID)
+	}
+	client.Close()
+}
+
+func (h *Handler) closeSkippedReconnect(
+	client types.ClientInterface,
+	previous types.ClientInterface,
+	playerID string,
+) {
+	log.Printf("玩家 %s 的重连快照因身份已变化而跳过", playerID)
+	if previous != nil && previous != client {
+		previous.Close()
+		if h.matcher != nil {
+			h.matcher.PlayerDisconnected(previous)
 		}
 	}
-
-	log.Printf("🔄 玩家 %s (%s) 重连成功", session.PlayerName, session.PlayerID)
+	client.Close()
 }
 
 // tryRestoreRoomState 尝试恢复房间状态
-func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *session.PlayerSession, payload *protocol.ReconnectedPayload) {
-	room := h.roomManager.GetRoom(session.RoomCode)
-	if room == nil {
-		return
-	}
-
-	oldClient := h.server.GetClientByID(session.PlayerID)
-	if oldClient == nil {
-		return
+func (h *Handler) tryRestoreRoomState(client types.ClientInterface, restored *session.RestoredSession) *room.Room {
+	gameRoom := h.roomManager.GetRoom(restored.RoomCode)
+	if gameRoom == nil {
+		types.CompareAndSetRoom(client, restored.PlayerID, restored.RoomCode, "")
+		return nil
 	}
 
 	// 重连到房间
-	if err := h.roomManager.ReconnectPlayer(oldClient, client); err != nil {
+	if err := h.roomManager.ReconnectPlayer(restored.PlayerID, restored.RoomCode, client); err != nil {
 		log.Printf("重连到房间失败: %v", err)
-		return
+		types.CompareAndSetRoom(client, restored.PlayerID, restored.RoomCode, "")
+		return nil
+	}
+	return gameRoom
+}
+
+// buildReconnectedMessage runs inside the room publication boundary. A waiting
+// room also gets a full roster snapshot, while an active game gets its private
+// authoritative projection and exact event watermark.
+func (h *Handler) buildReconnectedMessage(
+	client types.ClientInterface,
+	restored *session.RestoredSession,
+	expectedRoom *room.Room,
+	payload *protocol.ReconnectedPayload,
+) *protocol.Message {
+	h.gamesLifecycleMu.Lock()
+	defer h.gamesLifecycleMu.Unlock()
+
+	payload.RoomCode = ""
+	payload.GameState = nil
+	if expectedRoom != nil && expectedRoom.IsCurrentMember(restored.PlayerID, client) {
+		payload.RoomCode = expectedRoom.Code
+		payload.GameState = &protocol.GameStateDTO{
+			Phase:        "waiting",
+			Players:      expectedRoom.GetAllPlayersInfo(),
+			ServerTimeMS: time.Now().UnixMilli(),
+		}
+
+		h.gamesMu.RLock()
+		registration := h.games[expectedRoom.Code]
+		h.gamesMu.RUnlock()
+		if registration.room == expectedRoom && registration.session != nil && registration.session.RoomIdentity() == expectedRoom {
+			_, _, gameMember := registration.session.CurrentGameContext(restored.PlayerID)
+			if gameMember {
+				payload.GameState = registration.session.BuildGameStateDTO(restored.PlayerID, h.sessionManager)
+			}
+		}
 	}
 
-	client.SetRoom(session.RoomCode)
-	payload.RoomCode = session.RoomCode
+	message := codec.MustNewMessage(protocol.MsgReconnected, *payload)
+	message.Event = session.EventMetaFromGameStateDTO(payload.GameState)
+	return message
+}
 
-	// 如果游戏正在进行，恢复游戏状态
-	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
-		payload.GameState = gameSession.BuildGameStateDTO(session.PlayerID, h.sessionManager)
+// sendReconnected is retained for roomless recovery and focused tests. Room
+// restores build and enqueue the snapshot under RoomManager.publishMu.
+func (h *Handler) sendReconnected(client types.ClientInterface, restored *session.RestoredSession, expectedRoom *room.Room, payload *protocol.ReconnectedPayload) (bool, error) {
+	if expectedRoom != nil && h.roomManager != nil {
+		sent, err := h.roomManager.SendBuiltIfCurrentMember(expectedRoom, restored.PlayerID, client, func() *protocol.Message {
+			return h.buildReconnectedMessage(client, restored, expectedRoom, payload)
+		})
+		if err != nil {
+			log.Printf("发送重连状态给玩家 %s 失败: %v", restored.PlayerID, err)
+		}
+		if sent {
+			return true, nil
+		}
+		return false, err
 	}
+	types.CompareAndSetRoom(client, restored.PlayerID, restored.RoomCode, "")
+	message := h.buildReconnectedMessage(client, restored, nil, payload)
+	sent, err := types.SendCommandResultIfIdentity(client, restored.PlayerID, "", message)
+	if err != nil {
+		log.Printf("发送重连状态给玩家 %s 失败: %v", restored.PlayerID, err)
+		return false, err
+	}
+	return sent, nil
 }

@@ -27,8 +27,10 @@ enum MessageType {
   MSG_GET_LEADERBOARD = 13;
   MSG_GET_ROOM_LIST = 14;
   MSG_GET_ONLINE_COUNT = 15;
-  MSG_GET_MAINTENANCE_STATUS = 17;
   MSG_CHAT = 16;
+  MSG_GET_MAINTENANCE_STATUS = 17;
+  MSG_CANCEL_MATCH = 18;
+  MSG_HELLO = 19;
 
   // 服务端 -> 客户端
   MSG_CONNECTED = 100;
@@ -58,14 +60,42 @@ enum MessageType {
   MSG_ROOM_LIST_RESULT = 124;
   MSG_MAINTENANCE_STATUS = 125;
   MSG_MAINTENANCE = 126;
+  MSG_MATCH_QUEUED = 127;
+  MSG_MATCH_CANCELLED = 128;
+  MSG_ROOM_LEFT = 129;
+  MSG_NEGOTIATED = 130;
+  MSG_PROTOCOL_REJECTED = 131;
+  MSG_COMMAND_ACK = 132;
+  MSG_WARNING = 133;
   MSG_ERROR = 200;
   MSG_PRACTICE_MATCH = 201;
 }
 
 // ========== 基础消息包装器 ==========
 
+// EventMeta 权威服务端事件的顺序与计时上下文。
+// 旧客户端会按 protobuf 规则忽略该可选字段。
+message EventMeta {
+  string stream_id = 1;          // game:<game_id> 或其他服务端事件流
+  int64 event_version = 2;       // 流内单调递增的权威事件水位
+  string game_id = 3;            // 牌局 ID；非牌局事件可为空
+  int64 turn_id = 4;             // 当前回合序号
+  int64 server_time_ms = 5;      // 生成事件时的服务端 Unix 毫秒
+  int64 turn_deadline_ms = 6;    // 当前回合的服务端绝对截止时间
+}
+
+// CommandMeta correlates a client command with its completion and pins game
+// mutations to the authoritative game/turn snapshot seen by the caller.
+message CommandMeta {
+  string request_id = 1;
+  string expected_game_id = 2;
+  int64 expected_turn_id = 3;
+}
+
 // Message 所有消息的外层包装
 message Message {
   MessageType type = 1;
   bytes payload = 2;
+  EventMeta event = 3;
+  CommandMeta command = 4;
 }

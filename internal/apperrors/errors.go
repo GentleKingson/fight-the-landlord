@@ -34,4 +34,6 @@ var (
 	ErrInvalidCards = newGameError(protocol.ErrCodeInvalidCards)
 	ErrCannotBeat   = newGameError(protocol.ErrCodeCannotBeat)
 	ErrMustPlay     = newGameError(protocol.ErrCodeMustPlay)
+	ErrStaleGame    = newGameError(protocol.ErrCodeStaleGame)
+	ErrStaleTurn    = newGameError(protocol.ErrCodeStaleTurn)
 )

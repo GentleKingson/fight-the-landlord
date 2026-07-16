@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,7 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  go:
+    name: Go checks
     runs-on: ubuntu-latest
 
     steps:
@@ -43,9 +45,54 @@ jobs:
           version: v2.11.1
           args: --build-tags=ci
 
+      - name: Check gofmt
+        run: |
+          unformatted="$(git ls-files '*.go' | xargs gofmt -l)"
+          test -z "$unformatted" || { printf 'Run gofmt on:\n%s\n' "$unformatted"; exit 1; }
+
+      - name: Set up protoc
+        env:
+          PROTOC_VERSION: "3.13.0"
+          PROTOC_SHA256: 4a3b26d1ebb9c1d23e933694a6669295f6a39ddc64c3db2adf671f0a6026f82e
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/protoc.zip"
+          install_dir="$RUNNER_TEMP/protoc"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" \
+            --output "$archive"
+          printf '%s  %s\n' "$PROTOC_SHA256" "$archive" | sha256sum --check -
+          unzip -q "$archive" -d "$install_dir"
+          echo "$install_dir/bin" >> "$GITHUB_PATH"
+          "$install_dir/bin/protoc" --version
+
+      - name: Install protoc-gen-go
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+
+      - name: Check generated Go protocol
+        run: |
+          protoc --experimental_allow_proto3_optional --proto_path=. --go_out=. \
+            --go_opt=module=github.com/palemoky/fight-the-landlord \
+            internal/protocol/proto/*.proto
+          (cd internal/protocol/convert/msgtype && go run gen.go)
+          gofmt -w internal/protocol/convert/msgtype/mapping.go
+          git diff --exit-code -- internal/protocol/pb internal/protocol/convert/msgtype
+
       - name: Run tests
         # Use ci tag to skip sound tests/deps
-        run: go test -tags=ci -race -p 4 -coverprofile=coverage.out -covermode=atomic ./...
+        run: |
+          set -o pipefail
+          go test -tags=ci -race -p 4 -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee go-race.log
+
+      - name: Upload Go race and coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-race-and-coverage
+          path: |
+            go-race.log
+            coverage.out
+          if-no-files-found: warn
 
       - name: Save Go cache
         uses: actions/cache/save@v6
@@ -62,3 +109,172 @@ jobs:
           files: ./coverage.out
           flags: unittests
           fail_ci_if_error: false
+
+  web:
+    name: Web checks
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check generated Web protocol
+        run: npm run proto:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Benchmark full-hand rule response enumeration
+        run: npm run bench:rules
+
+      - name: Build production client
+        env:
+          VITE_APP_VERSION: ci
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run mock Playwright accessibility and screenshot tests
+        run: npm run test:e2e
+
+  production-e2e:
+    name: Shipped-image production E2E
+    needs: [go, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPOSE_PROJECT_NAME: fight-the-landlord-production-e2e
+      GAME_IMAGE: fight-the-landlord
+      IMAGE_TAG: ci
+      SERVER_ENV: production
+      SERVER_PORT: "1782"
+      REDIS_ADDR: redis:6379
+      BOT_ENABLED: "false"
+      DOUZERO_ENABLED: "false"
+      GAME_BID_TIMEOUT: "5"
+      GAME_TURN_TIMEOUT: "5"
+      GAME_ROOM_CLEANUP_DELAY: "0"
+      GAME_OFFLINE_WAIT_TIMEOUT: "5"
+      GAME_SHUTDOWN_TIMEOUT: "1"
+      GAME_SHUTDOWN_CHECK_INTERVAL: "1"
+      SERVER_MIN_CLIENT_VERSION: ""
+      SECURITY_ALLOWED_ORIGINS: http://127.0.0.1:1782
+      E2E_BASE_URL: http://127.0.0.1:1782
+      E2E_EXPECTED_VERSION: ci
+      E2E_COMPOSE_PROJECT_NAME: fight-the-landlord-production-e2e
+      E2E_COMPOSE_FILE: ${{ github.workspace }}/docker-compose.yml
+      E2E_REDIS_SERVICE: redis
+      E2E_SERVER_SERVICE: poker-server
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Verify Compose security invariants
+        run: ./scripts/check-compose-security.sh
+
+      - name: Prepare production environment
+        run: |
+          mkdir -p artifacts
+          echo "REDIS_PASSWORD=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      - name: Build production image
+        run: |
+          docker build \
+            --build-arg VERSION=ci \
+            --tag fight-the-landlord:ci \
+            .
+
+      - name: Generate production image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: fight-the-landlord:ci
+          format: spdx-json
+          output-file: artifacts/production-image.spdx.json
+          artifact-name: production-image-sbom
+
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.example config --quiet
+
+      - name: Start final image with Compose
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.example up -d --wait redis poker-server
+          redis_id="$(docker compose --env-file .env.example ps -q redis)"
+          test -n "$redis_id"
+          test "$(docker exec "$redis_id" awk '/^Uid:/{print $2}' /proc/1/status)" != 0
+
+          if docker compose --env-file .env.example ps --services --status running | grep -qx douzero; then
+            echo "DouZero must remain disabled without the optional profile"
+            exit 1
+          fi
+
+          server_id="$(docker compose --env-file .env.example ps -q poker-server)"
+          test -n "$server_id"
+          test "$(docker inspect --format='{{.State.Health.Status}}' "$server_id")" = healthy
+
+      - name: Install Web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install Chromium, Firefox, and WebKit
+        working-directory: web
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run production image browser and fault flows
+        working-directory: web
+        env:
+          CI: "true"
+        run: npm run test:e2e:production
+
+      - name: Capture Compose diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          docker compose --env-file .env.example ps --all > artifacts/compose-ps.txt 2>&1 || true
+          docker compose --env-file .env.example logs --no-color --timestamps > artifacts/compose.log 2>&1 || true
+          docker inspect fight-the-landlord:ci > artifacts/production-image-inspect.json 2>&1 || true
+
+      - name: Stop production stack
+        if: always()
+        run: docker compose --env-file .env.example down --timeout 90 --volumes --remove-orphans
+
+      - name: Upload Playwright evidence and Compose logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-e2e-evidence
+          path: |
+            web/test-results/
+            artifacts/compose-ps.txt
+            artifacts/compose.log
+            artifacts/production-image-inspect.json
+          if-no-files-found: warn

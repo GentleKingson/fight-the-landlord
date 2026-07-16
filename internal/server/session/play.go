@@ -8,84 +8,92 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
-	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 )
 
+type validatedPlay struct {
+	player *GamePlayer
+	cards  []card.Card
+	hand   rule.ParsedHand
+}
+
 // HandlePlayCards 处理出牌
 func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.CardInfo) error {
+	return gs.handlePlayCards(playerID, cardInfos, 0)
+}
+
+func (gs *GameSession) handlePlayCards(playerID string, cardInfos []protocol.CardInfo, expectedTurnID int64) error {
+	return gs.handlePlayCardsAt(playerID, cardInfos, "", expectedTurnID)
+}
+
+func (gs *GameSession) HandlePlayCardsAt(playerID string, cardInfos []protocol.CardInfo, expectedGameID string, expectedTurnID int64) error {
+	if expectedGameID == "" {
+		return apperrors.ErrStaleGame
+	}
+	if expectedTurnID <= 0 {
+		return apperrors.ErrStaleTurn
+	}
+	return gs.handlePlayCardsAt(playerID, cardInfos, expectedGameID, expectedTurnID)
+}
+
+func (gs *GameSession) handlePlayCardsAt(playerID string, cardInfos []protocol.CardInfo, expectedGameID string, expectedTurnID int64) error {
+	gs.actionMu.Lock()
+	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
-	defer gs.mu.Unlock()
-
-	if gs.state != GameStatePlaying {
-		return apperrors.ErrGameNotStart
-	}
-
-	currentPlayer := gs.players[gs.currentPlayer]
-	if currentPlayer.ID != playerID {
-		return apperrors.ErrNotYourTurn
-	}
-
-	// 转换牌
-	cards := convert.InfosToCards(cardInfos)
-
-	// 验证牌是否在手中
-	if !gs.validateCardsInHand(currentPlayer, cards) {
-		return apperrors.ErrInvalidCards
-	}
-
-	// 解析牌型
-	handToPlay, err := rule.ParseHand(cards)
+	play, err := gs.validatePlayLocked(playerID, cardInfos, expectedGameID, expectedTurnID)
 	if err != nil {
-		return apperrors.ErrInvalidCards
-	}
-
-	// 检查是否能打过上家
-	isNewRound := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
-	if !isNewRound && !rule.CanBeat(handToPlay, gs.lastPlayedHand) {
-		return apperrors.ErrCannotBeat
+		gs.mu.Unlock()
+		return err
 	}
 
 	// 所有验证通过后才取消计时器
 	gs.stopTimer()
 
 	// 出牌成功，更新状态
-	gs.lastPlayedHand = handToPlay
+	gs.lastPlayedHand = play.hand
 	gs.lastPlayerIdx = gs.currentPlayer
 	gs.consecutivePasses = 0
 
 	// 累计倍数与出牌次数（用于结算）
-	if handToPlay.Type == rule.Bomb || handToPlay.Type == rule.Rocket {
+	if play.hand.Type == rule.Bomb || play.hand.Type == rule.Rocket {
 		gs.bombCount++ // 炸弹 / 王炸各翻一倍
 	}
-	if currentPlayer.IsLandlord {
+	if play.player.IsLandlord {
 		gs.landlordPlays++
 	} else {
 		gs.farmerPlays++
 	}
 
 	// 从手牌中移除
-	currentPlayer.Hand = card.RemoveCards(currentPlayer.Hand, cards)
+	play.player.Hand = card.RemoveCards(play.player.Hand, play.cards)
 
 	// 对出的牌进行排序（从大到小），确保显示顺序正确
-	sortedCards := make([]card.Card, len(cards))
-	copy(sortedCards, cards)
+	sortedCards := make([]card.Card, len(play.cards))
+	copy(sortedCards, play.cards)
 	slices.SortFunc(sortedCards, func(a, b card.Card) int {
 		return cmp.Compare(b.Rank, a.Rank)
 	})
+	gs.lastPlayedHand.Cards = append([]card.Card(nil), sortedCards...)
+	if len(gs.playedCards) != len(gs.players) {
+		gs.playedCards = make([][]card.Card, len(gs.players))
+	}
+	gs.playedCards[gs.currentPlayer] = append(gs.playedCards[gs.currentPlayer], sortedCards...)
 
 	// 广播出牌信息
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
+	gs.queueCommandBroadcastLocked(playerID, gs.newGameEventMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
 		PlayerID:   playerID,
-		PlayerName: currentPlayer.Name,
+		PlayerName: play.player.Name,
 		Cards:      convert.CardsToInfos(sortedCards), // 使用排序后的牌
-		CardsLeft:  len(currentPlayer.Hand),
-		HandType:   handToPlay.Type.String(),
+		CardsLeft:  len(play.player.Hand),
+		HandType:   play.hand.Type.String(),
 	}))
 
 	// 检查是否获胜
-	if len(currentPlayer.Hand) == 0 {
-		gs.endGame(currentPlayer)
+	if len(play.player.Hand) == 0 {
+		gs.endGame(play.player)
+		work := gs.takePendingWorkLocked()
+		gs.mu.Unlock()
+		gs.dispatchPendingWork(work)
 		return nil
 	}
 
@@ -93,26 +101,102 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 	gs.currentPlayer = (gs.currentPlayer + 1) % 3
 	gs.notifyPlayTurn()
 
+	work := gs.takePendingWorkLocked()
+	gs.mu.Unlock()
+	gs.dispatchPendingWork(work)
 	return nil
 }
 
-// HandlePass 处理不出
-func (gs *GameSession) HandlePass(playerID string) error {
-	gs.mu.Lock()
-	defer gs.mu.Unlock()
-
+func (gs *GameSession) validatePlayLocked(playerID string, cardInfos []protocol.CardInfo, expectedGameID string, expectedTurnID int64) (validatedPlay, error) {
+	if gs.retired {
+		return validatedPlay{}, apperrors.ErrGameNotStart
+	}
+	if expectedGameID != "" && gs.gameID != expectedGameID {
+		return validatedPlay{}, apperrors.ErrStaleGame
+	}
 	if gs.state != GameStatePlaying {
-		return apperrors.ErrGameNotStart
+		return validatedPlay{}, apperrors.ErrGameNotStart
+	}
+	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
+		if expectedGameID != "" {
+			return validatedPlay{}, apperrors.ErrStaleTurn
+		}
+		return validatedPlay{}, apperrors.ErrNotYourTurn
 	}
 
 	currentPlayer := gs.players[gs.currentPlayer]
 	if currentPlayer.ID != playerID {
+		return validatedPlay{}, apperrors.ErrNotYourTurn
+	}
+	cards := convert.InfosToCards(cardInfos)
+	if !gs.validateCardsInHand(currentPlayer, cards) {
+		return validatedPlay{}, apperrors.ErrInvalidCards
+	}
+	handToPlay, err := rule.ParseHand(cards)
+	if err != nil {
+		return validatedPlay{}, apperrors.ErrInvalidCards
+	}
+	isNewRound := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
+	if !isNewRound && !rule.CanBeat(handToPlay, gs.lastPlayedHand) {
+		return validatedPlay{}, apperrors.ErrCannotBeat
+	}
+	return validatedPlay{player: currentPlayer, cards: cards, hand: handToPlay}, nil
+}
+
+// HandlePass 处理不出
+func (gs *GameSession) HandlePass(playerID string) error {
+	return gs.handlePass(playerID, 0)
+}
+
+func (gs *GameSession) handlePass(playerID string, expectedTurnID int64) error {
+	return gs.handlePassAt(playerID, "", expectedTurnID)
+}
+
+func (gs *GameSession) HandlePassAt(playerID, expectedGameID string, expectedTurnID int64) error {
+	if expectedGameID == "" {
+		return apperrors.ErrStaleGame
+	}
+	if expectedTurnID <= 0 {
+		return apperrors.ErrStaleTurn
+	}
+	return gs.handlePassAt(playerID, expectedGameID, expectedTurnID)
+}
+
+func (gs *GameSession) handlePassAt(playerID, expectedGameID string, expectedTurnID int64) error {
+	gs.actionMu.Lock()
+	defer gs.actionMu.Unlock()
+	gs.mu.Lock()
+	if gs.retired {
+		gs.mu.Unlock()
+		return apperrors.ErrGameNotStart
+	}
+	if expectedGameID != "" && gs.gameID != expectedGameID {
+		gs.mu.Unlock()
+		return apperrors.ErrStaleGame
+	}
+
+	if gs.state != GameStatePlaying {
+		gs.mu.Unlock()
+		return apperrors.ErrGameNotStart
+	}
+	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
+		gs.mu.Unlock()
+		if expectedGameID != "" {
+			return apperrors.ErrStaleTurn
+		}
+		return apperrors.ErrNotYourTurn
+	}
+
+	currentPlayer := gs.players[gs.currentPlayer]
+	if currentPlayer.ID != playerID {
+		gs.mu.Unlock()
 		return apperrors.ErrNotYourTurn
 	}
 
 	// 检查是否必须出牌
 	mustPlay := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
 	if mustPlay {
+		gs.mu.Unlock()
 		return apperrors.ErrMustPlay
 	}
 
@@ -122,7 +206,7 @@ func (gs *GameSession) HandlePass(playerID string) error {
 	gs.consecutivePasses++
 
 	// 广播不出
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
+	gs.queueCommandBroadcastLocked(playerID, gs.newGameEventMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
 		PlayerID:   playerID,
 		PlayerName: currentPlayer.Name,
 	}))
@@ -138,6 +222,9 @@ func (gs *GameSession) HandlePass(playerID string) error {
 	gs.currentPlayer = (gs.currentPlayer + 1) % 3
 	gs.notifyPlayTurn()
 
+	work := gs.takePendingWorkLocked()
+	gs.mu.Unlock()
+	gs.dispatchPendingWork(work)
 	return nil
 }
 
@@ -188,11 +275,12 @@ func (gs *GameSession) notifyPlayTurn() {
 		canBeat = beatingCards != nil
 	}
 
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+	gs.turnID++
+	gs.startPlayTimer()
+	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
 		PlayerID: player.ID,
 		Timeout:  gs.gameConfig.TurnTimeout,
 		MustPlay: mustPlay,
 		CanBeat:  canBeat,
 	}))
-	gs.startPlayTimer()
 }

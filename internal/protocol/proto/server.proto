@@ -5,8 +5,33 @@ package protocol;
 option go_package = "github.com/palemoky/fight-the-landlord/internal/protocol/pb";
 
 import "internal/protocol/proto/common.proto";
+import "internal/protocol/proto/message.proto";
 
 // ========== 服务端响应消息 ==========
+
+message NegotiatedPayload {
+  string protocol_version = 1;
+  string server_version = 2;
+  repeated string capabilities = 3;
+  string client_kind = 4;
+}
+
+message ProtocolRejectedPayload {
+  string request_id = 1;
+  string reason = 2;
+  string supported_protocol_version = 3;
+  string min_client_version = 4;
+}
+
+message CommandAckPayload {
+  string request_id = 1;
+  MessageType command_type = 2;
+}
+
+message WarningPayload {
+  int64 code = 1;
+  string message = 2;
+}
 
 // ConnectedPayload 连接成功响应
 message ConnectedPayload {
@@ -21,6 +46,7 @@ message ReconnectedPayload {
   string player_name = 2;
   string room_code = 3;
   GameStateDTO game_state = 4;
+  string reconnect_token = 5;
 }
 
 // PongPayload 心跳响应
@@ -61,6 +87,24 @@ message MaintenancePayload {
 message ErrorPayload {
   int64 code = 1;
   string message = 2;
+  MessageType command_type = 3;
+  string request_id = 4;
+}
+
+// MatchQueuedPayload 匹配请求已由服务端接受。
+message MatchQueuedPayload {
+  int64 deadline_ms = 1;
+  bool practice = 2;
+}
+
+// MatchCancelledPayload 匹配请求已由服务端取消。
+message MatchCancelledPayload {
+  string reason = 1;
+}
+
+// RoomLeftPayload 玩家已从服务端房间状态中移除。
+message RoomLeftPayload {
+  string room_code = 1;
 }
 
 // StatsResultPayload 个人统计结果

@@ -1,29 +1,52 @@
 services:
   # 游戏服务器
   poker-server:
-    image: palemoky/fight-the-landlord:latest
-    container_name: poker-server
+    image: ${GAME_IMAGE:-palemoky/fight-the-landlord}:${IMAGE_TAG:-latest}
     restart: unless-stopped
     stop_grace_period: ${GAME_SHUTDOWN_TIMEOUT:-30}m
     stop_signal: SIGTERM
-    env_file: .env
     environment:
-      - TZ=Asia/Shanghai
-      - DOUZERO_URL=http://douzero:2021
+      TZ: Asia/Shanghai
+      SERVER_HOST: 0.0.0.0
+      # SERVER_PORT in .env is the published host port. The container always
+      # listens on 1780 so changing the host port cannot break the mapping.
+      SERVER_PORT: 1780
+      SERVER_ENV: ${SERVER_ENV:-production}
+      SERVER_MIN_CLIENT_VERSION: ${SERVER_MIN_CLIENT_VERSION:-}
+      SECURITY_ALLOWED_ORIGINS: ${SECURITY_ALLOWED_ORIGINS:-http://localhost:1780,http://127.0.0.1:1780}
+      SECURITY_TRUSTED_PROXY_CIDRS: ${SECURITY_TRUSTED_PROXY_CIDRS:-}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      BOT_ENABLED: ${BOT_ENABLED:-true}
+      BOT_FILL_TIMEOUT: ${BOT_FILL_TIMEOUT:-15}
+      DOUZERO_ENABLED: ${DOUZERO_ENABLED:-false}
+      DOUZERO_URL: ${DOUZERO_URL:-http://douzero:2021}
+      GAME_TURN_TIMEOUT: ${GAME_TURN_TIMEOUT:-30}
+      GAME_BID_TIMEOUT: ${GAME_BID_TIMEOUT:-15}
+      GAME_ROOM_TIMEOUT: ${GAME_ROOM_TIMEOUT:-10}
+      GAME_SHUTDOWN_TIMEOUT: ${GAME_SHUTDOWN_TIMEOUT:-30}
+      GAME_SHUTDOWN_CHECK_INTERVAL: ${GAME_SHUTDOWN_CHECK_INTERVAL:-15}
+      GAME_ROOM_CLEANUP_DELAY: ${GAME_ROOM_CLEANUP_DELAY:-30}
+      GAME_OFFLINE_WAIT_TIMEOUT: ${GAME_OFFLINE_WAIT_TIMEOUT:-30}
     ports:
       - "${SERVER_PORT:-1780}:1780"
     depends_on:
       redis:
         condition: service_healthy
-      douzero:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/server", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - poker-network
 
   # DouZero 推理服务
   douzero:
-    image: palemoky/fight-the-landlord-douzero:latest
-    container_name: poker-douzero
+    image: ${DOUZERO_IMAGE:-palemoky/fight-the-landlord-douzero}:${IMAGE_TAG:-latest}
+    profiles: ["douzero"]
     restart: unless-stopped
     networks:
       - poker-network
@@ -36,22 +59,57 @@ services:
 
   # Redis 数据库
   redis:
-    image: redis:8-alpine
-    container_name: poker-redis
+    image: ${REDIS_IMAGE:-redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005}
     restart: unless-stopped
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    secrets:
+      - redis_password
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    command:
+      - sh
+      - -ec
+      - |
+        password="$$(cat /run/secrets/redis_password)"
+        if [ -z "$$password" ]; then
+          echo >&2 "REDIS_PASSWORD must be provided by the deployment secret manager"
+          exit 1
+        fi
+        password_hash="$$(printf '%s' "$$password" | sha256sum)"
+        password_hash="$${password_hash%% *}"
+        umask 077
+        printf 'user default on #%s ~* &* +@all\n' "$$password_hash" > /tmp/users.acl
+        chown redis:redis /tmp/users.acl
+        exec /usr/local/bin/docker-entrypoint.sh redis-server --appendonly yes --aclfile /tmp/users.acl
     networks:
       - poker-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  # LOCAL DEBUG ONLY. This loopback proxy must never be enabled in production.
+  redis-debug:
+    image: ${REDIS_DEBUG_IMAGE:-alpine/socat:1.8.0.3@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e}
+    profiles: ["redis-debug"]
+    restart: "no"
+    user: "65534:65534"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["tcp-listen:6379,fork,reuseaddr", "tcp-connect:redis:6379"]
+    ports:
+      - "127.0.0.1:${REDIS_DEBUG_PORT:-6379}:6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - poker-network
+    labels:
+      io.palemoky.fight-the-landlord.purpose: "LOCAL DEBUG ONLY - DO NOT USE IN PRODUCTION"
 
 networks:
   poker-network:
@@ -60,3 +118,9 @@ networks:
 volumes:
   redis-data:
     driver: local
+
+secrets:
+  # Compose receives the value from the process environment. Keep it out of
+  # .env files in production and inject it through the deployment secret store.
+  redis_password:
+    environment: REDIS_PASSWORD

@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +23,10 @@ type RateLimiter struct {
 	maxRequestsPerMinute int           // 每分钟最大请求数
 	banDuration          time.Duration // 封禁时长
 	cleanupInterval      time.Duration // 清理间隔
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	workers              sync.WaitGroup
+	closeOnce            sync.Once
 }
 
 // clientRate 客户端速率记录
@@ -33,18 +40,51 @@ type clientRate struct {
 
 // NewRateLimiter 创建速率限制器
 func NewRateLimiter(maxPerSecond, maxPerMinute int, banDuration time.Duration) *RateLimiter {
+	return NewRateLimiterWithContext(context.Background(), maxPerSecond, maxPerMinute, banDuration)
+}
+
+// NewRateLimiterWithContext creates a limiter whose cleanup worker is owned by
+// the supplied runtime context.
+func NewRateLimiterWithContext(ctx context.Context, maxPerSecond, maxPerMinute int, banDuration time.Duration) *RateLimiter {
+	return newRateLimiter(ctx, maxPerSecond, maxPerMinute, banDuration, 5*time.Minute)
+}
+
+func newRateLimiter(parent context.Context, maxPerSecond, maxPerMinute int, banDuration, cleanupInterval time.Duration) *RateLimiter {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent) //nolint:gosec // Close owns cancellation and waits for the cleanup worker.
 	rl := &RateLimiter{
 		requests:             make(map[string]*clientRate),
 		maxRequestsPerSecond: maxPerSecond,
 		maxRequestsPerMinute: maxPerMinute,
 		banDuration:          banDuration,
-		cleanupInterval:      5 * time.Minute,
+		cleanupInterval:      cleanupInterval,
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
 
-	// 启动清理协程
-	go rl.cleanup()
+	rl.workers.Add(1)
+	go func() {
+		defer rl.workers.Done()
+		rl.cleanup()
+	}()
 
 	return rl
+}
+
+// Close stops the cleanup worker and waits for it to exit. It is idempotent.
+func (rl *RateLimiter) Close() error {
+	if rl == nil {
+		return nil
+	}
+	rl.closeOnce.Do(func() {
+		if rl.cancel != nil {
+			rl.cancel()
+		}
+		rl.workers.Wait()
+	})
+	return nil
 }
 
 // Allow 检查是否允许请求
@@ -113,16 +153,21 @@ func (rl *RateLimiter) cleanup() {
 	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for ip, rate := range rl.requests {
-			// 如果超过 10 分钟没有请求，删除记录
-			if now.Sub(rate.lastMinute) > 10*time.Minute && now.After(rate.bannedUntil) {
-				delete(rl.requests, ip)
+	for {
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, rate := range rl.requests {
+				// 如果超过 10 分钟没有请求，删除记录
+				if now.Sub(rate.lastMinute) > 10*time.Minute && now.After(rate.bannedUntil) {
+					delete(rl.requests, ip)
+				}
 			}
+			rl.mu.Unlock()
+		case <-rl.ctx.Done():
+			return
 		}
-		rl.mu.Unlock()
 	}
 }
 
@@ -164,6 +209,21 @@ func (oc *OriginChecker) Check(r *http.Request) bool {
 	}
 
 	return oc.allowedOrigins[strings.ToLower(origin)]
+}
+
+func validateOriginPolicy(environment string, origins []string) error {
+	if !strings.EqualFold(strings.TrimSpace(environment), "production") {
+		return nil
+	}
+	if len(origins) == 0 {
+		return errors.New("production requires at least one allowed origin")
+	}
+	for _, origin := range origins {
+		if strings.TrimSpace(origin) == "*" {
+			return errors.New("production does not allow wildcard Origin")
+		}
+	}
+	return nil
 }
 
 // --- IP 白名单/黑名单 ---
@@ -224,27 +284,91 @@ func (f *IPFilter) IsAllowed(ip string) bool {
 
 // --- 辅助函数 ---
 
-// GetClientIP 获取客户端真实 IP
-func GetClientIP(r *http.Request) string {
-	// 检查代理头
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// 取第一个 IP（最原始的客户端）
+// ClientIPResolver only accepts forwarding headers from explicitly trusted
+// direct peers. It walks X-Forwarded-For from the nearest hop toward the
+// client, stopping at the first untrusted address.
+type ClientIPResolver struct {
+	trusted []netip.Prefix
+}
+
+func NewClientIPResolver(cidrs []string) (*ClientIPResolver, error) {
+	resolver := &ClientIPResolver{trusted: make([]netip.Prefix, 0, len(cidrs))}
+	for _, value := range cidrs {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy CIDR %q: %w", value, err)
+		}
+		resolver.trusted = append(resolver.trusted, prefix.Masked())
+	}
+	return resolver, nil
+}
+
+func (resolver *ClientIPResolver) Resolve(r *http.Request) string {
+	remoteText, remoteIP := remoteClientIP(r.RemoteAddr)
+	if resolver == nil || !remoteIP.IsValid() || !resolver.isTrusted(remoteIP) {
+		return remoteText
+	}
+
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 		parts := strings.Split(forwarded, ",")
-		return strings.TrimSpace(parts[0])
+		addresses := make([]netip.Addr, len(parts))
+		for index, part := range parts {
+			address, err := netip.ParseAddr(strings.TrimSpace(part))
+			if err != nil {
+				return remoteText
+			}
+			addresses[index] = address.Unmap()
+		}
+		for index := len(addresses) - 1; index >= 0; index-- {
+			if !resolver.isTrusted(addresses[index]) {
+				return addresses[index].String()
+			}
+		}
+		if len(addresses) > 0 {
+			return addresses[0].String()
+		}
 	}
 
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
+	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
+		if address, err := netip.ParseAddr(value); err == nil {
+			return address.Unmap().String()
+		}
 	}
+	return remoteText
+}
 
-	// 从连接中获取
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+func (resolver *ClientIPResolver) isTrusted(address netip.Addr) bool {
+	address = address.Unmap()
+	for _, prefix := range resolver.trusted {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+func remoteClientIP(remoteAddr string) (string, netip.Addr) {
+	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = remoteAddr
 	}
-	return ip
+	address, err := netip.ParseAddr(strings.TrimSpace(host))
+	if err != nil {
+		return host, netip.Addr{}
+	}
+	address = address.Unmap()
+	return address.String(), address
+}
+
+// GetClientIP is the secure direct-connection default. Production servers use
+// their configured ClientIPResolver when trusted proxies are present.
+func GetClientIP(r *http.Request) string {
+	remote, _ := remoteClientIP(r.RemoteAddr)
+	return remote
 }
 
 // --- 消息速率限制 ---

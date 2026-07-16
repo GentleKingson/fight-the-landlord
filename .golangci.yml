@@ -130,6 +130,7 @@ linters:
     paths:
       - internal/protocol/pb
       - internal/protocol/convert/msgtype/mapping.go
+      - web/node_modules
 
 issues:
   # 最大问题数 (0 = 无限制)

@@ -1,12 +1,16 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,7 +45,8 @@ func TestServer_RegisterUnregister_Concurrency(t *testing.T) {
 	for i := 0; i < count; i++ {
 		go func(i int) {
 			defer wg.Done()
-			s.UnregisterClient(strconv.Itoa(i))
+			id := strconv.Itoa(i)
+			s.UnregisterClient(id, s.GetClientByID(id))
 		}(i)
 	}
 	wg.Wait()
@@ -61,6 +66,117 @@ func TestServer_HandleHealth(t *testing.T) {
 	defer func() { _ = res.Body.Close() }()
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "no-store", res.Header.Get("Cache-Control"))
+	assert.Equal(t, "text/plain; charset=utf-8", res.Header.Get("Content-Type"))
+}
+
+func TestServerShutdownStopsOwnedHTTPListenerAndWaitsForServeLoop(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := listener.Addr().(*net.TCPAddr).Port
+	require.NoError(t, listener.Close())
+
+	cfg := config.Default()
+	cfg.Server.Host = "127.0.0.1"
+	cfg.Server.Port = port
+	cfg.Game.RoomCleanupDelay = 0
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	t.Cleanup(runtimeCancel)
+	s := &Server{
+		config:        cfg,
+		clients:       make(map[string]*Client),
+		runtimeCtx:    runtimeCtx,
+		runtimeCancel: runtimeCancel,
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- s.Start() }()
+
+	endpoint := "http://127.0.0.1:" + strconv.Itoa(port) + "/livez"
+	require.Eventually(t, func() bool {
+		response, requestErr := http.Get(endpoint) //nolint:gosec // endpoint is a loopback listener created by this test.
+		if requestErr != nil {
+			return false
+		}
+		_ = response.Body.Close()
+		return response.StatusCode == http.StatusOK
+	}, 2*time.Second, 10*time.Millisecond)
+
+	s.Shutdown()
+	select {
+	case err := <-serveDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Server.Shutdown returned without stopping the HTTP serve loop")
+	}
+	client := &http.Client{Timeout: 100 * time.Millisecond}
+	response, err := client.Get(endpoint)
+	if response != nil {
+		defer response.Body.Close()
+	}
+	require.Error(t, err, "owned listener still accepted traffic after Shutdown")
+}
+
+func TestNewServerRejectsMissingProductionRedisCredentialBeforeDial(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.Server.Environment = "production"
+	cfg.Security.AllowedOrigins = []string{"https://game.example"}
+
+	server, err := NewServer(cfg)
+
+	assert.Nil(t, server)
+	assert.ErrorContains(t, err, "redis.password")
+}
+
+func TestNewServerValidatesConfigurationBeforeDial(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Server.Port = 0
+
+	server, err := NewServer(cfg)
+
+	assert.Nil(t, server)
+	assert.ErrorContains(t, err, "server.port")
+}
+
+func TestServer_ReadinessChecksDependencyAndShutdownState(t *testing.T) {
+	t.Parallel()
+	s := &Server{readinessCheck: func(context.Context) error { return nil }}
+
+	ready := httptest.NewRecorder()
+	s.handleReadyz(ready, httptest.NewRequest(http.MethodGet, "/readyz", http.NoBody))
+	assert.Equal(t, http.StatusOK, ready.Code)
+	assert.Equal(t, "READY", ready.Body.String())
+
+	s.readinessCheck = func(context.Context) error { return errors.New("redis unavailable") }
+	unavailable := httptest.NewRecorder()
+	s.handleReadyz(unavailable, httptest.NewRequest(http.MethodGet, "/readyz", http.NoBody))
+	assert.Equal(t, http.StatusServiceUnavailable, unavailable.Code)
+
+	s.readinessCheck = func(context.Context) error { return nil }
+	s.shuttingDown.Store(true)
+	shuttingDown := httptest.NewRecorder()
+	s.handleReadyz(shuttingDown, httptest.NewRequest(http.MethodGet, "/readyz", http.NoBody))
+	assert.Equal(t, http.StatusServiceUnavailable, shuttingDown.Code)
+
+	live := httptest.NewRecorder()
+	s.handleLivez(live, httptest.NewRequest(http.MethodGet, "/livez", http.NoBody))
+	assert.Equal(t, http.StatusOK, live.Code, "liveness remains healthy during graceful shutdown")
+}
+
+func TestHTTPHandlerAppliesBrowserSecurityHeaders(t *testing.T) {
+	t.Parallel()
+	s := &Server{}
+	recorder := httptest.NewRecorder()
+	s.httpHandler(nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/livez", http.NoBody))
+
+	assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "no-referrer", recorder.Header().Get("Referrer-Policy"))
+	assert.Contains(t, recorder.Header().Get("Permissions-Policy"), "camera=()")
+	assert.Contains(t, recorder.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'")
+	assert.Contains(t, recorder.Header().Get("Content-Security-Policy"), "object-src 'none'")
+	assert.Equal(t, "DENY", recorder.Header().Get("X-Frame-Options"))
 }
 
 func TestServer_HandleVersion(t *testing.T) {
@@ -79,14 +195,42 @@ func TestServer_HandleVersion(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, "application/json", res.Header.Get("Content-Type"))
+	assert.Equal(t, "no-store", res.Header.Get("Cache-Control"))
 
 	var body struct {
 		ServerVersion    string `json:"server_version"`
 		MinClientVersion string `json:"min_client_version"`
+		WebClientVersion string `json:"web_client_version"`
 	}
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 	assert.Equal(t, "v1.1.0", body.MinClientVersion)
 	assert.Equal(t, Version, body.ServerVersion)
+	assert.Equal(t, Version, body.WebClientVersion)
+}
+
+func TestServer_ReadOnlyEndpointsRejectWrites(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: &config.Config{}}
+	for _, endpoint := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{name: "health", handler: s.handleHealth},
+		{name: "livez", handler: s.handleLivez},
+		{name: "readyz", handler: s.handleReadyz},
+		{name: "version", handler: s.handleVersion},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			t.Parallel()
+			w := httptest.NewRecorder()
+			endpoint.handler(w, httptest.NewRequest(http.MethodPost, "/"+endpoint.name, http.NoBody))
+
+			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+			assert.Equal(t, "GET, HEAD", w.Header().Get("Allow"))
+			assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		})
+	}
 }
 
 func TestServer_MaintenanceMode(t *testing.T) {

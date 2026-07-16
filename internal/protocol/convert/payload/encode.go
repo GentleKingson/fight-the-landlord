@@ -1,12 +1,13 @@
 package payload
 
 import (
-	"encoding/json"
+	"fmt"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/convert/msgtype"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/pb"
 )
 
@@ -39,13 +40,20 @@ func EncodePayload(msgType protocol.MessageType, payload any) ([]byte, error) {
 		return proto.Marshal(pb)
 	}
 
-	// 未知类型，回退到 JSON
-	return json.Marshal(payload)
+	return nil, fmt.Errorf("unsupported protobuf payload for message type %q", msgType)
 }
 
 // encodeClientRequests 编码客户端请求
 func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Message, bool) {
 	switch msgType {
+	case protocol.MsgHello:
+		p := payload.(protocol.HelloPayload)
+		return &pb.HelloPayload{
+			ProtocolVersion: p.ProtocolVersion,
+			ClientVersion:   p.ClientVersion,
+			Capabilities:    append([]string(nil), p.Capabilities...),
+			ClientKind:      p.ClientKind,
+		}, true
 	case protocol.MsgReconnect:
 		p := payload.(protocol.ReconnectPayload)
 		return &pb.ReconnectPayload{
@@ -79,6 +87,28 @@ func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Mess
 			Offset: int64(p.Offset),
 			Limit:  int64(p.Limit),
 		}, true
+	case protocol.MsgChat:
+		var p protocol.ChatPayload
+		switch value := payload.(type) {
+		case protocol.ChatPayload:
+			p = value
+		case *protocol.ChatPayload:
+			p = *value
+		default:
+			return nil, false
+		}
+		return &pb.ChatPayload{
+			SenderId:   p.SenderID,
+			SenderName: p.SenderName,
+			Content:    p.Content,
+			Scope:      p.Scope,
+			Time:       p.Time,
+			IsSystem:   p.IsSystem,
+			MessageId:  p.MessageID,
+			RoomCode:   p.RoomCode,
+			GameId:     p.GameID,
+			ServerTime: p.ServerTime,
+		}, true
 	case protocol.MsgGetOnlineCount, protocol.MsgGetMaintenanceStatus:
 		// No payload needed for these messages
 		return nil, true
@@ -89,6 +119,31 @@ func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Mess
 // encodeServerSystemMessages 编码系统相关消息
 func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (proto.Message, bool) {
 	switch msgType {
+	case protocol.MsgNegotiated:
+		p := payload.(protocol.NegotiatedPayload)
+		return &pb.NegotiatedPayload{
+			ProtocolVersion: p.ProtocolVersion,
+			ServerVersion:   p.ServerVersion,
+			Capabilities:    append([]string(nil), p.Capabilities...),
+			ClientKind:      p.ClientKind,
+		}, true
+	case protocol.MsgProtocolRejected:
+		p := payload.(protocol.ProtocolRejectedPayload)
+		return &pb.ProtocolRejectedPayload{
+			RequestId:                p.RequestID,
+			Reason:                   p.Reason,
+			SupportedProtocolVersion: p.SupportedProtocolVersion,
+			MinClientVersion:         p.MinClientVersion,
+		}, true
+	case protocol.MsgCommandAck:
+		p := payload.(protocol.CommandAckPayload)
+		return &pb.CommandAckPayload{
+			RequestId:   p.RequestID,
+			CommandType: msgtype.StringToProtoMessageType(string(p.CommandType)),
+		}, true
+	case protocol.MsgWarning:
+		p := payload.(protocol.WarningPayload)
+		return &pb.WarningPayload{Code: int64(p.Code), Message: p.Message}, true
 	case protocol.MsgConnected:
 		p := payload.(protocol.ConnectedPayload)
 		return &pb.ConnectedPayload{
@@ -103,10 +158,11 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 			gameState = convert.GameStateDTOToProto(p.GameState)
 		}
 		return &pb.ReconnectedPayload{
-			PlayerId:   p.PlayerID,
-			PlayerName: p.PlayerName,
-			RoomCode:   p.RoomCode,
-			GameState:  gameState,
+			PlayerId:       p.PlayerID,
+			PlayerName:     p.PlayerName,
+			RoomCode:       p.RoomCode,
+			GameState:      gameState,
+			ReconnectToken: p.ReconnectToken,
 		}, true
 	case protocol.MsgPong:
 		p := payload.(protocol.PongPayload)
@@ -130,23 +186,7 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 			Maintenance: p.Maintenance,
 		}, true
 	case protocol.MsgStatsResult:
-		p := payload.(protocol.StatsResultPayload)
-		return &pb.StatsResultPayload{
-			PlayerId:      p.PlayerID,
-			PlayerName:    p.PlayerName,
-			TotalGames:    int64(p.TotalGames),
-			Wins:          int64(p.Wins),
-			Losses:        int64(p.Losses),
-			WinRate:       p.WinRate,
-			LandlordGames: int64(p.LandlordGames),
-			LandlordWins:  int64(p.LandlordWins),
-			FarmerGames:   int64(p.FarmerGames),
-			FarmerWins:    int64(p.FarmerWins),
-			Score:         int64(p.Score),
-			Rank:          int64(p.Rank),
-			CurrentStreak: int64(p.CurrentStreak),
-			MaxWinStreak:  int64(p.MaxWinStreak),
-		}, true
+		return encodeStatsResultPayload(payload.(protocol.StatsResultPayload)), true
 	case protocol.MsgLeaderboardResult:
 		p := payload.(protocol.LeaderboardResultPayload)
 		return &pb.LeaderboardResultPayload{
@@ -156,11 +196,32 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 	case protocol.MsgError:
 		p := payload.(protocol.ErrorPayload)
 		return &pb.ErrorPayload{
-			Code:    int64(p.Code),
-			Message: p.Message,
+			Code:        int64(p.Code),
+			Message:     p.Message,
+			CommandType: msgtype.StringToProtoMessageType(string(p.CommandType)),
+			RequestId:   p.RequestID,
 		}, true
 	}
 	return nil, false
+}
+
+func encodeStatsResultPayload(payload protocol.StatsResultPayload) *pb.StatsResultPayload {
+	return &pb.StatsResultPayload{
+		PlayerId:      payload.PlayerID,
+		PlayerName:    payload.PlayerName,
+		TotalGames:    int64(payload.TotalGames),
+		Wins:          int64(payload.Wins),
+		Losses:        int64(payload.Losses),
+		WinRate:       payload.WinRate,
+		LandlordGames: int64(payload.LandlordGames),
+		LandlordWins:  int64(payload.LandlordWins),
+		FarmerGames:   int64(payload.FarmerGames),
+		FarmerWins:    int64(payload.FarmerWins),
+		Score:         int64(payload.Score),
+		Rank:          int64(payload.Rank),
+		CurrentStreak: int64(payload.CurrentStreak),
+		MaxWinStreak:  int64(payload.MaxWinStreak),
+	}
 }
 
 // encodeServerRoomMessages 编码房间及玩家状态消息
@@ -209,6 +270,18 @@ func encodeServerRoomMessages(msgType protocol.MessageType, payload any) (proto.
 			PlayerId: p.PlayerID,
 			Ready:    p.Ready,
 		}, true
+	case protocol.MsgMatchQueued:
+		p := payload.(protocol.MatchQueuedPayload)
+		return &pb.MatchQueuedPayload{
+			DeadlineMs: p.DeadlineMS,
+			Practice:   p.Practice,
+		}, true
+	case protocol.MsgMatchCancelled:
+		p := payload.(protocol.MatchCancelledPayload)
+		return &pb.MatchCancelledPayload{Reason: p.Reason}, true
+	case protocol.MsgRoomLeft:
+		p := payload.(protocol.RoomLeftPayload)
+		return &pb.RoomLeftPayload{RoomCode: p.RoomCode}, true
 	case protocol.MsgRoomListResult:
 		p := payload.(protocol.RoomListResultPayload)
 		return &pb.RoomListResultPayload{

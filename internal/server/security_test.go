@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRateLimiter_Allow(t *testing.T) {
@@ -216,8 +218,10 @@ func TestIPFilter(t *testing.T) {
 	}
 }
 
-func TestGetClientIP_ProxyHeaders(t *testing.T) {
+func TestClientIPResolverOnlyTrustsConfiguredProxyPeers(t *testing.T) {
 	t.Parallel()
+	resolver, err := NewClientIPResolver([]string{"10.0.0.0/8", "fd00::/8"})
+	assert.NoError(t, err)
 
 	tests := []struct {
 		name       string
@@ -232,7 +236,15 @@ func TestGetClientIP_ProxyHeaders(t *testing.T) {
 			expectedIP: "192.168.1.1",
 		},
 		{
-			name:       "X-Forwarded-For single IP",
+			name:       "untrusted direct peer cannot spoof X-Forwarded-For",
+			remoteAddr: "198.51.100.20:12345",
+			headers: map[string]string{
+				"X-Forwarded-For": "203.0.113.1",
+			},
+			expectedIP: "198.51.100.20",
+		},
+		{
+			name:       "trusted proxy X-Forwarded-For single IP",
 			remoteAddr: "10.0.0.1:12345",
 			headers: map[string]string{
 				"X-Forwarded-For": "203.0.113.1",
@@ -240,7 +252,7 @@ func TestGetClientIP_ProxyHeaders(t *testing.T) {
 			expectedIP: "203.0.113.1",
 		},
 		{
-			name:       "X-Forwarded-For multiple IPs",
+			name:       "trusted proxy chain is walked from nearest hop",
 			remoteAddr: "10.0.0.1:12345",
 			headers: map[string]string{
 				"X-Forwarded-For": "203.0.113.1, 10.0.0.2, 10.0.0.3",
@@ -248,7 +260,7 @@ func TestGetClientIP_ProxyHeaders(t *testing.T) {
 			expectedIP: "203.0.113.1", // First IP is the original client
 		},
 		{
-			name:       "X-Real-IP",
+			name:       "trusted proxy X-Real-IP",
 			remoteAddr: "10.0.0.1:12345",
 			headers: map[string]string{
 				"X-Real-IP": "203.0.113.2",
@@ -256,13 +268,13 @@ func TestGetClientIP_ProxyHeaders(t *testing.T) {
 			expectedIP: "203.0.113.2",
 		},
 		{
-			name:       "X-Forwarded-For takes precedence over X-Real-IP",
+			name:       "invalid forwarded chain falls back to direct proxy",
 			remoteAddr: "10.0.0.1:12345",
 			headers: map[string]string{
-				"X-Forwarded-For": "203.0.113.3",
+				"X-Forwarded-For": "203.0.113.3, not-an-ip",
 				"X-Real-IP":       "203.0.113.4",
 			},
-			expectedIP: "203.0.113.3",
+			expectedIP: "10.0.0.1",
 		},
 	}
 
@@ -276,10 +288,26 @@ func TestGetClientIP_ProxyHeaders(t *testing.T) {
 				req.Header.Set(k, v)
 			}
 
-			ip := GetClientIP(req)
+			ip := resolver.Resolve(req)
 			assert.Equal(t, tt.expectedIP, ip)
 		})
 	}
+
+	request, _ := http.NewRequest(http.MethodGet, "/", http.NoBody)
+	request.RemoteAddr = "198.51.100.30:9999"
+	request.Header.Set("X-Forwarded-For", "203.0.113.7")
+	assert.Equal(t, "198.51.100.30", GetClientIP(request), "secure default ignores all proxy headers")
+
+	_, err = NewClientIPResolver([]string{"not-a-cidr"})
+	assert.Error(t, err)
+}
+
+func TestProductionOriginPolicyRejectsWildcard(t *testing.T) {
+	t.Parallel()
+	assert.Error(t, validateOriginPolicy("production", []string{"*"}))
+	assert.Error(t, validateOriginPolicy("production", nil))
+	assert.NoError(t, validateOriginPolicy("production", []string{"https://game.example"}))
+	assert.NoError(t, validateOriginPolicy("development", []string{"*"}))
 }
 
 func TestMessageRateLimiter(t *testing.T) {
@@ -374,5 +402,42 @@ func TestOriginChecker_SpecificOrigins(t *testing.T) {
 			req.Header.Set("Origin", tt.origin)
 		}
 		assert.Equal(t, tt.allowed, oc.Check(req), "Origin: %s", tt.origin)
+	}
+}
+
+func TestRateLimiterCloseStopsCleanupWorker(t *testing.T) {
+	t.Parallel()
+
+	rl := newRateLimiter(context.Background(), 10, 100, time.Second, 5*time.Millisecond)
+	rl.mu.Lock()
+	rl.requests["stale"] = &clientRate{
+		lastMinute: time.Now().Add(-11 * time.Minute),
+	}
+	rl.mu.Unlock()
+
+	require.Eventually(t, func() bool {
+		rl.mu.RLock()
+		_, exists := rl.requests["stale"]
+		rl.mu.RUnlock()
+		return !exists
+	}, time.Second, time.Millisecond)
+	require.NoError(t, rl.Close())
+	require.NoError(t, rl.Close(), "Close must be idempotent")
+}
+
+func TestRateLimiterCloseWaitsAfterParentCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rl := NewRateLimiterWithContext(ctx, 10, 100, time.Second)
+	cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- rl.Close() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("RateLimiter.Close did not wait for a canceled worker")
 	}
 }

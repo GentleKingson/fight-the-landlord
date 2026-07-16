@@ -7,7 +7,6 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
-	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 )
 
@@ -19,15 +18,53 @@ import (
 //   - 抢地主阶段：除暂定地主外的玩家依次「抢 / 不抢」，每次抢翻一倍并接管暂定地主身份
 //     （原叫地主者可「反抢」）。当连续两人放弃后，暂定地主成为地主，底倍即叫抢累计的倍数。
 func (gs *GameSession) HandleBid(playerID string, bid bool) error {
+	return gs.handleBid(playerID, bid, 0)
+}
+
+func (gs *GameSession) handleBid(playerID string, bid bool, expectedTurnID int64) error {
+	return gs.handleBidAt(playerID, bid, "", expectedTurnID)
+}
+
+// HandleBidAt rejects commands created from a different game or turn. The
+// comparison and mutation share the same action/state lock boundary.
+func (gs *GameSession) HandleBidAt(playerID string, bid bool, expectedGameID string, expectedTurnID int64) error {
+	if expectedGameID == "" {
+		return apperrors.ErrStaleGame
+	}
+	if expectedTurnID <= 0 {
+		return apperrors.ErrStaleTurn
+	}
+	return gs.handleBidAt(playerID, bid, expectedGameID, expectedTurnID)
+}
+
+func (gs *GameSession) handleBidAt(playerID string, bid bool, expectedGameID string, expectedTurnID int64) error {
+	gs.actionMu.Lock()
+	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
-	defer gs.mu.Unlock()
+	if gs.retired {
+		gs.mu.Unlock()
+		return apperrors.ErrGameNotStart
+	}
+	if expectedGameID != "" && gs.gameID != expectedGameID {
+		gs.mu.Unlock()
+		return apperrors.ErrStaleGame
+	}
 
 	if gs.state != GameStateBidding {
+		gs.mu.Unlock()
 		return apperrors.ErrGameNotStart
+	}
+	if expectedTurnID != 0 && gs.turnID != expectedTurnID {
+		gs.mu.Unlock()
+		if expectedGameID != "" {
+			return apperrors.ErrStaleTurn
+		}
+		return apperrors.ErrNotYourTurn
 	}
 
 	currentPlayer := gs.players[gs.currentBidder]
 	if currentPlayer.ID != playerID {
+		gs.mu.Unlock()
 		return apperrors.ErrNotYourTurn
 	}
 
@@ -41,6 +78,9 @@ func (gs *GameSession) HandleBid(playerID string, bid bool) error {
 	} else {
 		gs.handleCall(currentPlayer, bid)
 	}
+	work := gs.takePendingWorkLocked()
+	gs.mu.Unlock()
+	gs.dispatchPendingWork(work)
 	return nil
 }
 
@@ -113,7 +153,7 @@ func (gs *GameSession) nextGrabber(from int) int {
 
 // broadcastBidResult 广播叫/抢地主结果
 func (gs *GameSession) broadcastBidResult(player *GamePlayer, bid, isGrab bool) {
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgBidResult, protocol.BidResultPayload{
+	gs.queueCommandBroadcastLocked(player.ID, gs.newGameEventMessage(protocol.MsgBidResult, protocol.BidResultPayload{
 		PlayerID:   player.ID,
 		PlayerName: player.Name,
 		Bid:        bid,
@@ -134,10 +174,10 @@ func (gs *GameSession) setLandlord(idx int) {
 	})
 
 	// 更新房间玩家状态
-	gs.room.Players[landlord.ID].IsLandlord = true
+	gs.room.SetLandlord(landlord.ID)
 
 	// 广播地主信息（含底倍）
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgLandlord, protocol.LandlordPayload{
+	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgLandlord, protocol.LandlordPayload{
 		PlayerID:    landlord.ID,
 		PlayerName:  landlord.Name,
 		BottomCards: convert.CardsToInfos(gs.bottomCards),
@@ -145,16 +185,14 @@ func (gs *GameSession) setLandlord(idx int) {
 	}))
 
 	// 给地主发送更新后的手牌
-	rp := gs.room.Players[landlord.ID]
-	client := rp.Client
-	client.SendMessage(codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
+	gs.queuePrivateLocked(landlord.ID, gs.newGameEventMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
 		Cards:       convert.CardsToInfos(landlord.Hand),
 		BottomCards: convert.CardsToInfos(gs.bottomCards),
 	}))
 
 	// 开始游戏，地主先出牌
 	gs.state = GameStatePlaying
-	gs.room.State = RoomStatePlaying
+	gs.room.SetState(RoomStatePlaying)
 	gs.currentPlayer = idx
 	gs.lastPlayerIdx = idx
 
@@ -164,11 +202,12 @@ func (gs *GameSession) setLandlord(idx int) {
 // notifyBidTurn 通知当前玩家叫/抢地主
 func (gs *GameSession) notifyBidTurn() {
 	player := gs.players[gs.currentBidder]
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
+	gs.turnID++
+	gs.startBidTimer()
+	gs.queueBroadcastLocked(gs.newGameEventMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
 		PlayerID:   player.ID,
 		Timeout:    gs.gameConfig.BidTimeout,
 		IsGrab:     gs.landlordCaller != -1,
 		Multiplier: gs.bidMultiplier,
 	}))
-	gs.startBidTimer()
 }

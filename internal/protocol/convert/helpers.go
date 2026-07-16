@@ -50,6 +50,7 @@ func PlayerInfoToProto(p *protocol.PlayerInfo) *pb.PlayerInfo {
 		IsLandlord: p.IsLandlord,
 		CardsCount: int64(p.CardsCount),
 		Online:     p.Online,
+		IsBot:      p.IsBot,
 	}
 }
 
@@ -70,6 +71,7 @@ func ProtoToPlayerInfo(pb *pb.PlayerInfo) protocol.PlayerInfo {
 		IsLandlord: pb.IsLandlord,
 		CardsCount: int(pb.CardsCount),
 		Online:     pb.Online,
+		IsBot:      pb.IsBot,
 	}
 }
 
@@ -85,30 +87,106 @@ func ProtoToPlayerInfos(pbs []*pb.PlayerInfo) []protocol.PlayerInfo {
 
 func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 	return &pb.GameStateDTO{
-		Phase:        gs.Phase,
-		Players:      PlayerInfosToProto(gs.Players),
-		Hand:         CardsToProto(gs.Hand),
-		BottomCards:  CardsToProto(gs.BottomCards),
-		CurrentTurn:  gs.CurrentTurn,
-		LastPlayed:   CardsToProto(gs.LastPlayed),
-		LastPlayerId: gs.LastPlayerID,
-		MustPlay:     gs.MustPlay,
-		CanBeat:      gs.CanBeat,
+		Phase:               gs.Phase,
+		Players:             PlayerInfosToProto(gs.Players),
+		Hand:                CardsToProto(gs.Hand),
+		BottomCards:         CardsToProto(gs.BottomCards),
+		CurrentTurn:         gs.CurrentTurn,
+		LastPlayed:          CardsToProto(gs.LastPlayed),
+		LastPlayerId:        gs.LastPlayerID,
+		MustPlay:            gs.MustPlay,
+		CanBeat:             gs.CanBeat,
+		SnapshotVersion:     gs.SnapshotVersion,
+		GameId:              gs.GameID,
+		BottomCardsRevealed: gs.BottomCardsRevealed,
+		TurnId:              gs.TurnID,
+		TurnDeadlineMs:      gs.TurnDeadlineMS,
+		ServerTimeMs:        gs.ServerTimeMS,
+		LastPlayerName:      gs.LastPlayerName,
+		LastHandType:        gs.LastHandType,
+		IsGrab:              gs.IsGrab,
+		Multiplier:          int64(gs.Multiplier),
+		BaseScore:           int64(gs.BaseScore),
+		PlayedCards:         PlayerPlayedCardsToProto(gs.PlayedCards),
+		Settlement:          GameSettlementDTOToProto(gs.Settlement),
 	}
 }
 
 func ProtoToGameStateDTO(pb *pb.GameStateDTO) *protocol.GameStateDTO {
 	return &protocol.GameStateDTO{
-		Phase:        pb.Phase,
-		Players:      ProtoToPlayerInfos(pb.Players),
-		Hand:         ProtoToCards(pb.Hand),
-		BottomCards:  ProtoToCards(pb.BottomCards),
-		CurrentTurn:  pb.CurrentTurn,
-		LastPlayed:   ProtoToCards(pb.LastPlayed),
-		LastPlayerID: pb.LastPlayerId,
-		MustPlay:     pb.MustPlay,
-		CanBeat:      pb.CanBeat,
+		Phase:               pb.Phase,
+		Players:             ProtoToPlayerInfos(pb.Players),
+		Hand:                ProtoToCards(pb.Hand),
+		BottomCards:         ProtoToCards(pb.BottomCards),
+		CurrentTurn:         pb.CurrentTurn,
+		LastPlayed:          ProtoToCards(pb.LastPlayed),
+		LastPlayerID:        pb.LastPlayerId,
+		MustPlay:            pb.MustPlay,
+		CanBeat:             pb.CanBeat,
+		SnapshotVersion:     pb.SnapshotVersion,
+		GameID:              pb.GameId,
+		BottomCardsRevealed: pb.BottomCardsRevealed,
+		TurnID:              pb.TurnId,
+		TurnDeadlineMS:      pb.TurnDeadlineMs,
+		ServerTimeMS:        pb.ServerTimeMs,
+		LastPlayerName:      pb.LastPlayerName,
+		LastHandType:        pb.LastHandType,
+		IsGrab:              pb.IsGrab,
+		Multiplier:          int(pb.Multiplier),
+		BaseScore:           int(pb.BaseScore),
+		PlayedCards:         ProtoToPlayerPlayedCards(pb.PlayedCards),
+		Settlement:          ProtoToGameSettlementDTO(pb.Settlement),
 	}
+}
+
+func GameSettlementDTOToProto(settlement *protocol.GameSettlementDTO) *pb.GameSettlementDTO {
+	if settlement == nil {
+		return nil
+	}
+	return &pb.GameSettlementDTO{
+		WinnerId:         settlement.WinnerID,
+		WinnerName:       settlement.WinnerName,
+		WinnerIsLandlord: settlement.WinnerIsLandlord,
+		Multiplier:       int64(settlement.Multiplier),
+		Scores:           PlayerScoresToProto(settlement.Scores),
+		PlayerHands:      PlayerHandsToProto(settlement.PlayerHands),
+	}
+}
+
+func ProtoToGameSettlementDTO(settlement *pb.GameSettlementDTO) *protocol.GameSettlementDTO {
+	if settlement == nil {
+		return nil
+	}
+	return &protocol.GameSettlementDTO{
+		WinnerID:         settlement.WinnerId,
+		WinnerName:       settlement.WinnerName,
+		WinnerIsLandlord: settlement.WinnerIsLandlord,
+		Multiplier:       int(settlement.Multiplier),
+		Scores:           ProtoToPlayerScores(settlement.Scores),
+		PlayerHands:      ProtoToPlayerHands(settlement.PlayerHands),
+	}
+}
+
+func PlayerPlayedCardsToProto(entries []protocol.PlayerPlayedCards) []*pb.PlayerPlayedCards {
+	result := make([]*pb.PlayerPlayedCards, len(entries))
+	for i, entry := range entries {
+		result[i] = &pb.PlayerPlayedCards{
+			PlayerId: entry.PlayerID,
+			Cards:    CardsToProto(entry.Cards),
+		}
+	}
+	return result
+}
+
+func ProtoToPlayerPlayedCards(entries []*pb.PlayerPlayedCards) []protocol.PlayerPlayedCards {
+	result := make([]protocol.PlayerPlayedCards, len(entries))
+	for i, entry := range entries {
+		result[i] = protocol.PlayerPlayedCards{
+			PlayerID: entry.PlayerId,
+			Cards:    ProtoToCards(entry.Cards),
+		}
+	}
+	return result
 }
 
 // --- PlayerHand conversion ---

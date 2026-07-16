@@ -11,7 +11,9 @@ type ServerInterface interface {
 	BroadcastToLobby(msg *protocol.Message)
 	GetClientByID(id string) ClientInterface
 	RegisterClient(id string, client ClientInterface)
-	UnregisterClient(id string)
+	UnregisterClient(id string, client ClientInterface) bool
+	RebindClient(temporaryID, playerID, playerName, roomCode string, client ClientInterface) (ClientInterface, error)
+	RollbackRebindClient(temporaryID, temporaryName, playerID, roomCode string, client, previous ClientInterface) error
 }
 
 // ClientInterface 定义客户端接口
@@ -20,9 +22,116 @@ type ClientInterface interface {
 	GetName() string
 	GetRoom() string
 	SetRoom(code string)
-	SendMessage(msg *protocol.Message)
+	SendMessage(msg *protocol.Message) error
 	Close()
 	IsBot() bool
+}
+
+// RoomConditionalSender is an optional capability for atomically ordering a
+// room-scoped delivery with room identity changes on a physical connection.
+// A false result with a nil error means the expected room no longer matched.
+type RoomConditionalSender interface {
+	SendMessageIfRoom(expectedRoom string, msg *protocol.Message) (sent bool, err error)
+}
+
+// IdentityConditionalSender is the stronger producer capability used for
+// asynchronous deliveries. It validates both the logical player and room on
+// the physical connection under one lock, so reconnect identity rebinding
+// cannot redirect a stale player's private or lifecycle message.
+type IdentityConditionalSender interface {
+	SendMessageIfIdentity(expectedPlayerID, expectedRoom string, msg *protocol.Message) (sent bool, err error)
+}
+
+// CommandResultSender marks a delivery as the direct result of the command
+// currently executing on this physical connection. Ordinary SendMessage calls
+// are events and must never inherit command correlation implicitly.
+type CommandResultSender interface {
+	SendCommandResult(msg *protocol.Message) error
+}
+
+// CommandResultIdentityConditionalSender combines direct-result correlation
+// with the same atomic identity check used for asynchronous room delivery.
+type CommandResultIdentityConditionalSender interface {
+	SendCommandResultIfIdentity(expectedPlayerID, expectedRoom string, msg *protocol.Message) (sent bool, err error)
+}
+
+// IdentityConditionalRoomBinder atomically changes a physical connection's
+// room only while both its logical player and current room still match. It is
+// the membership counterpart to IdentityConditionalSender.
+type IdentityConditionalRoomBinder interface {
+	CompareAndSetRoom(expectedPlayerID, expectedRoom, newRoom string) bool
+}
+
+// CompareAndSetRoom uses the atomic production capability when available.
+// The fallback preserves compatibility for bots and lightweight test clients
+// whose identities are immutable by construction.
+func CompareAndSetRoom(client ClientInterface, expectedPlayerID, expectedRoom, newRoom string) bool {
+	if client == nil {
+		return false
+	}
+	if binder, ok := client.(IdentityConditionalRoomBinder); ok {
+		return binder.CompareAndSetRoom(expectedPlayerID, expectedRoom, newRoom)
+	}
+	if client.GetID() != expectedPlayerID || client.GetRoom() != expectedRoom {
+		return false
+	}
+	client.SetRoom(newRoom)
+	return true
+}
+
+// SendMessageIfIdentity uses the strongest atomic capability exposed by the
+// client. The fallback keeps lightweight test and bot clients compatible;
+// production WebSocket clients implement IdentityConditionalSender.
+func SendMessageIfIdentity(client ClientInterface, expectedPlayerID, expectedRoom string, msg *protocol.Message) (bool, error) {
+	if client == nil {
+		return false, nil
+	}
+	if sender, ok := client.(IdentityConditionalSender); ok {
+		return sender.SendMessageIfIdentity(expectedPlayerID, expectedRoom, msg)
+	}
+	if client.GetID() != expectedPlayerID {
+		return false, nil
+	}
+	if sender, ok := client.(RoomConditionalSender); ok {
+		return sender.SendMessageIfRoom(expectedRoom, msg)
+	}
+	if client.GetRoom() != expectedRoom {
+		return false, nil
+	}
+	return true, client.SendMessage(msg)
+}
+
+// SendCommandResult uses explicit command-result delivery when supported.
+// Lightweight clients keep their existing behavior through SendMessage.
+func SendCommandResult(client ClientInterface, msg *protocol.Message) error {
+	if client == nil {
+		return nil
+	}
+	if sender, ok := client.(CommandResultSender); ok {
+		return sender.SendCommandResult(msg)
+	}
+	return client.SendMessage(msg)
+}
+
+// SendCommandResultIfIdentity correlates only the intended command owner while
+// retaining the atomic logical-player and room validation.
+func SendCommandResultIfIdentity(client ClientInterface, expectedPlayerID, expectedRoom string, msg *protocol.Message) (bool, error) {
+	if client == nil {
+		return false, nil
+	}
+	if sender, ok := client.(CommandResultIdentityConditionalSender); ok {
+		return sender.SendCommandResultIfIdentity(expectedPlayerID, expectedRoom, msg)
+	}
+	if client.GetID() != expectedPlayerID {
+		return false, nil
+	}
+	if sender, ok := client.(IdentityConditionalSender); ok {
+		return sender.SendMessageIfIdentity(expectedPlayerID, expectedRoom, msg)
+	}
+	if client.GetRoom() != expectedRoom {
+		return false, nil
+	}
+	return true, SendCommandResult(client, msg)
 }
 
 // ChatLimiter 聊天速率限制器接口

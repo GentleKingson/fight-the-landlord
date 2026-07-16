@@ -10,12 +10,12 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 )
 
-// sendGameError 统一处理游戏错误并发送给客户端
-func sendGameError(client types.ClientInterface, err error) {
+// sendGameError 统一处理游戏错误并发送给客户端。
+func sendGameError(client types.ClientInterface, command protocol.MessageType, err error) {
 	if gameErr, ok := errors.AsType[*apperrors.GameError](err); ok {
-		client.SendMessage(codec.NewErrorMessage(gameErr.Code))
+		sendMessage(client, codec.NewCommandErrorMessage(gameErr.Code, command))
 	} else {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, err.Error()))
+		sendMessage(client, codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, err.Error(), command))
 	}
 }
 
@@ -23,29 +23,40 @@ func sendGameError(client types.ClientInterface, err error) {
 func (h *Handler) handleBid(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.BidPayload](msg)
 	if err != nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgBid))
 		return
 	}
 
 	if h.roomManager == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameNotStart))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgBid))
 		return
 	}
 
 	room := h.roomManager.GetRoom(client.GetRoom())
 	if room == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeNotInRoom))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgBid))
+		return
+	}
+	if !room.IsCurrentClient(client) {
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgBid))
 		return
 	}
 
 	gameSession := h.GetGameSession(room.Code)
 	if gameSession == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameNotStart))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgBid))
 		return
 	}
 
-	if err := gameSession.HandleBid(client.GetID(), payload.Bid); err != nil {
-		sendGameError(client, err)
+	command := msg.Command
+	if command == nil {
+		if err := gameSession.HandleBid(client.GetID(), payload.Bid); err != nil {
+			sendGameError(client, protocol.MsgBid, err)
+		}
+		return
+	}
+	if err := gameSession.HandleBidAt(client.GetID(), payload.Bid, command.ExpectedGameID, command.ExpectedTurnID); err != nil {
+		sendGameError(client, protocol.MsgBid, err)
 	}
 }
 
@@ -53,52 +64,77 @@ func (h *Handler) handleBid(client types.ClientInterface, msg *protocol.Message)
 func (h *Handler) handlePlayCards(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.PlayCardsPayload](msg)
 	if err != nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgPlayCards))
 		return
 	}
 
 	if h.roomManager == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameNotStart))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPlayCards))
 		return
 	}
 
 	room := h.roomManager.GetRoom(client.GetRoom())
 	if room == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeNotInRoom))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPlayCards))
+		return
+	}
+	if !room.IsCurrentClient(client) {
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPlayCards))
 		return
 	}
 
 	gameSession := h.GetGameSession(room.Code)
 	if gameSession == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameNotStart))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPlayCards))
 		return
 	}
 
-	if err := gameSession.HandlePlayCards(client.GetID(), payload.Cards); err != nil {
-		sendGameError(client, err)
+	command := msg.Command
+	if command == nil {
+		if err := gameSession.HandlePlayCards(client.GetID(), payload.Cards); err != nil {
+			sendGameError(client, protocol.MsgPlayCards, err)
+		}
+		return
+	}
+	if err := gameSession.HandlePlayCardsAt(client.GetID(), payload.Cards, command.ExpectedGameID, command.ExpectedTurnID); err != nil {
+		sendGameError(client, protocol.MsgPlayCards, err)
 	}
 }
 
 // handlePass 处理不出
-func (h *Handler) handlePass(client types.ClientInterface) {
+func (h *Handler) handlePass(client types.ClientInterface, messages ...*protocol.Message) {
 	if h.roomManager == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameNotStart))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPass))
 		return
 	}
 
 	room := h.roomManager.GetRoom(client.GetRoom())
 	if room == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeNotInRoom))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPass))
+		return
+	}
+	if !room.IsCurrentClient(client) {
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, protocol.MsgPass))
 		return
 	}
 
 	gameSession := h.GetGameSession(room.Code)
 	if gameSession == nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameNotStart))
+		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeGameNotStart, protocol.MsgPass))
 		return
 	}
 
-	if err := gameSession.HandlePass(client.GetID()); err != nil {
-		sendGameError(client, err)
+	var command *protocol.CommandMeta
+	if len(messages) > 0 && messages[0] != nil {
+		command = messages[0].Command
+	}
+	if command == nil {
+		if err := gameSession.HandlePass(client.GetID()); err != nil {
+			sendGameError(client, protocol.MsgPass, err)
+		}
+		return
+	}
+	if err := gameSession.HandlePassAt(client.GetID(), command.ExpectedGameID, command.ExpectedTurnID); err != nil {
+		sendGameError(client, protocol.MsgPass, err)
 	}
 }

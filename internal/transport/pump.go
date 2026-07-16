@@ -13,13 +13,13 @@ import (
 )
 
 // readPump 从服务器读取消息
-func (c *Client) readPump() {
-	defer c.handleReadExit()
+func (c *Client) readPump(conn *websocket.Conn) {
+	defer c.handleReadExit(conn)
 
-	c.setupPongHandler()
+	c.setupPongHandler(conn)
 
 	for {
-		_, message, err := c.conn.ReadMessage()
+		_, message, err := conn.ReadMessage()
 		if err != nil {
 			c.handleReadError(err)
 			return
@@ -35,26 +35,45 @@ func (c *Client) readPump() {
 	}
 }
 
-func (c *Client) handleReadExit() {
+func (c *Client) handleReadExit(conn *websocket.Conn) {
 	if r := recover(); r != nil {
 		logger.LogPanic(r)
 		log.Printf("[PANIC] readPump panic recovered: %v", r)
 	}
+	_ = conn.Close()
+
+	c.mu.Lock()
+	if c.conn != conn {
+		c.mu.Unlock()
+		return
+	}
+	c.conn = nil
+	closed := c.closed
+	playerID := c.PlayerID
+	reconnectToken := c.ReconnectToken
+	wasReconnecting := c.reconnecting.Load()
+	if wasReconnecting {
+		c.clearReconnectAttemptLocked()
+	}
+	c.mu.Unlock()
+	if closed {
+		return
+	}
 	// 尝试重连
-	if c.ReconnectToken != "" && !c.reconnecting.Load() {
-		go c.tryReconnect()
-	} else {
-		c.Close()
-		if c.OnClose != nil {
-			c.OnClose()
+	if reconnectToken != "" {
+		if wasReconnecting || c.reconnecting.CompareAndSwap(false, true) {
+			go c.tryReconnect(playerID, reconnectToken)
+			return
 		}
 	}
+	c.Close()
+	c.notifyClosed()
 }
 
-func (c *Client) setupPongHandler() {
-	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error {
-		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+func (c *Client) setupPongHandler(conn *websocket.Conn) {
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
 }
@@ -68,7 +87,11 @@ func (c *Client) handleReadError(err error) {
 }
 
 func (c *Client) processMessage(msg *protocol.Message) {
-	isReconnected := c.handleInternalMessage(msg)
+	isReconnected, suppress := c.handleInternalMessage(msg)
+	if suppress {
+		codec.PutMessage(msg)
+		return
+	}
 
 	// 回调处理
 	if c.OnMessage != nil {
@@ -87,34 +110,67 @@ func (c *Client) processMessage(msg *protocol.Message) {
 	}
 }
 
-func (c *Client) handleInternalMessage(msg *protocol.Message) bool {
+func (c *Client) handleInternalMessage(msg *protocol.Message) (reconnected, suppress bool) {
+	if msg.Event != nil && msg.Event.GameID != "" {
+		c.setGameContext(msg.Event.GameID, msg.Event.TurnID)
+	}
 	switch msg.Type {
 	case protocol.MsgConnected:
 		var payload protocol.ConnectedPayload
-		if err := payloadconv.DecodePayload(msg.Type, msg.Payload, &payload); err == nil {
-			c.PlayerID = payload.PlayerID
-			c.PlayerName = payload.PlayerName
-			c.ReconnectToken = payload.ReconnectToken
+		if err := payloadconv.DecodePayload(msg.Type, msg.Payload, &payload); err != nil {
+			break
 		}
+		// Every restored physical connection first receives a provisional
+		// identity. It must not replace or leak ahead of the identity being
+		// restored by MsgReconnected.
+		if c.stageProvisionalConnected(msg) {
+			return false, true
+		}
+		c.setIdentity(payload.PlayerID, payload.PlayerName, payload.ReconnectToken)
+		c.setGameContext("", 0)
 	case protocol.MsgReconnected:
-		c.reconnecting.Store(false)
+		var payload protocol.ReconnectedPayload
+		if err := payloadconv.DecodePayload(msg.Type, msg.Payload, &payload); err == nil {
+			c.setIdentity(payload.PlayerID, payload.PlayerName, payload.ReconnectToken)
+			if payload.GameState != nil {
+				c.setGameContext(payload.GameState.GameID, payload.GameState.TurnID)
+			} else {
+				c.setGameContext("", 0)
+			}
+		}
+		c.mu.Lock()
+		c.clearReconnectAttemptLocked()
 		c.reconnectCount = 0
-		return true
+		c.reconnecting.Store(false)
+		c.mu.Unlock()
+		return true, false
+	case protocol.MsgError:
+		if provisional := c.resolveReconnectError(msg); provisional != nil {
+			c.processMessage(provisional)
+			// The old identity could not be restored, but the physical
+			// connection is usable with the provisional session. Notify the UI
+			// so it leaves its reconnecting state after the Error is delivered.
+			return true, false
+		}
+	case protocol.MsgRoomLeft:
+		c.setGameContext("", 0)
 	case protocol.MsgPong:
 		var payload protocol.PongPayload
 		if err := payloadconv.DecodePayload(msg.Type, msg.Payload, &payload); err == nil {
 			latency := time.Now().UnixMilli() - payload.ClientTimestamp
+			c.mu.Lock()
 			c.Latency = latency
+			c.mu.Unlock()
 			if c.OnLatencyUpdate != nil {
 				c.OnLatencyUpdate(latency)
 			}
 		}
 	}
-	return false
+	return false, false
 }
 
 // writePump 向服务器写入消息
-func (c *Client) writePump() {
+func (c *Client) writePump(conn *websocket.Conn, send <-chan []byte) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		if r := recover(); r != nil {
@@ -122,25 +178,25 @@ func (c *Client) writePump() {
 			log.Printf("[PANIC] writePump panic recovered: %v", r)
 		}
 		ticker.Stop()
-		_ = c.conn.Close()
+		_ = conn.Close()
 	}()
 
 	for {
 		select {
-		case message, ok := <-c.send:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+		case message, ok := <-send:
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
-			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
+			if err := conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
 				return
 			}
 
 		case <-ticker.C:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 
@@ -148,4 +204,12 @@ func (c *Client) writePump() {
 			return
 		}
 	}
+}
+
+func (c *Client) notifyClosed() {
+	c.closeNotifyOnce.Do(func() {
+		if c.OnClose != nil {
+			c.OnClose()
+		}
+	})
 }
