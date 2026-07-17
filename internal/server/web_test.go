@@ -139,7 +139,7 @@ func TestSessionCommitSetsOpaqueHttpOnlyCookieAndRetiresTicketAfterRefresh(t *te
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
 	require.Len(t, recorder.Result().Cookies(), 2)
-	cookie := responseCookie(t, recorder, webSessionCookieName)
+	cookie := webSessionResponseCookie(t, recorder)
 	assert.Equal(t, webSessionCookieName, cookie.Name)
 	assert.Equal(t, playerSession.ReconnectToken, cookie.Value)
 	assert.True(t, cookie.HttpOnly)
@@ -178,7 +178,7 @@ func TestSessionCommitRequiresExactPredecessorCookieWithoutInvalidatingOwner(t *
 	owner := commitSessionTicket(fixture.server, fixture.ticket, fixture.predecessor)
 	require.Equal(t, http.StatusNoContent, owner.Code)
 	require.Len(t, owner.Result().Cookies(), 2)
-	assert.Equal(t, fixture.restored.ReconnectToken, responseCookie(t, owner, webSessionCookieName).Value)
+	assert.Equal(t, fixture.restored.ReconnectToken, webSessionResponseCookie(t, owner).Value)
 	fixture.client.Close()
 }
 
@@ -206,7 +206,7 @@ func TestSessionRefreshObservesSuccessorRenewsCookieAndRejectsOldReplay(t *testi
 	committed := commitSessionTicket(fixture.server, fixture.ticket, fixture.predecessor)
 	require.Equal(t, http.StatusNoContent, committed.Code)
 	require.Len(t, committed.Result().Cookies(), 2)
-	successorCookie := responseCookie(t, committed, webSessionCookieName)
+	successorCookie := webSessionResponseCookie(t, committed)
 
 	refreshed := refreshWebSession(fixture.server, successorCookie.Value)
 	require.Equal(t, http.StatusNoContent, refreshed.Code)
@@ -238,7 +238,7 @@ func TestConcurrentSessionCommitRetriesReturnOneSuccessorWithoutDoubleRotation(t
 		result := <-results
 		require.Equal(t, http.StatusNoContent, result.Code)
 		require.Len(t, result.Result().Cookies(), 2)
-		assert.Equal(t, fixture.restored.ReconnectToken, responseCookie(t, result, webSessionCookieName).Value)
+		assert.Equal(t, fixture.restored.ReconnectToken, webSessionResponseCookie(t, result).Value)
 	}
 	assert.Equal(t, fixture.restored.ReconnectToken, fixture.sessions.GetSession(fixture.restored.PlayerID).ReconnectToken)
 	fixture.client.Close()
@@ -935,7 +935,7 @@ func TestSessionRefreshAndPredecessorRevokeCannotLeaveSuccessorAlive(t *testing.
 	fixture := newPendingBrowserFixture(t)
 	committed := commitSessionTicket(fixture.server, fixture.ticket, fixture.predecessor)
 	require.Equal(t, http.StatusNoContent, committed.Code)
-	successor := responseCookie(t, committed, webSessionCookieName).Value
+	successor := webSessionResponseCookie(t, committed).Value
 	start := make(chan struct{})
 	results := make(chan int, 2)
 	go func() {
@@ -977,6 +977,7 @@ func TestSessionCommitSecureCookieTrustsOnlyTLSOrConfiguredDirectProxy(t *testin
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			manager := session.NewSessionManager()
 			t.Cleanup(func() { require.NoError(t, manager.Close()) })
 			playerSession := manager.MustCreateSession("player-1", "Player One")
@@ -1006,7 +1007,7 @@ func TestSessionCommitSecureCookieTrustsOnlyTLSOrConfiguredDirectProxy(t *testin
 			server.handleSessionCommit(recorder, request)
 			require.Equal(t, http.StatusNoContent, recorder.Code)
 			require.Len(t, recorder.Result().Cookies(), 2)
-			assert.Equal(t, test.wantSecure, responseCookie(t, recorder, webSessionCookieName).Secure)
+			assert.Equal(t, test.wantSecure, webSessionResponseCookie(t, recorder).Secure)
 		})
 	}
 }
@@ -1040,7 +1041,7 @@ func TestSessionRevokeUsesCookieRequiresAllowedOriginAndIsIdempotent(t *testing.
 	assert.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
 	assert.False(t, manager.CanReconnectToken(playerSession.ReconnectToken))
 	require.Len(t, recorder.Result().Cookies(), 2)
-	assert.Equal(t, -1, responseCookie(t, recorder, webSessionCookieName).MaxAge)
+	assert.Equal(t, -1, webSessionResponseCookie(t, recorder).MaxAge)
 
 	replayed := httptest.NewRequest(http.MethodPost, "/session/revoke", strings.NewReader(`{}`))
 	replayed.Header.Set("Content-Type", "application/json")
@@ -1088,6 +1089,7 @@ func TestSessionEndpointsRejectUnknownAndOversizedJSON(t *testing.T) {
 		{name: "oversized commit", path: "/session/commit", body: `{"ticket":"` + strings.Repeat("x", 2048) + `"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Origin", "https://game.example")
@@ -1193,14 +1195,14 @@ func newSessionJSONRequest(requestPath, body, cookie string) *http.Request {
 	return request
 }
 
-func responseCookie(t *testing.T, recorder *httptest.ResponseRecorder, name string) *http.Cookie {
+func webSessionResponseCookie(t *testing.T, recorder *httptest.ResponseRecorder) *http.Cookie {
 	t.Helper()
 	for _, cookie := range recorder.Result().Cookies() {
-		if cookie.Name == name {
+		if cookie.Name == webSessionCookieName {
 			return cookie
 		}
 	}
-	require.FailNow(t, "response cookie not found", name)
+	require.FailNow(t, "response cookie not found", webSessionCookieName)
 	return nil
 }
 

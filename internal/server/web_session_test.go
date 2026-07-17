@@ -19,9 +19,8 @@ func issueTestWebSessionTicket(
 	manager *webSessionTicketManager,
 	token, predecessor string,
 	rollback, orphan func() bool,
-) (string, string) {
+) (ticket, owner string) {
 	t.Helper()
-	owner := ""
 	if predecessor == "" {
 		var err error
 		owner, err = manager.AcquireOwnerNonce()
@@ -216,7 +215,7 @@ func TestWebSessionTicketTimerActivelyExpiresUncommittedAndCommittedStates(t *te
 	}
 
 	rollbacks := 0
-	ticket, owner := issueTestWebSessionTicket(t, manager, "successor", "predecessor", func() bool {
+	issueTestWebSessionTicket(t, manager, "successor", "predecessor", func() bool {
 		rollbacks++
 		return true
 	}, nil)
@@ -230,7 +229,7 @@ func TestWebSessionTicketTimerActivelyExpiresUncommittedAndCommittedStates(t *te
 
 	now = now.Add(time.Second)
 	orphans := 0
-	ticket, owner = issueTestWebSessionTicket(t, manager, "committed-successor", "committed-predecessor", nil, func() bool {
+	ticket, owner := issueTestWebSessionTicket(t, manager, "committed-successor", "committed-predecessor", nil, func() bool {
 		orphans++
 		return true
 	})
@@ -370,7 +369,7 @@ func TestRequestUsesHTTPSOnlyTrustsExactForwardedProtoFromDirectProxy(t *testing
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodPost, "http://example.test/session/commit", nil)
+			r := httptest.NewRequest(http.MethodPost, "http://example.test/session/commit", http.NoBody)
 			r.RemoteAddr = test.remoteAddr
 			r.Header.Set("X-Forwarded-Proto", test.proto)
 			if test.tls {
@@ -380,7 +379,7 @@ func TestRequestUsesHTTPSOnlyTrustsExactForwardedProtoFromDirectProxy(t *testing
 		})
 	}
 
-	duplicate := httptest.NewRequest(http.MethodPost, "http://example.test/session/commit", nil)
+	duplicate := httptest.NewRequest(http.MethodPost, "http://example.test/session/commit", http.NoBody)
 	duplicate.RemoteAddr = "10.0.0.4:1234"
 	duplicate.Header.Add("X-Forwarded-Proto", "https")
 	duplicate.Header.Add("X-Forwarded-Proto", "https")
@@ -389,18 +388,18 @@ func TestRequestUsesHTTPSOnlyTrustsExactForwardedProtoFromDirectProxy(t *testing
 
 func TestReadWebSessionCookieAcceptsOnlyOpaqueSessionTokenShape(t *testing.T) {
 	valid := strings.Repeat("ab", 32)
-	r := httptest.NewRequest(http.MethodGet, "http://example.test/ws", nil)
+	r := httptest.NewRequest(http.MethodGet, "http://example.test/ws", http.NoBody)
 	r.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: valid})
 	assert.Equal(t, valid, readWebSessionCookie(r))
 
-	r = httptest.NewRequest(http.MethodGet, "http://example.test/ws", nil)
+	r = httptest.NewRequest(http.MethodGet, "http://example.test/ws", http.NoBody)
 	r.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: "player-id:" + valid})
 	assert.Empty(t, readWebSessionCookie(r))
 }
 
 func TestBrowserOriginRequiresNonEmptyAllowedOrigin(t *testing.T) {
 	checker := NewOriginChecker([]string{"https://game.example"})
-	r := httptest.NewRequest(http.MethodPost, "https://game.example/session/revoke", nil)
+	r := httptest.NewRequest(http.MethodPost, "https://game.example/session/revoke", http.NoBody)
 	assert.False(t, browserOriginAllowed(checker, r))
 
 	r.Header.Set("Origin", "https://evil.example")

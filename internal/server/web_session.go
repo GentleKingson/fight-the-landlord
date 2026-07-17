@@ -178,54 +178,66 @@ func (manager *webSessionTicketManager) Issue(
 	if len(manager.entries) >= maxWebSessionTickets {
 		return "", errWebSessionTicketCapacity
 	}
-	if predecessorToken == "" {
-		expiresAt, issued := manager.ownerNonces[ownerToken]
-		if !issued || !manager.now().Before(expiresAt) {
-			return "", errWebSessionTicketEntropy
-		}
+	if predecessorToken == "" && !manager.ownerNonceActiveLocked(ownerToken) {
+		return "", errWebSessionTicketEntropy
 	}
+	ticket, err := manager.generateUniqueTicketLocked()
+	if err != nil {
+		return "", err
+	}
+	entry := webSessionTicketEntry{
+		token:            token,
+		predecessorToken: predecessorToken,
+		ownerToken:       ownerToken,
+		expiresAt:        manager.now().Add(webSessionTicketTTL),
+		validateOwner:    validateOwner,
+		confirm:          confirm,
+		rollback:         rollback,
+		orphan:           orphan,
+	}
+	if manager.scheduleExpiry != nil {
+		entry.stopExpiry = manager.scheduleExpiry(ticket, webSessionTicketTTL)
+	}
+	manager.entries[ticket] = entry
+	manager.indexTicketLocked(ticket, entry)
+	return ticket, nil
+}
 
+func (manager *webSessionTicketManager) ownerNonceActiveLocked(ownerToken string) bool {
+	expiresAt, issued := manager.ownerNonces[ownerToken]
+	return issued && manager.now().Before(expiresAt)
+}
+
+func (manager *webSessionTicketManager) generateUniqueTicketLocked() (string, error) {
 	for range 16 {
 		bytes := make([]byte, 32)
 		if _, err := io.ReadFull(manager.reader, bytes); err != nil {
 			return "", errors.Join(errWebSessionTicketEntropy, err)
 		}
 		ticket := hex.EncodeToString(bytes)
-		if _, exists := manager.entries[ticket]; exists {
-			continue
+		if _, exists := manager.entries[ticket]; !exists {
+			return ticket, nil
 		}
-		entry := webSessionTicketEntry{
-			token:            token,
-			predecessorToken: predecessorToken,
-			ownerToken:       ownerToken,
-			expiresAt:        manager.now().Add(webSessionTicketTTL),
-			validateOwner:    validateOwner,
-			confirm:          confirm,
-			rollback:         rollback,
-			orphan:           orphan,
-		}
-		if manager.scheduleExpiry != nil {
-			entry.stopExpiry = manager.scheduleExpiry(ticket, webSessionTicketTTL)
-		}
-		manager.entries[ticket] = entry
-		if manager.successorTickets[token] == nil {
-			manager.successorTickets[token] = make(map[string]struct{})
-		}
-		manager.successorTickets[token][ticket] = struct{}{}
-		if predecessorToken != "" {
-			if manager.predecessorTickets[predecessorToken] == nil {
-				manager.predecessorTickets[predecessorToken] = make(map[string]struct{})
-			}
-			manager.predecessorTickets[predecessorToken][ticket] = struct{}{}
-		} else {
-			if manager.ownerTickets[ownerToken] == nil {
-				manager.ownerTickets[ownerToken] = make(map[string]struct{})
-			}
-			manager.ownerTickets[ownerToken][ticket] = struct{}{}
-		}
-		return ticket, nil
 	}
 	return "", errWebSessionTicketEntropy
+}
+
+func (manager *webSessionTicketManager) indexTicketLocked(ticket string, entry webSessionTicketEntry) {
+	if manager.successorTickets[entry.token] == nil {
+		manager.successorTickets[entry.token] = make(map[string]struct{})
+	}
+	manager.successorTickets[entry.token][ticket] = struct{}{}
+	if entry.predecessorToken != "" {
+		if manager.predecessorTickets[entry.predecessorToken] == nil {
+			manager.predecessorTickets[entry.predecessorToken] = make(map[string]struct{})
+		}
+		manager.predecessorTickets[entry.predecessorToken][ticket] = struct{}{}
+		return
+	}
+	if manager.ownerTickets[entry.ownerToken] == nil {
+		manager.ownerTickets[entry.ownerToken] = make(map[string]struct{})
+	}
+	manager.ownerTickets[entry.ownerToken][ticket] = struct{}{}
 }
 
 // Commit enters the response-uncertainty state only when the request presents
@@ -241,65 +253,96 @@ func (manager *webSessionTicketManager) Commit(
 	if manager == nil || ticket == "" {
 		return "", false
 	}
-
-	manager.mu.Lock()
-	entry, ok := manager.entries[ticket]
-	ownerActive := true
-	if ok && !entry.committed && entry.predecessorToken == "" {
-		expiresAt, issued := manager.ownerNonces[ownerToken]
-		ownerActive = issued && manager.now().Before(expiresAt)
-	}
-	manager.mu.Unlock()
-	if !ok || !ownerActive {
-		return "", false
-	}
-	if entry.predecessorToken != "" {
-		if !constantTimeCredentialEqual(entry.predecessorToken, predecessorToken) {
-			return "", false
-		}
-	} else if !constantTimeCredentialEqual(entry.ownerToken, ownerToken) {
+	entry, ok := manager.lookupCommittableEntry(ticket, ownerToken)
+	if !ok || !webSessionCommitBindingMatches(entry, predecessorToken, ownerToken) {
 		return "", false
 	}
 	if entry.validateOwner == nil || !entry.validateOwner() || validate == nil || !validate(entry.token) {
 		manager.Invalidate(ticket)
 		return "", false
 	}
-
-	manager.mu.Lock()
-	entry, ok = manager.entries[ticket]
-	if !ok {
-		manager.mu.Unlock()
+	result := manager.finalizeWebSessionCommit(ticket, ownerToken)
+	if result.expired {
+		manager.invalidateEntry(result.entry)
 		return "", false
+	}
+	if !result.committed {
+		return "", false
+	}
+	return result.entry.token, true
+}
+
+func (manager *webSessionTicketManager) lookupCommittableEntry(
+	ticket, ownerToken string,
+) (webSessionTicketEntry, bool) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	entry, ok := manager.entries[ticket]
+	if !ok {
+		return webSessionTicketEntry{}, false
+	}
+	if !entry.committed && entry.predecessorToken == "" && !manager.ownerNonceActiveLocked(ownerToken) {
+		return webSessionTicketEntry{}, false
+	}
+	return entry, true
+}
+
+func webSessionCommitBindingMatches(
+	entry webSessionTicketEntry,
+	predecessorToken, ownerToken string,
+) bool {
+	if entry.predecessorToken != "" {
+		return constantTimeCredentialEqual(entry.predecessorToken, predecessorToken)
+	}
+	return constantTimeCredentialEqual(entry.ownerToken, ownerToken)
+}
+
+type webSessionCommitResult struct {
+	entry     webSessionTicketEntry
+	committed bool
+	expired   bool
+}
+
+func (manager *webSessionTicketManager) finalizeWebSessionCommit(
+	ticket, ownerToken string,
+) webSessionCommitResult {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	entry, ok := manager.entries[ticket]
+	if !ok {
+		return webSessionCommitResult{}
 	}
 	if !manager.now().Before(entry.expiresAt) {
 		manager.deleteEntryLocked(ticket, entry)
-		manager.mu.Unlock()
-		manager.invalidateEntry(entry)
-		return "", false
+		return webSessionCommitResult{entry: entry, expired: true}
 	}
 	if !entry.committed && entry.predecessorToken == "" {
-		expiresAt, issued := manager.ownerNonces[ownerToken]
-		if !issued || !manager.now().Before(expiresAt) {
-			manager.mu.Unlock()
-			return "", false
+		if !manager.ownerNonceActiveLocked(ownerToken) {
+			return webSessionCommitResult{}
 		}
 		manager.deleteOwnerNonceLocked(ownerToken)
 	}
 	if !entry.committed {
-		if entry.stopExpiry != nil {
-			entry.stopExpiry()
-		}
-		entry.expiresAt = manager.now().Add(webSessionTicketTTL)
-		if manager.scheduleExpiry != nil {
-			entry.stopExpiry = manager.scheduleExpiry(ticket, webSessionTicketTTL)
-		} else {
-			entry.stopExpiry = nil
-		}
+		manager.renewTicketExpiryLocked(ticket, &entry)
 	}
 	entry.committed = true
 	manager.entries[ticket] = entry
-	manager.mu.Unlock()
-	return entry.token, true
+	return webSessionCommitResult{entry: entry, committed: true}
+}
+
+func (manager *webSessionTicketManager) renewTicketExpiryLocked(
+	ticket string,
+	entry *webSessionTicketEntry,
+) {
+	if entry.stopExpiry != nil {
+		entry.stopExpiry()
+	}
+	entry.expiresAt = manager.now().Add(webSessionTicketTTL)
+	if manager.scheduleExpiry != nil {
+		entry.stopExpiry = manager.scheduleExpiry(ticket, webSessionTicketTTL)
+		return
+	}
+	entry.stopExpiry = nil
 }
 
 // ObserveSuccessor retires committed ticket state after an authenticated

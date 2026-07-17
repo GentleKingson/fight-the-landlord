@@ -18,13 +18,7 @@ import (
 
 // handleWebSocket 处理 WebSocket 连接
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// 获取真实客户端IP
-	clientIP := GetClientIP(r)
-	if s.ipResolver != nil {
-		clientIP = s.ipResolver.Resolve(r)
-	}
-
-	// 维护模式检查（最优先）
+	clientIP := s.webSocketClientIP(r)
 	if s.shuttingDown.Load() || s.IsMaintenanceMode() {
 		s.recordWebSocketRejection("maintenance", clientIP)
 		log.Printf("🔧 维护模式，拒绝新连接: %s", clientIP)
@@ -43,101 +37,139 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server Full", http.StatusServiceUnavailable)
 		return
 	}
-	leaseTransferred := false
-	browserTicketOwnerToken := ""
-	defer func() {
-		if !leaseTransferred {
-			lease.release()
-			if browserTicketOwnerToken != "" {
-				s.activeWebSessionTickets().ReleaseOwnerNonce(browserTicketOwnerToken)
-			}
-		}
-	}()
-
-	// IP 过滤检查
-	if !s.ipFilter.IsAllowed(clientIP) {
-		s.recordWebSocketRejection("ip_filter", clientIP)
-		log.Printf("🚫 IP %s 被过滤器拒绝", clientIP)
-		http.Error(w, "Forbidden", http.StatusForbidden)
+	pending := &pendingWebSocketActivation{server: s, lease: lease}
+	defer pending.release()
+	if !s.validateWebSocketUpgradeRequest(w, r, clientIP) {
 		return
 	}
-
-	// 来源验证
-	if !s.originChecker.Check(r) {
-		s.recordWebSocketRejection("origin", clientIP)
-		log.Printf("🚫 来源验证失败: %s (IP: %s)", r.Header.Get("Origin"), clientIP)
-		http.Error(w, "Origin not allowed", http.StatusForbidden)
+	browser, prepared := s.prepareBrowserWebSocket(w, r, clientIP)
+	if !prepared {
 		return
 	}
+	pending.ownerToken = browser.ownerToken
 
-	// Reject excess attempts before allocating a nonce or timer. Otherwise
-	// malformed pre-upgrade traffic could exhaust the global nonce registry.
-	if !s.rateLimiter.Allow(clientIP) {
-		s.recordWebSocketRejection("rate_limit", clientIP)
-		log.Printf("🚫 IP %s 请求过于频繁", clientIP)
-		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-		return
-	}
-	browserTransport := isBrowserTransportRequest(r)
-	browserReconnectToken := ""
-	upgradeHeaders := http.Header(nil)
-	if browserTransport {
-		browserReconnectToken = readWebSessionCookie(r)
-		observed := false
-		known := false
-		if browserReconnectToken != "" && s.sessionManager != nil {
-			s.sessionAuthorityMu.Lock()
-			observed = s.sessionManager.ObserveWebSessionToken(browserReconnectToken)
-			if observed {
-				s.activeWebSessionTickets().ObserveSuccessor(browserReconnectToken)
-			}
-			known = s.sessionManager.IsKnownWebSessionToken(browserReconnectToken)
-			s.sessionAuthorityMu.Unlock()
-		}
-		if browserReconnectToken != "" && !observed && known {
-			s.recordWebSocketRejection("session_busy", clientIP)
-			http.Error(w, "Web session is unavailable", http.StatusConflict)
-			return
-		}
-		if !observed {
-			// Unknown or absent reconnect cookies do not become the binding for a
-			// new credential. A separate nonce is established by the 101 response.
-			browserReconnectToken = ""
-			var ownerErr error
-			browserTicketOwnerToken, ownerErr = s.activeWebSessionTickets().AcquireOwnerNonce()
-			if ownerErr != nil {
-				s.recordWebSocketRejection("session_owner", clientIP)
-				http.Error(w, "Session service unavailable", http.StatusServiceUnavailable)
-				return
-			}
-			upgradeHeaders = make(http.Header)
-			upgradeHeaders.Add("Set-Cookie", webSessionOwnerCookie(
-				browserTicketOwnerToken,
-				requestUsesHTTPS(r, s.ipResolver),
-				time.Now(),
-			).String())
-		}
-	}
-
-	conn, err := upgrader.Upgrade(w, r, upgradeHeaders)
+	conn, err := upgrader.Upgrade(w, r, browser.upgradeHeaders)
 	if err != nil {
 		s.recordWebSocketRejection("upgrade", clientIP)
 		log.Printf("WebSocket 升级失败: %v", err)
 		return
 	}
 	lease.activate()
-	negotiated, err := s.negotiateWebSocket(conn, browserTransport)
+	negotiated, err := s.negotiateWebSocket(conn, browser.transport)
 	if err != nil {
 		s.recordWebSocketRejection("handshake", clientIP)
 		log.Printf("协议握手失败 (IP: %s): %v", clientIP, err)
 		_ = conn.Close()
 		return
 	}
-	negotiated.browserTransport = browserTransport
-	negotiated.browserReconnectToken = browserReconnectToken
-	negotiated.browserTicketOwnerToken = browserTicketOwnerToken
+	negotiated.browserTransport = browser.transport
+	negotiated.browserReconnectToken = browser.reconnectToken
+	negotiated.browserTicketOwnerToken = browser.ownerToken
 
-	leaseTransferred = s.activateWebSocketClient(conn, lease, negotiated, clientIP)
+	pending.transferred = s.activateWebSocketClient(conn, lease, negotiated, clientIP)
+}
+
+type pendingWebSocketActivation struct {
+	server      *Server
+	lease       *connectionLease
+	ownerToken  string
+	transferred bool
+}
+
+func (pending *pendingWebSocketActivation) release() {
+	if pending == nil || pending.transferred {
+		return
+	}
+	pending.lease.release()
+	if pending.ownerToken != "" {
+		pending.server.activeWebSessionTickets().ReleaseOwnerNonce(pending.ownerToken)
+	}
+}
+
+type browserWebSocketPreparation struct {
+	transport      bool
+	reconnectToken string
+	ownerToken     string
+	upgradeHeaders http.Header
+}
+
+func (s *Server) webSocketClientIP(r *http.Request) string {
+	if s.ipResolver != nil {
+		return s.ipResolver.Resolve(r)
+	}
+	return GetClientIP(r)
+}
+
+func (s *Server) validateWebSocketUpgradeRequest(w http.ResponseWriter, r *http.Request, clientIP string) bool {
+	if !s.ipFilter.IsAllowed(clientIP) {
+		s.recordWebSocketRejection("ip_filter", clientIP)
+		log.Printf("🚫 IP %s 被过滤器拒绝", clientIP)
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return false
+	}
+	if !s.originChecker.Check(r) {
+		s.recordWebSocketRejection("origin", clientIP)
+		log.Printf("🚫 来源验证失败: %s (IP: %s)", r.Header.Get("Origin"), clientIP)
+		http.Error(w, "Origin not allowed", http.StatusForbidden)
+		return false
+	}
+	// Reject excess attempts before allocating a nonce or timer.
+	if !s.rateLimiter.Allow(clientIP) {
+		s.recordWebSocketRejection("rate_limit", clientIP)
+		log.Printf("🚫 IP %s 请求过于频繁", clientIP)
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		return false
+	}
+	return true
+}
+
+func (s *Server) prepareBrowserWebSocket(
+	w http.ResponseWriter,
+	r *http.Request,
+	clientIP string,
+) (browserWebSocketPreparation, bool) {
+	preparation := browserWebSocketPreparation{transport: isBrowserTransportRequest(r)}
+	if !preparation.transport {
+		return preparation, true
+	}
+	presentedToken := readWebSessionCookie(r)
+	observed, known := s.observeBrowserReconnectToken(presentedToken)
+	if presentedToken != "" && !observed && known {
+		s.recordWebSocketRejection("session_busy", clientIP)
+		http.Error(w, "Web session is unavailable", http.StatusConflict)
+		return browserWebSocketPreparation{}, false
+	}
+	if observed {
+		preparation.reconnectToken = presentedToken
+		return preparation, true
+	}
+	ownerToken, err := s.activeWebSessionTickets().AcquireOwnerNonce()
+	if err != nil {
+		s.recordWebSocketRejection("session_owner", clientIP)
+		http.Error(w, "Session service unavailable", http.StatusServiceUnavailable)
+		return browserWebSocketPreparation{}, false
+	}
+	preparation.ownerToken = ownerToken
+	preparation.upgradeHeaders = make(http.Header)
+	preparation.upgradeHeaders.Add("Set-Cookie", webSessionOwnerCookie(
+		ownerToken,
+		requestUsesHTTPS(r, s.ipResolver),
+		time.Now(),
+	).String())
+	return preparation, true
+}
+
+func (s *Server) observeBrowserReconnectToken(token string) (observed, known bool) {
+	if token == "" || s.sessionManager == nil {
+		return false, false
+	}
+	s.sessionAuthorityMu.Lock()
+	defer s.sessionAuthorityMu.Unlock()
+	observed = s.sessionManager.ObserveWebSessionToken(token)
+	if observed {
+		s.activeWebSessionTickets().ObserveSuccessor(token)
+	}
+	return observed, s.sessionManager.IsKnownWebSessionToken(token)
 }
 
 func (s *Server) activateWebSocketClient(
@@ -146,29 +178,12 @@ func (s *Server) activateWebSocketClient(
 	negotiated negotiatedClient,
 	clientIP string,
 ) bool {
-	if negotiated.browserTransport {
-		s.sessionAuthorityMu.Lock()
-		defer s.sessionAuthorityMu.Unlock()
-		if negotiated.browserReconnectToken != "" && s.sessionManager != nil {
-			observed := s.sessionManager.ObserveWebSessionToken(negotiated.browserReconnectToken)
-			if observed {
-				s.activeWebSessionTickets().ObserveSuccessor(negotiated.browserReconnectToken)
-			}
-			if !observed {
-				s.recordWebSocketRejection("session_race", clientIP)
-				_ = conn.Close()
-				return false
-			}
-		}
+	unlockAuthority, authorized := s.acquireBrowserWebSocketActivationAuthority(conn, negotiated, clientIP)
+	if !authorized {
+		return false
 	}
-	client := newClientWithLease(s, conn, lease)
-	client.IP = clientIP
-	client.clientVersion = negotiated.version
-	client.clientKind = negotiated.kind
-	client.capabilities = append([]string(nil), negotiated.capabilities...)
-	client.browserTransport = negotiated.browserTransport
-	client.browserReconnectToken = negotiated.browserReconnectToken
-	client.browserTicketOwnerToken = negotiated.browserTicketOwnerToken
+	defer unlockAuthority()
+	client := s.newActivatedWebSocketClient(conn, lease, negotiated, clientIP)
 	s.registerClient(client)
 
 	playerID := client.GetID()
@@ -182,58 +197,118 @@ func (s *Server) activateWebSocketClient(
 		return false
 	}
 
-	connectedPayload := protocol.ConnectedPayload{PlayerID: playerID, PlayerName: playerName}
-	if client.IsBrowserTransport() {
-		ticket, ticketErr := client.IssueWebSessionTicket(
-			playerSession.ReconnectToken,
-			client.BrowserReconnectToken(),
-			nil,
-			nil,
-		)
-		if ticketErr != nil {
-			s.recordWebSocketRejection("session_ticket", clientIP)
-			log.Printf("创建 Web 会话确认票据失败: %v", ticketErr)
-			s.unregisterClient(client)
-			s.sessionManager.DeleteSession(playerID)
-			_ = conn.Close()
-			return false
-		}
-		if !client.setProvisionalWebSessionTicket(ticket) {
-			client.InvalidateWebSessionTicket(ticket)
-			s.recordWebSocketRejection("session_ticket", clientIP)
-			s.unregisterClient(client)
-			s.sessionManager.DeleteSession(playerID)
-			_ = conn.Close()
-			return false
-		}
-		connectedPayload.WebSessionTicket = ticket
-		connectedPayload.ReconnectAvailable = s.sessionManager.CanReconnectToken(client.BrowserReconnectToken())
-	} else {
-		connectedPayload.ReconnectToken = playerSession.ReconnectToken
+	connectedPayload, err := s.connectedPayloadForClient(client, playerSession.ReconnectToken)
+	if err != nil {
+		s.recordWebSocketRejection("session_ticket", clientIP)
+		log.Printf("创建 Web 会话确认票据失败: %v", err)
+		s.cleanupRejectedClientSession(client, conn, playerID, false)
+		return false
 	}
 	connected := codec.MustNewMessage(protocol.MsgConnected, connectedPayload)
 	if err := client.SendMessage(connected); err != nil {
 		s.recordWebSocketRejection("delivery", clientIP)
 		log.Printf("发送连接确认失败: %v", err)
-		s.unregisterClient(client)
-		client.InvalidateProvisionalWebSessionTicket()
-		s.sessionManager.DeleteSession(playerID)
-		_ = conn.Close()
+		s.cleanupRejectedClientSession(client, conn, playerID, true)
 		return false
 	}
 
 	if !s.startClientPumps(client) {
 		s.recordWebSocketRejection("shutdown", clientIP)
-		client.Close()
-		s.unregisterClient(client)
-		client.InvalidateProvisionalWebSessionTicket()
-		s.sessionManager.DeleteSession(playerID)
-		_ = conn.Close()
+		s.cleanupClientPumpStartFailure(client, conn, playerID)
 		return false
 	}
 	if s.metrics != nil {
 		s.metrics.ConnectionAccepted()
 	}
+	s.logAcceptedWebSocket(client, playerID, playerName)
+	return true
+}
+
+func (s *Server) acquireBrowserWebSocketActivationAuthority(
+	conn *websocket.Conn,
+	negotiated negotiatedClient,
+	clientIP string,
+) (func(), bool) {
+	if !negotiated.browserTransport {
+		return func() {}, true
+	}
+	s.sessionAuthorityMu.Lock()
+	if negotiated.browserReconnectToken == "" || s.sessionManager == nil {
+		return s.sessionAuthorityMu.Unlock, true
+	}
+	observed := s.sessionManager.ObserveWebSessionToken(negotiated.browserReconnectToken)
+	if observed {
+		s.activeWebSessionTickets().ObserveSuccessor(negotiated.browserReconnectToken)
+		return s.sessionAuthorityMu.Unlock, true
+	}
+	s.recordWebSocketRejection("session_race", clientIP)
+	_ = conn.Close()
+	s.sessionAuthorityMu.Unlock()
+	return func() {}, false
+}
+
+func (s *Server) newActivatedWebSocketClient(
+	conn *websocket.Conn,
+	lease *connectionLease,
+	negotiated negotiatedClient,
+	clientIP string,
+) *Client {
+	client := newClientWithLease(s, conn, lease)
+	client.IP = clientIP
+	client.clientVersion = negotiated.version
+	client.clientKind = negotiated.kind
+	client.capabilities = append([]string(nil), negotiated.capabilities...)
+	client.browserTransport = negotiated.browserTransport
+	client.browserReconnectToken = negotiated.browserReconnectToken
+	client.browserTicketOwnerToken = negotiated.browserTicketOwnerToken
+	return client
+}
+
+func (s *Server) connectedPayloadForClient(
+	client *Client,
+	reconnectToken string,
+) (protocol.ConnectedPayload, error) {
+	payload := protocol.ConnectedPayload{PlayerID: client.GetID(), PlayerName: client.GetName()}
+	if !client.IsBrowserTransport() {
+		payload.ReconnectToken = reconnectToken
+		return payload, nil
+	}
+	ticket, err := client.IssueWebSessionTicket(reconnectToken, client.BrowserReconnectToken(), nil, nil)
+	if err != nil {
+		return protocol.ConnectedPayload{}, err
+	}
+	if !client.setProvisionalWebSessionTicket(ticket) {
+		client.InvalidateWebSessionTicket(ticket)
+		return protocol.ConnectedPayload{}, errWebSessionTicketEntropy
+	}
+	payload.WebSessionTicket = ticket
+	payload.ReconnectAvailable = s.sessionManager.CanReconnectToken(client.BrowserReconnectToken())
+	return payload, nil
+}
+
+func (s *Server) cleanupRejectedClientSession(
+	client *Client,
+	conn *websocket.Conn,
+	playerID string,
+	invalidateTicket bool,
+) {
+	s.unregisterClient(client)
+	if invalidateTicket {
+		client.InvalidateProvisionalWebSessionTicket()
+	}
+	s.sessionManager.DeleteSession(playerID)
+	_ = conn.Close()
+}
+
+func (s *Server) cleanupClientPumpStartFailure(client *Client, conn *websocket.Conn, playerID string) {
+	client.Close()
+	s.unregisterClient(client)
+	client.InvalidateProvisionalWebSessionTicket()
+	s.sessionManager.DeleteSession(playerID)
+	_ = conn.Close()
+}
+
+func (s *Server) logAcceptedWebSocket(client *Client, playerID, playerName string) {
 	logger := s.logger
 	if logger == nil {
 		logger = slog.Default()
@@ -245,7 +320,6 @@ func (s *Server) activateWebSocketClient(
 		"protocol_version", protocol.ProtocolVersion,
 	)
 	log.Printf("✅ 玩家 %s (%s) 已连接", playerName, playerID)
-	return true
 }
 
 func (s *Server) recordWebSocketRejection(reason, clientIP string) {
@@ -340,8 +414,7 @@ func (s *Server) RetireBrowserSessionClient(playerID string, client types.Client
 }
 
 func (s *Server) drainRetiredBrowserSessionClient(playerID string, retired *Client) {
-	retired.webCommandMu.Lock()
-	retired.webCommandMu.Unlock()
+	waitForBrowserCommandDrain(retired)
 
 	s.sessionAuthorityMu.Lock()
 	defer s.sessionAuthorityMu.Unlock()
@@ -350,6 +423,12 @@ func (s *Server) drainRetiredBrowserSessionClient(playerID string, retired *Clie
 	if len(lineage) == 0 {
 		delete(s.retiredBrowserClients, playerID)
 	}
+}
+
+func waitForBrowserCommandDrain(client *Client) {
+	client.webCommandMu.Lock()
+	client.RevokeWebSessionAuthorization()
+	client.webCommandMu.Unlock()
 }
 
 // collectRetiredBrowserSessionClients is called under sessionAuthorityMu and

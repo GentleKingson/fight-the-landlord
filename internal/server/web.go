@@ -159,102 +159,133 @@ func (s *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
 	secure := requestUsesHTTPS(r, s.ipResolver)
 	http.SetCookie(w, expiredWebSessionCookie(secure))
 	http.SetCookie(w, expiredWebSessionOwnerCookie(secure))
-	if s.sessionManager != nil {
-		token := readWebSessionCookie(r)
-		owner := readWebSessionOwnerCookie(r)
-		if token != "" || owner != "" {
-			drainWork := make(map[*browserRevokeDrain]bool)
-			func() {
-				s.sessionAuthorityMu.Lock()
-				defer s.sessionAuthorityMu.Unlock()
-				browserClientsToClose := make(map[*Client]struct{})
-				credentials := make(map[string]struct{})
-				queueBrowserClient := func(browserClient *Client) {
-					if browserClient == nil {
-						return
-					}
-					if credential := browserClient.browserSessionCredentialSnapshot(); credential != "" {
-						credentials[credential] = struct{}{}
-					}
-					// Deny new commands while authority is still exclusively
-					// serialized. Waiting for an already-running command happens
-					// after releasing the global lock so one slow player cannot
-					// stall every unrelated browser session operation.
-					browserClient.RevokeWebSessionAuthorization()
-					browserClientsToClose[browserClient] = struct{}{}
-				}
-				closePlayer := func(playerID string) {
-					if client := s.GetClientByID(playerID); client != nil {
-						if browserClient, ok := client.(*Client); ok {
-							queueBrowserClient(browserClient)
-						} else {
-							client.Close()
-						}
-					}
-					s.collectRetiredBrowserSessionClients(playerID, browserClientsToClose, credentials)
-				}
-				if token != "" {
-					credentials[token] = struct{}{}
-					if existing := s.browserRevokeDrain(token); existing != nil {
-						drainWork[existing] = false
-					} else {
-						s.collectPendingWebSessionCredentialLineage(token, credentials)
-						playerID, lineage, revoked := s.sessionManager.RevokeSessionByTokenWithLineage(token)
-						for _, credential := range lineage {
-							credentials[credential] = struct{}{}
-						}
-						s.activeWebSessionTickets().InvalidatePendingCredential(token)
-						if revoked {
-							closePlayer(playerID)
-						}
-					}
-				}
-				if owner != "" {
-					credentials[owner] = struct{}{}
-					if existing := s.browserRevokeDrain(owner); existing != nil {
-						drainWork[existing] = false
-					} else {
-						s.activeWebSessionTickets().InvalidatePendingOwner(owner, func(successor string) {
-							credentials[successor] = struct{}{}
-							if existing := s.browserRevokeDrain(successor); existing != nil {
-								drainWork[existing] = false
-								return
-							}
-							playerID, lineage, revoked := s.sessionManager.RevokeSessionByTokenWithLineage(successor)
-							for _, credential := range lineage {
-								credentials[credential] = struct{}{}
-							}
-							if revoked {
-								closePlayer(playerID)
-							}
-						})
-					}
-				}
-				for drain, leader := range s.registerBrowserRevokeDrains(browserClientsToClose, credentials) {
-					if leader || !drainWork[drain] {
-						drainWork[drain] = leader
-					}
-				}
-			}()
-			for drain, leader := range drainWork {
-				if leader {
-					go func() {
-						defer s.completeBrowserRevokeDrain(drain)
-						for browserClient := range drain.clients {
-							browserClient.revokeAuthorizedWebSessionAndClose()
-						}
-						for dependency := range drain.dependencies {
-							<-dependency.done
-						}
-					}()
-				}
-			}
-			for drain := range drainWork {
-				<-drain.done
-			}
+	s.revokeBrowserCredentials(readWebSessionCookie(r), readWebSessionOwnerCookie(r))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type browserRevokePlan struct {
+	server      *Server
+	drainWork   map[*browserRevokeDrain]bool
+	clients     map[*Client]struct{}
+	credentials map[string]struct{}
+}
+
+func (s *Server) revokeBrowserCredentials(token, owner string) {
+	if s.sessionManager == nil || (token == "" && owner == "") {
+		return
+	}
+	plan := s.buildBrowserRevokePlan(token, owner)
+	for drain, leader := range plan.drainWork {
+		if leader {
+			go s.runBrowserRevokeDrain(drain)
 		}
 	}
-	w.WriteHeader(http.StatusNoContent)
+	for drain := range plan.drainWork {
+		<-drain.done
+	}
+}
+
+func (s *Server) buildBrowserRevokePlan(token, owner string) *browserRevokePlan {
+	s.sessionAuthorityMu.Lock()
+	defer s.sessionAuthorityMu.Unlock()
+	plan := &browserRevokePlan{
+		server:      s,
+		drainWork:   make(map[*browserRevokeDrain]bool),
+		clients:     make(map[*Client]struct{}),
+		credentials: make(map[string]struct{}),
+	}
+	plan.revokeToken(token)
+	plan.revokeOwner(owner)
+	for drain, leader := range s.registerBrowserRevokeDrains(plan.clients, plan.credentials) {
+		plan.addDrain(drain, leader)
+	}
+	return plan
+}
+
+func (plan *browserRevokePlan) revokeToken(token string) {
+	if token == "" {
+		return
+	}
+	plan.credentials[token] = struct{}{}
+	if existing := plan.server.browserRevokeDrain(token); existing != nil {
+		plan.addDrain(existing, false)
+		return
+	}
+	plan.server.collectPendingWebSessionCredentialLineage(token, plan.credentials)
+	playerID, lineage, revoked := plan.server.sessionManager.RevokeSessionByTokenWithLineage(token)
+	plan.addCredentialLineage(lineage)
+	plan.server.activeWebSessionTickets().InvalidatePendingCredential(token)
+	if revoked {
+		plan.closePlayer(playerID)
+	}
+}
+
+func (plan *browserRevokePlan) revokeOwner(owner string) {
+	if owner == "" {
+		return
+	}
+	plan.credentials[owner] = struct{}{}
+	if existing := plan.server.browserRevokeDrain(owner); existing != nil {
+		plan.addDrain(existing, false)
+		return
+	}
+	plan.server.activeWebSessionTickets().InvalidatePendingOwner(owner, plan.revokeOwnerSuccessor)
+}
+
+func (plan *browserRevokePlan) revokeOwnerSuccessor(successor string) {
+	plan.credentials[successor] = struct{}{}
+	if existing := plan.server.browserRevokeDrain(successor); existing != nil {
+		plan.addDrain(existing, false)
+		return
+	}
+	playerID, lineage, revoked := plan.server.sessionManager.RevokeSessionByTokenWithLineage(successor)
+	plan.addCredentialLineage(lineage)
+	if revoked {
+		plan.closePlayer(playerID)
+	}
+}
+
+func (plan *browserRevokePlan) addCredentialLineage(lineage []string) {
+	for _, credential := range lineage {
+		plan.credentials[credential] = struct{}{}
+	}
+}
+
+func (plan *browserRevokePlan) closePlayer(playerID string) {
+	client := plan.server.GetClientByID(playerID)
+	if browserClient, ok := client.(*Client); ok {
+		plan.queueBrowserClient(browserClient)
+	} else if client != nil {
+		client.Close()
+	}
+	plan.server.collectRetiredBrowserSessionClients(playerID, plan.clients, plan.credentials)
+}
+
+func (plan *browserRevokePlan) queueBrowserClient(client *Client) {
+	if client == nil {
+		return
+	}
+	if credential := client.browserSessionCredentialSnapshot(); credential != "" {
+		plan.credentials[credential] = struct{}{}
+	}
+	// Deny new commands while authority is exclusively serialized. Exact-client
+	// draining happens only after the global authority lock has been released.
+	client.RevokeWebSessionAuthorization()
+	plan.clients[client] = struct{}{}
+}
+
+func (plan *browserRevokePlan) addDrain(drain *browserRevokeDrain, leader bool) {
+	plan.drainWork[drain] = plan.drainWork[drain] || leader
+}
+
+func (s *Server) runBrowserRevokeDrain(drain *browserRevokeDrain) {
+	defer s.completeBrowserRevokeDrain(drain)
+	for browserClient := range drain.clients {
+		browserClient.revokeAuthorizedWebSessionAndClose()
+	}
+	for dependency := range drain.dependencies {
+		<-dependency.done
+	}
 }
 
 // collectPendingWebSessionCredentialLineage snapshots both sides of an

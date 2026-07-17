@@ -145,55 +145,88 @@ func (c *Client) ReadPump() {
 }
 
 func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
-	if frameType != websocket.BinaryMessage {
-		if c.server != nil && c.server.metrics != nil {
-			c.server.metrics.ProtocolError("non_binary_frame")
-		}
-		_ = c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeInvalidMsg, "消息必须使用二进制 protobuf 帧"))
-		return true
-	}
-	msg, err := codec.Decode(frame)
-	if err != nil {
-		if c.server != nil && c.server.metrics != nil {
-			c.server.metrics.ProtocolError("decode")
-		}
-		log.Printf("消息解析错误: %v", err)
-		_ = c.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+	msg, decoded := c.decodeIncomingFrame(frameType, frame)
+	if !decoded {
 		return true
 	}
 	defer codec.PutMessage(msg)
 	started := time.Now()
-
 	c.attachLegacyChatCommand(msg)
+	requestID, valid := c.validateIncomingCommand(msg, started)
+	if !valid {
+		return true
+	}
+	return c.handleValidatedIncomingCommand(msg, requestID, started)
+}
+
+func (c *Client) decodeIncomingFrame(frameType int, frame []byte) (*protocol.Message, bool) {
+	if frameType != websocket.BinaryMessage {
+		c.recordProtocolError("non_binary_frame")
+		_ = c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeInvalidMsg, "消息必须使用二进制 protobuf 帧"))
+		return nil, false
+	}
+	msg, err := codec.Decode(frame)
+	if err != nil {
+		c.recordProtocolError("decode")
+		log.Printf("消息解析错误: %v", err)
+		_ = c.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+		return nil, false
+	}
+	return msg, true
+}
+
+func (c *Client) recordProtocolError(reason string) {
+	if c.server != nil && c.server.metrics != nil {
+		c.server.metrics.ProtocolError(reason)
+	}
+}
+
+func (c *Client) validateIncomingCommand(msg *protocol.Message, started time.Time) (string, bool) {
 	requestID := ""
 	if msg.Command != nil {
 		requestID = msg.Command.RequestID
 	}
-	if !isClientCommand(msg.Type) || !validRequestID(requestID) {
-		if c.server != nil && c.server.metrics != nil {
-			reason := "invalid_request_id"
-			if !isClientCommand(msg.Type) {
-				reason = "invalid_command"
-			}
-			c.server.metrics.ProtocolError(reason)
-			c.server.metrics.ObserveCommand(string(msg.Type), "invalid", time.Since(started))
-		}
-		correlatedRequestID := requestID
-		if !validRequestID(correlatedRequestID) {
-			correlatedRequestID = ""
-		}
-		response := codec.NewCorrelatedCommandErrorMessage(
-			protocol.ErrCodeInvalidMsg,
-			"无效的命令或 request_id",
-			correlatedRequestID,
-			msg.Type,
-		)
-		if correlatedRequestID == "" {
-			response.Command = nil
-		}
-		_ = c.SendMessage(response)
-		return true
+	if isClientCommand(msg.Type) && validRequestID(requestID) {
+		return requestID, true
 	}
+	c.rejectInvalidIncomingCommand(msg.Type, requestID, started)
+	return "", false
+}
+
+func (c *Client) rejectInvalidIncomingCommand(
+	messageType protocol.MessageType,
+	requestID string,
+	started time.Time,
+) {
+	reason := "invalid_request_id"
+	if !isClientCommand(messageType) {
+		reason = "invalid_command"
+	}
+	if c.server != nil && c.server.metrics != nil {
+		c.server.metrics.ProtocolError(reason)
+		c.server.metrics.ObserveCommand(string(messageType), "invalid", time.Since(started))
+	}
+	correlatedRequestID := requestID
+	if !validRequestID(correlatedRequestID) {
+		correlatedRequestID = ""
+	}
+	response := codec.NewCorrelatedCommandErrorMessage(
+		protocol.ErrCodeInvalidMsg,
+		"无效的命令或 request_id",
+		correlatedRequestID,
+		messageType,
+	)
+	if correlatedRequestID == "" {
+		response.Command = nil
+	}
+	_ = c.SendMessage(response)
+}
+
+func (c *Client) handleValidatedIncomingCommand(
+	msg *protocol.Message,
+	requestID string,
+	started time.Time,
+) bool {
 	releaseAuthority, authorized := c.beginBrowserCommandAuthority(msg.Type)
 	if !authorized {
 		_ = c.SendMessage(codec.NewCorrelatedCommandErrorMessage(
@@ -210,42 +243,10 @@ func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
 	cache := c.server.activeCommandCache()
 	lookup, err := cache.begin(playerID, requestID, commandFingerprint(msg))
 	if err != nil {
-		code := protocol.ErrCodeCommandCacheFull
-		result := "unavailable"
-		if errors.Is(err, errRequestConflict) {
-			code = protocol.ErrCodeRequestConflict
-			result = "conflict"
-			if c.server.metrics != nil {
-				c.server.metrics.IdempotencyConflict()
-			}
-		}
-		if c.server.metrics != nil {
-			c.server.metrics.ObserveCommand(string(msg.Type), result, time.Since(started))
-		}
-		_ = c.SendMessage(codec.NewCorrelatedCommandErrorMessage(code, "", requestID, msg.Type))
+		c.rejectCommandCacheLookup(msg.Type, requestID, started, err)
 		return true
 	}
-	if len(lookup.responses) > 0 {
-		if c.server.metrics != nil {
-			c.server.metrics.IdempotencyHit()
-			c.server.metrics.ObserveCommand(string(msg.Type), "cache_hit", time.Since(started))
-		}
-		c.replayCommandResponses(lookup.responses)
-		return true
-	}
-	if lookup.wait != nil {
-		if c.server.metrics != nil {
-			c.server.metrics.IdempotencyHit()
-		}
-		c.initializeLifecycle()
-		select {
-		case <-lookup.wait:
-			c.replayCommandResponses(cache.responsesAfter(lookup.entry))
-		case <-c.done:
-		}
-		if c.server.metrics != nil {
-			c.server.metrics.ObserveCommand(string(msg.Type), "cache_hit", time.Since(started))
-		}
+	if c.replayCachedCommand(cache, lookup, msg.Type, started) {
 		return true
 	}
 
@@ -262,6 +263,59 @@ func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
 		c.server.metrics.ObserveCommand(string(msg.Type), result, time.Since(started))
 	}
 	return true
+}
+
+func (c *Client) rejectCommandCacheLookup(
+	messageType protocol.MessageType,
+	requestID string,
+	started time.Time,
+	err error,
+) {
+	code := protocol.ErrCodeCommandCacheFull
+	result := "unavailable"
+	if errors.Is(err, errRequestConflict) {
+		code = protocol.ErrCodeRequestConflict
+		result = "conflict"
+		if c.server.metrics != nil {
+			c.server.metrics.IdempotencyConflict()
+		}
+	}
+	if c.server.metrics != nil {
+		c.server.metrics.ObserveCommand(string(messageType), result, time.Since(started))
+	}
+	_ = c.SendMessage(codec.NewCorrelatedCommandErrorMessage(code, "", requestID, messageType))
+}
+
+func (c *Client) replayCachedCommand(
+	cache *commandCache,
+	lookup commandCacheLookup,
+	messageType protocol.MessageType,
+	started time.Time,
+) bool {
+	if len(lookup.responses) > 0 {
+		if c.server.metrics != nil {
+			c.server.metrics.IdempotencyHit()
+			c.server.metrics.ObserveCommand(string(messageType), "cache_hit", time.Since(started))
+		}
+		c.replayCommandResponses(lookup.responses)
+		return true
+	}
+	if lookup.wait != nil {
+		if c.server.metrics != nil {
+			c.server.metrics.IdempotencyHit()
+		}
+		c.initializeLifecycle()
+		select {
+		case <-lookup.wait:
+			c.replayCommandResponses(cache.responsesAfter(lookup.entry))
+		case <-c.done:
+		}
+		if c.server.metrics != nil {
+			c.server.metrics.ObserveCommand(string(messageType), "cache_hit", time.Since(started))
+		}
+		return true
+	}
+	return false
 }
 
 func (c *Client) checkMessageRateLimit(

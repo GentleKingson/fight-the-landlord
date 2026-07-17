@@ -302,7 +302,11 @@ func (sm *SessionManager) RevokeSessionByTokenWithPlayer(token string) (string, 
 // the live lineage. Callers use this uncapped set for in-flight response
 // barriers; unlike revokedWebTokens it must not be truncated by tombstone
 // capacity.
-func (sm *SessionManager) RevokeSessionByTokenWithLineage(token string) (string, []string, bool) {
+func (sm *SessionManager) RevokeSessionByTokenWithLineage(token string) (
+	playerID string,
+	lineage []string,
+	revoked bool,
+) {
 	if token == "" {
 		return "", nil, false
 	}
@@ -327,7 +331,7 @@ func (sm *SessionManager) RevokeSessionByTokenWithLineage(token string) (string,
 		}
 		return "", nil, false
 	}
-	lineage := sm.revokeBrowserLineageLocked(playerID)
+	lineage = sm.revokeBrowserLineageLocked(playerID)
 	return playerID, lineage, true
 }
 
@@ -415,7 +419,6 @@ func (sm *SessionManager) restoreSessionLocked(
 	token, playerID, temporaryPlayerID string,
 	browserPending bool,
 ) (*RestoredSession, error) {
-
 	storedPlayerID, ok := sm.tokens[token]
 	if !ok || storedPlayerID != playerID {
 		return nil, ErrInvalidReconnect

@@ -257,7 +257,7 @@ func TestBrowserCookieReconnectRotatesOnlyAfterCommittedResponse(t *testing.T) {
 	}
 	require.Error(t, busyErr)
 	require.NotNil(t, busyResponse)
-	busyResponse.Body.Close()
+	require.NoError(t, busyResponse.Body.Close())
 	assert.Equal(t, http.StatusConflict, busyResponse.StatusCode, "an active pending predecessor must not mint a fresh identity")
 	rotatedCookie := commitBrowserTicket(t, url, reconnected.WebSessionTicket, firstCookie)
 	assert.NotEqual(t, firstCookie.Value, rotatedCookie.Value)
@@ -299,7 +299,7 @@ func TestBrowserOpeningHandshakeReplacesPreseededOwnerAndBindsInitialTicket(t *t
 	request.AddCookie(preseeded)
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
-	response.Body.Close()
+	require.NoError(t, response.Body.Close())
 	assert.Equal(t, http.StatusUnauthorized, response.StatusCode)
 
 	cookie := commitBrowserTicket(t, url, connected.WebSessionTicket, issuedOwner)
@@ -558,6 +558,7 @@ func TestValidateClientTransportSeparatesBrowserAndOriginlessClients(t *testing.
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 			reason := validateClientTransport(testCase.browserTransport, testCase.clientKind)
 			if testCase.accepted {
 				assert.Empty(t, reason)
