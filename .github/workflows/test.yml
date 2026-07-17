@@ -88,7 +88,19 @@ jobs:
         # Use ci tag to skip sound tests/deps
         run: |
           set -o pipefail
-          go test -tags=ci -race -p 4 -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee go-race.log
+          go test -tags=ci -race -p 4 -count=1 -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee go-race.log
+
+      - name: Enforce coverage baseline
+        run: ./scripts/check-coverage.sh coverage.out
+
+      - name: Run short fuzz smoke
+        env:
+          FUZZ_TIME: 2s
+          FUZZ_TIMEOUT: 20m
+          FUZZ_PARALLEL: "1"
+        run: |
+          set -o pipefail
+          ./scripts/run-fuzz-tests.sh 2>&1 | tee fuzz-smoke.log
 
       - name: Upload Go race and coverage artifacts
         if: always()
@@ -98,6 +110,7 @@ jobs:
           path: |
             go-race.log
             coverage.out
+            fuzz-smoke.log
           if-no-files-found: warn
 
       - name: Save Go cache

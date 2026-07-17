@@ -621,7 +621,10 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 			RoomCode:         "123456",
 			WebSessionTicket: "rotated-ticket",
 			GameState: &protocol.GameStateDTO{
-				Phase: "ended",
+				Phase:           "ended",
+				SnapshotVersion: 42,
+				GameID:          "game-roundtrip-7",
+				TurnID:          19,
 				Players: []protocol.PlayerInfo{
 					{ID: "p1", Name: "Player1", Seat: 0, IsLandlord: true},
 				},
@@ -657,6 +660,9 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 		assert.Equal(t, "ended", result.GameState.Phase)
 		assert.True(t, result.GameState.MustPlay)
 		assert.Equal(t, original.WebSessionTicket, result.WebSessionTicket)
+		assert.Equal(t, original.GameState.SnapshotVersion, result.GameState.SnapshotVersion)
+		assert.Equal(t, original.GameState.GameID, result.GameState.GameID)
+		assert.Equal(t, original.GameState.TurnID, result.GameState.TurnID)
 		require.NotNil(t, result.GameState.Settlement)
 		assert.Equal(t, original.GameState.Settlement, result.GameState.Settlement)
 	})

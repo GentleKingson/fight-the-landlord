@@ -85,6 +85,7 @@ func Decode(data []byte) (*protocol.Message, error) {
 	msg := GetMessage()
 	typeName := msgtype.ProtoMessageTypeToString(pbMsg.Type)
 	if typeName == "unknown" {
+		PutMessage(msg)
 		return nil, fmt.Errorf("unknown protobuf message type %d", pbMsg.Type)
 	}
 	msg.Type = protocol.MessageType(typeName)
