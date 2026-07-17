@@ -49,7 +49,7 @@ jq -e '
     "published": "6379",
     "protocol": "tcp"
   }] and
-  (.services["redis-debug"].labels["io.palemoky.fight-the-landlord.purpose"] |
+  (.services["redis-debug"].labels["io.gentlekingson.fight-the-landlord.purpose"] |
     contains("DO NOT USE IN PRODUCTION"))
 ' <<<"$debug_config" >/dev/null
 

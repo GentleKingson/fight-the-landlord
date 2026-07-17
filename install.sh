@@ -1,6 +1,6 @@
 #!/bin/bash
 # 斗地主客户端一键安装脚本
-# 使用方法: curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/install.sh | bash
+# 使用方法: curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.sh | bash
 
 set -e
 
@@ -59,7 +59,7 @@ detect_platform() {
 # 获取最新版本
 get_latest_version() {
     info "获取最新版本..."
-    LATEST_VERSION=$(curl -fsSL https://api.github.com/repos/palemoky/fight-the-landlord/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    LATEST_VERSION=$(curl -fsSL https://api.github.com/repos/GentleKingson/fight-the-landlord/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
     if [ -z "$LATEST_VERSION" ]; then
         error "无法获取最新版本"
@@ -71,7 +71,7 @@ get_latest_version() {
 # 下载二进制文件
 download_binary() {
     BINARY_NAME="fight-the-landlord-${OS}-${ARCH}"
-    DOWNLOAD_URL="https://github.com/palemoky/fight-the-landlord/releases/download/${LATEST_VERSION}/${BINARY_NAME}"
+    DOWNLOAD_URL="https://github.com/GentleKingson/fight-the-landlord/releases/download/${LATEST_VERSION}/${BINARY_NAME}"
     CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
     info "下载客户端..."

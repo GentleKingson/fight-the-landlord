@@ -1,5 +1,5 @@
 # 斗地主客户端一键安装脚本 (Windows)
-# 使用方法: irm https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/install.ps1 | iex
+# 使用方法: irm https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -24,7 +24,7 @@ function Write-Error-Custom {
 function Get-LatestVersion {
     Write-Info "获取最新版本..."
     try {
-        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/palemoky/fight-the-landlord/releases/latest"
+        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/GentleKingson/fight-the-landlord/releases/latest"
         $version = $response.tag_name
         Write-Info "最新版本: $version"
         return $version
@@ -39,7 +39,7 @@ function Download-Binary {
     param([string]$Version)
 
     $binaryName = "fight-the-landlord-windows-amd64.exe"
-    $downloadUrl = "https://github.com/palemoky/fight-the-landlord/releases/download/$Version/$binaryName"
+    $downloadUrl = "https://github.com/GentleKingson/fight-the-landlord/releases/download/$Version/$binaryName"
 
     Write-Info "下载客户端..."
 

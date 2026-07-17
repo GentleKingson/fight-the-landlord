@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/logo.png" alt="Logo" height="100px" />
+    <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/logo.png" alt="Logo" height="100px" />
 
 # 🎮 斗地主
 
@@ -7,13 +7,18 @@
 
 基于 Go 语言实现的斗地主游戏，支持联网对战、断线重连、智能机器人等功能。
 
-[![Docker Image Size](https://img.shields.io/docker/image-size/palemoky/fight-the-landlord/latest)](https://hub.docker.com/r/palemoky/fight-the-landlord)
-[![Test](https://github.com/palemoky/fight-the-landlord/actions/workflows/test.yml/badge.svg)](https://github.com/palemoky/fight-the-landlord/actions/workflows/test.yml)
-[![Release](https://github.com/palemoky/fight-the-landlord/actions/workflows/release.yml/badge.svg)](https://github.com/palemoky/fight-the-landlord/actions/workflows/release.yml)
+[![Docker Image Size](https://img.shields.io/docker/image-size/gentlekingson/fight-the-landlord/latest)](https://hub.docker.com/r/gentlekingson/fight-the-landlord)
+[![Test](https://github.com/GentleKingson/fight-the-landlord/actions/workflows/test.yml/badge.svg)](https://github.com/GentleKingson/fight-the-landlord/actions/workflows/test.yml)
+[![Release](https://github.com/GentleKingson/fight-the-landlord/actions/workflows/release.yml/badge.svg)](https://github.com/GentleKingson/fight-the-landlord/actions/workflows/release.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/palemoky/fight-the-landlord)](https://goreportcard.com/report/github.com/palemoky/fight-the-landlord)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 </div>
+
+> 本仓库是由 [GentleKingson](https://github.com/GentleKingson/fight-the-landlord)
+> 维护的独立 fork，默认安装脚本、发行版本和容器镜像均来自该 fork。
+> 原始上游项目为 [palemoky/fight-the-landlord](https://github.com/palemoky/fight-the-landlord)，
+> Go 模块路径为保持协议和导入兼容而继续使用上游路径。
 
 ## 项目初衷
 
@@ -29,8 +34,8 @@
 ## 游戏截图
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/lobby.png" alt="Lobby" width="45%" />
-  <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/in-game.png" alt="In Game" width="45%" />
+  <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/lobby.png" alt="Lobby" width="45%" />
+  <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/in-game.png" alt="In Game" width="45%" />
 </div>
 
 ## DouZero 机器人出牌演示
@@ -38,8 +43,8 @@
 [DouZero](https://github.com/kwai/DouZero) 是快手开源的基于深度强化学习的斗地主 AI。相比于经常出非法牌型的 LLM 而言，DouZero 能展现出更丰富的高级策略：自由出牌时主动组合复杂牌型、农民间默契配合、精准顶牌与拆牌等，对局体验更接近真人对手。
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/douzero-game.png" alt="Game" width="45%" />
-  <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/douzero-log.png" alt="Log" width="45%" />
+  <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/douzero-game.png" alt="Game" width="45%" />
+  <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/douzero-log.png" alt="Log" width="45%" />
 </div>
 
 ## 快速开始
@@ -49,13 +54,13 @@
 **macOS / Linux**：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.sh | bash
 ```
 
 **Windows (PowerShell)**：
 
 ```powershell
-irm https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.ps1 | iex
 ```
 
 **运行客户端**：
@@ -77,8 +82,8 @@ ddz
 mkdir fight-the-landlord && cd fight-the-landlord
 
 # 2. 下载配置文件
-curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docker-compose.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/.env.example -o .env
+curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/.env.example -o .env
 
 # 3. 修改公开来源等配置，并从 secret manager 注入 Redis 密码（必填）
 vim .env
@@ -170,6 +175,7 @@ npm run dev
 
 **让斗地主回归纯粹 - 无控牌，真公平**
 
-Made with ❤️ by [palemoky](https://github.com/palemoky)
+Upstream created by [palemoky](https://github.com/palemoky). This fork is maintained by
+[GentleKingson](https://github.com/GentleKingson/fight-the-landlord).
 
 </div>

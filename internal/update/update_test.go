@@ -101,6 +101,17 @@ func TestCheck(t *testing.T) {
 	}
 }
 
+func TestReleaseIdentity(t *testing.T) {
+	const wantRepo = "GentleKingson/fight-the-landlord"
+	if Repo != wantRepo {
+		t.Fatalf("Repo = %q, want %q", Repo, wantRepo)
+	}
+	const wantURL = "https://github.com/GentleKingson/fight-the-landlord/releases/download/v1.2.3/fight-the-landlord-linux-amd64"
+	if got := downloadURL("v1.2.3", "fight-the-landlord-linux-amd64"); got != wantURL {
+		t.Fatalf("downloadURL() = %q, want %q", got, wantURL)
+	}
+}
+
 func TestAssetName(t *testing.T) {
 	tests := []struct {
 		goos   string

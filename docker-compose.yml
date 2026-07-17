@@ -1,7 +1,7 @@
 services:
   # 游戏服务器
   poker-server:
-    image: ${GAME_IMAGE:-palemoky/fight-the-landlord}:${IMAGE_TAG:-latest}
+    image: ${GAME_IMAGE:-gentlekingson/fight-the-landlord}:${IMAGE_TAG:-latest}
     restart: unless-stopped
     stop_grace_period: ${GAME_SHUTDOWN_TIMEOUT:-30}m
     stop_signal: SIGTERM
@@ -45,7 +45,7 @@ services:
 
   # DouZero 推理服务
   douzero:
-    image: ${DOUZERO_IMAGE:-palemoky/fight-the-landlord-douzero}:${IMAGE_TAG:-latest}
+    image: ${DOUZERO_IMAGE:-gentlekingson/fight-the-landlord-douzero}:${IMAGE_TAG:-latest}
     profiles: ["douzero"]
     restart: unless-stopped
     networks:
@@ -109,7 +109,7 @@ services:
     networks:
       - poker-network
     labels:
-      io.palemoky.fight-the-landlord.purpose: "LOCAL DEBUG ONLY - DO NOT USE IN PRODUCTION"
+      io.gentlekingson.fight-the-landlord.purpose: "LOCAL DEBUG ONLY - DO NOT USE IN PRODUCTION"
 
 networks:
   poker-network:

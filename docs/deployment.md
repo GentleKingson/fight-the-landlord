@@ -4,6 +4,11 @@
 `webui` build tag 将资源嵌入服务端二进制。浏览器页面、`/ws`、`/health`
 和 `/version` 因此共享同一来源，不需要单独维护静态 Web 容器。
 
+本文档对应维护 fork `GentleKingson/fight-the-landlord`。Compose 默认拉取
+`gentlekingson/fight-the-landlord`，可选 DouZero 服务默认拉取
+`gentlekingson/fight-the-landlord-douzero`。上游 `palemoky` 项目仅作为来源
+归属和兼容模块路径，不是本 fork 的默认部署源。
+
 ## 构建镜像
 
 Dockerfile 默认使用按多架构 manifest digest 固定的官方 Go/Node 构建镜像和
