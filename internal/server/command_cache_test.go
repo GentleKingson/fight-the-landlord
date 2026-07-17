@@ -121,11 +121,13 @@ func TestClientSameRequestReplaysTheFirstQueryResult(t *testing.T) {
 
 func TestCommandHandlerPanicIsNotConvertedIntoACachedSuccess(t *testing.T) {
 	server := &Server{commandCache: newCommandCache(32, time.Minute)}
-	// A production server always provides a leaderboard. Leaving it nil here
-	// gives the test a deterministic handler panic without a recovery shim.
-	server.handler = serverhandler.NewHandler(serverhandler.HandlerDeps{})
+	panicServer := new(testutil.MockServer)
+	panicServer.On("GetOnlineCount").Run(func(mock.Arguments) {
+		panic("deterministic handler panic")
+	}).Return(0)
+	server.handler = serverhandler.NewHandler(serverhandler.HandlerDeps{Server: panicServer})
 	client := NewClient(server, nil)
-	message := codec.MustNewMessage(protocol.MsgGetStats, nil)
+	message := codec.MustNewMessage(protocol.MsgGetOnlineCount, nil)
 	message.Command = &protocol.CommandMeta{RequestID: "panic-must-unwind"}
 	frame := encodeCommandTestFrame(t, message)
 
