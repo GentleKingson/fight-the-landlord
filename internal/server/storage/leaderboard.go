@@ -239,10 +239,12 @@ func (lm *LeaderboardManager) RecordGameResult(
 			stats.TotalGames++
 			stats.LastPlayedAt = now.Unix()
 
+			previousScore := stats.Score
 			scoreChange := updateRoleStats(stats, isLandlord, isWinner)
 			updateWinLossStats(stats, isWinner)
 			scoreChange += calculateStreakBonus(stats.CurrentStreak)
 			stats.Score = max(0, stats.Score+scoreChange)
+			periodScoreChange := stats.Score - previousScore
 
 			data, err := json.Marshal(stats)
 			if err != nil {
@@ -251,9 +253,9 @@ func (lm *LeaderboardManager) RecordGameResult(
 			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 				pipe.Set(ctx, statsKey, data, 0)
 				pipe.ZAdd(ctx, leaderboardKey, redis.Z{Score: float64(stats.Score), Member: playerID})
-				pipe.ZIncrBy(ctx, dailyKey, float64(scoreChange), playerID)
+				pipe.ZIncrBy(ctx, dailyKey, float64(periodScoreChange), playerID)
 				pipe.Expire(ctx, dailyKey, dailyLeaderboardTTL)
-				pipe.ZIncrBy(ctx, weeklyKey, float64(scoreChange), playerID)
+				pipe.ZIncrBy(ctx, weeklyKey, float64(periodScoreChange), playerID)
 				pipe.Expire(ctx, weeklyKey, weeklyLeaderboardTTL)
 				pipe.SAdd(ctx, settlementKey, playerID)
 				return nil

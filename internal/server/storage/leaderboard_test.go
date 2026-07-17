@@ -128,6 +128,22 @@ func TestLeaderboardPeriodicScoresAndClockBoundaries(t *testing.T) {
 	assert.Equal(t, 15, daily[1].Score)
 }
 
+func TestLeaderboardPeriodicScoreUsesAppliedDelta(t *testing.T) {
+	t.Parallel()
+	lm, _, _ := newTestLeaderboardManager(t)
+	ctx := context.Background()
+
+	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Player1", false, false))
+	stats, err := lm.GetPlayerStats(ctx, "p1")
+	require.NoError(t, err)
+	assert.Zero(t, stats.Score)
+
+	daily, err := lm.GetLeaderboard(ctx, LeaderboardTypeDaily, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, daily, 1)
+	assert.Zero(t, daily[0].Score, "period score must reflect the score actually applied after the zero floor")
+}
+
 func TestLeaderboardPaginationAndLimitBounds(t *testing.T) {
 	t.Parallel()
 	lm, _, _ := newTestLeaderboardManager(t)
