@@ -1,10 +1,18 @@
 import { spawnSync } from 'node:child_process';
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Browser,
+  type BrowserContext,
+  type Page
+} from '@playwright/test';
 
 const composeProject = process.env.E2E_COMPOSE_PROJECT_NAME;
 const composeFile = process.env.E2E_COMPOSE_FILE;
 const redisService = process.env.E2E_REDIS_SERVICE ?? 'redis';
 const serverService = process.env.E2E_SERVER_SERVICE ?? 'poker-server';
+const sessionCookieName = 'ddz_web_session';
 
 test.describe.serial('production fault recovery', () => {
   test('queued matching is canceled explicitly and when the client disconnects', async ({ browser }, testInfo) => {
@@ -70,7 +78,7 @@ test.describe.serial('production fault recovery', () => {
     }
   });
 
-  test('SIGTERM performs a graceful shutdown and clients reconnect after restart', async ({ browser }, testInfo) => {
+  test('SIGTERM performs a graceful shutdown and clients reconnect after restart', async ({ browser, request }, testInfo) => {
     requireComposeControl();
     const context = await browser.newContext({
       recordVideo: { dir: testInfo.outputPath('video'), size: { width: 640, height: 400 } }
@@ -79,16 +87,19 @@ test.describe.serial('production fault recovery', () => {
 
     try {
       await openLobby(page);
+      await expect.poll(() => webSessionCookieValue(context)).not.toBe('');
+      const originalSessionCookie = await webSessionCookieValue(context);
       runCompose(['stop', '--timeout', '90', serverService]);
 
-      await expect.poll(() => endpointStatus('/livez'), { timeout: 15_000 }).toBe(0);
+      await expect.poll(() => endpointStatus(request, '/livez'), { timeout: 15_000 }).not.toBe(200);
       await expect(page.getByRole('status')).toBeVisible();
       expect(runCompose(['logs', '--no-color', serverService])).toContain('服务器已关闭');
 
       runCompose(['up', '-d', '--wait', serverService]);
-      await expect.poll(() => endpointStatus('/readyz'), { timeout: 30_000 }).toBe(200);
+      await expect.poll(() => endpointStatus(request, '/readyz'), { timeout: 30_000 }).toBe(200);
       await expect(page.getByRole('button', { name: /创建房间/ })).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByRole('status')).toContainText('已作为新玩家连接');
+      await expect.poll(() => webSessionCookieValue(context)).not.toBe(originalSessionCookie);
+      await expect(page.getByRole('status')).toHaveCount(0);
     } finally {
       await context.close();
       ensureServerRunning();
@@ -252,12 +263,16 @@ function ensureServerRunning(): void {
   runCompose(['up', '-d', '--wait', serverService]);
 }
 
-async function endpointStatus(path: string): Promise<number> {
-  const baseURL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:1782';
+async function endpointStatus(request: APIRequestContext, path: string): Promise<number> {
   try {
-    const response = await fetch(new URL(path, baseURL), { signal: AbortSignal.timeout(1_000) });
-    return response.status;
+    const response = await request.get(path, { timeout: 1_000 });
+    return response.status();
   } catch {
     return 0;
   }
+}
+
+async function webSessionCookieValue(context: BrowserContext): Promise<string> {
+  const cookie = (await context.cookies()).find(({ name }) => name === sessionCookieName);
+  return cookie?.value ?? '';
 }
