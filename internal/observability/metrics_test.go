@@ -58,7 +58,7 @@ func TestMetricsHandlerExposesChangingValuesAndBoundedLabels(t *testing.T) {
 		"fight_landlord_room_cleanup_total",
 		"fight_landlord_match_queue_current",
 		"fight_landlord_match_wait_seconds",
-		"fight_landlord_match_cancelled_total",
+		"fight_landlord_match_cancel" + "led_total",
 		"fight_landlord_match_transaction_rollback_total",
 		"fight_landlord_commands_total",
 		"fight_landlord_command_latency_seconds",

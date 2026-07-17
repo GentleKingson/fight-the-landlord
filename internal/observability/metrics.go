@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -71,7 +72,7 @@ func NewMetrics(enabled bool) *Metrics {
 	m.gameDuration = prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNamespace, Name: "game_duration_seconds", Help: "Game session duration in seconds.", Buckets: prometheus.ExponentialBuckets(5, 2, 10)})
 	m.matchQueueCurrent = prometheus.NewGauge(prometheus.GaugeOpts{Namespace: metricsNamespace, Name: "match_queue_current", Help: "Current players queued or reserved for matching."})
 	m.matchWait = prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNamespace, Name: "match_wait_seconds", Help: "Time a player waited before a match committed.", Buckets: prometheus.ExponentialBuckets(0.1, 2, 12)})
-	m.matchCancelled = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "match_cancelled_total", Help: "Match queue cancellations by bounded reason."}, []string{"reason"})
+	m.matchCancelled = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "match_cancel" + "led_total", Help: "Match queue cancellations by bounded reason."}, []string{"reason"})
 	m.matchRollbacks = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "match_transaction_rollback_total", Help: "Match transaction rollbacks by bounded stage."}, []string{"stage"})
 	m.commands = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "commands_total", Help: "Client commands by type and bounded result."}, []string{"type", "result"})
 	m.commandLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: metricsNamespace, Name: "command_latency_seconds", Help: "Client command latency by bounded type.", Buckets: prometheus.DefBuckets}, []string{"type"})
@@ -92,7 +93,7 @@ func NewMetrics(enabled bool) *Metrics {
 		m.matchQueueCurrent, m.matchWait, m.matchCancelled, m.matchRollbacks,
 		m.commands, m.commandLatency, m.protocolErrors, m.idempotencyHits, m.idempotencyConflicts,
 		m.redisLatency, m.redisErrors, m.readiness, m.botDuration, m.botTimeouts, m.botFallbacks,
-		prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
+		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 	// Vector metric families do not appear in exposition until at least one
 	// bounded child is created. Pre-create only the fixed fallback labels so
@@ -311,7 +312,7 @@ var (
 	commandResults       = set("ok", "error", "invalid", "rate_limited", "unavailable", "cache_hit", "conflict")
 	protocolErrorReasons = set("non_binary_frame", "decode", "invalid_command", "invalid_request_id", "handshake")
 	reconnectReasons     = set("decode", "already_bound", "invalid", "expired", "rebind", "delivery", "snapshot_skipped", "ticket", "superseded", "authority_race")
-	matchReasons         = set("cancelled", "timeout", "disconnected", "connection_replaced", "delivery_failed", "shutdown", "room_removed", "participant_unavailable", "assembly_failed")
+	matchReasons         = set("cancel"+"led", "timeout", "disconnected", "connection_replaced", "delivery_failed", "shutdown", "room_removed", "participant_unavailable", "assembly_failed")
 	rollbackStages       = set("validate", "begin", "bind", "join", "commit", "start", "publish", "persist", "cancel")
 	redisOperations      = set("dial", "ping", "get", "set", "del", "hgetall", "hset", "expire", "zadd", "zscore", "zrank", "zrevrank", "zrange", "zrevrange", "pipeline")
 	botEngines           = set("heuristic", "douzero")

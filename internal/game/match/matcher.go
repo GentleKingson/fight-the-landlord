@@ -576,32 +576,8 @@ func (m *Matcher) attemptWorker(attempt *matchAttempt) {
 }
 
 func (m *Matcher) runAttempt(attempt *matchAttempt) {
-	if err := m.validateAttempt(attempt); err != nil {
-		m.failAttempt(attempt, nil, false, "participant_unavailable", err)
-		return
-	}
-	if m.beginRoom == nil {
-		m.failAttempt(attempt, nil, false, "assembly_failed", errors.New("match room assembler unavailable"))
-		return
-	}
-
-	clients := attemptClients(attempt)
-	assembly, err := m.beginRoom(attempt.ctx, clients[0])
-	if err != nil {
-		m.failAttempt(attempt, nil, false, "assembly_failed", err)
-		return
-	}
-	gameRoom := assembly.Room()
-	if gameRoom == nil {
-		m.failAttempt(attempt, assembly, false, "assembly_failed", errors.New("room transaction began without a room identity"))
-		return
-	}
-	if !m.bindAttemptRoom(attempt, gameRoom) {
-		m.failAttempt(attempt, assembly, false, protocol.MatchCancelReason, attempt.ctx.Err())
-		return
-	}
-	if err := m.validateAttempt(attempt); err != nil {
-		m.failAttempt(attempt, assembly, false, "participant_unavailable", err)
+	assembly, gameRoom, clients, prepared := m.prepareAttempt(attempt)
+	if !prepared {
 		return
 	}
 	if !m.joinAttemptParticipants(attempt, assembly, clients[1:]) {
@@ -642,6 +618,40 @@ func (m *Matcher) runAttempt(attempt *matchAttempt) {
 	m.reportQueueCurrent()
 
 	m.publishCommittedMatch(attempt, gameRoom, clients, startingPlayers)
+}
+
+func (m *Matcher) prepareAttempt(
+	attempt *matchAttempt,
+) (assembly RoomAssembly, gameRoom *room.Room, clients []types.ClientInterface, prepared bool) {
+	if err := m.validateAttempt(attempt); err != nil {
+		m.failAttempt(attempt, nil, false, "participant_unavailable", err)
+		return nil, nil, nil, false
+	}
+	if m.beginRoom == nil {
+		m.failAttempt(attempt, nil, false, "assembly_failed", errors.New("match room assembler unavailable"))
+		return nil, nil, nil, false
+	}
+
+	clients = attemptClients(attempt)
+	assembly, err := m.beginRoom(attempt.ctx, clients[0])
+	if err != nil {
+		m.failAttempt(attempt, nil, false, "assembly_failed", err)
+		return nil, nil, nil, false
+	}
+	gameRoom = assembly.Room()
+	if gameRoom == nil {
+		m.failAttempt(attempt, assembly, false, "assembly_failed", errors.New("room transaction began without a room identity"))
+		return nil, nil, nil, false
+	}
+	if !m.bindAttemptRoom(attempt, gameRoom) {
+		m.failAttempt(attempt, assembly, false, protocol.MatchCancelReason, attempt.ctx.Err())
+		return nil, nil, nil, false
+	}
+	if err := m.validateAttempt(attempt); err != nil {
+		m.failAttempt(attempt, assembly, false, "participant_unavailable", err)
+		return nil, nil, nil, false
+	}
+	return assembly, gameRoom, clients, true
 }
 
 func (m *Matcher) joinAttemptParticipants(attempt *matchAttempt, assembly RoomAssembly, clients []types.ClientInterface) bool {

@@ -3,7 +3,6 @@ package room
 import (
 	"testing"
 
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
@@ -20,11 +19,11 @@ func TestRoomManagerMetricsTrackPublishedRoomsAndCleanup(t *testing.T) {
 	host := testutil.NewSimpleClient("metrics-host", "Metrics host")
 	gameRoom, err := rm.CreateRoom(host)
 	require.NoError(t, err)
-	require.Equal(t, float64(1), roomMetricValue(t, metrics, "fight_landlord_rooms_current", nil))
+	require.Equal(t, float64(1), roomMetricValue(t, metrics, "fight_landlord_rooms_current"))
 
 	require.True(t, rm.RemoveRoom(gameRoom, RoomRemovalRollback))
-	require.Equal(t, float64(0), roomMetricValue(t, metrics, "fight_landlord_rooms_current", nil))
-	require.Equal(t, float64(1), roomMetricValue(t, metrics, "fight_landlord_room_cleanup_total", nil))
+	require.Equal(t, float64(0), roomMetricValue(t, metrics, "fight_landlord_rooms_current"))
+	require.Equal(t, float64(1), roomMetricValue(t, metrics, "fight_landlord_room_cleanup_total"))
 }
 
 func TestMatchRoomTransactionCommitUpdatesRoomMetric(t *testing.T) {
@@ -42,19 +41,19 @@ func TestMatchRoomTransactionCommitUpdatesRoomMetric(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Join(clients[1]))
 	require.NoError(t, tx.Join(clients[2]))
-	require.Equal(t, float64(0), roomMetricValue(t, metrics, "fight_landlord_rooms_current", nil), "pending rooms are not published")
+	require.Equal(t, float64(0), roomMetricValue(t, metrics, "fight_landlord_rooms_current"), "pending rooms are not published")
 
 	gameRoom, err := tx.Commit()
 	require.NoError(t, err)
 	require.Same(t, tx.Room(), gameRoom)
-	require.Equal(t, float64(1), roomMetricValue(t, metrics, "fight_landlord_rooms_current", nil))
+	require.Equal(t, float64(1), roomMetricValue(t, metrics, "fight_landlord_rooms_current"))
 
 	tx.Rollback()
-	require.Equal(t, float64(0), roomMetricValue(t, metrics, "fight_landlord_rooms_current", nil))
-	require.Equal(t, float64(1), roomMetricValue(t, metrics, "fight_landlord_room_cleanup_total", nil))
+	require.Equal(t, float64(0), roomMetricValue(t, metrics, "fight_landlord_rooms_current"))
+	require.Equal(t, float64(1), roomMetricValue(t, metrics, "fight_landlord_room_cleanup_total"))
 }
 
-func roomMetricValue(t *testing.T, metrics *observability.Metrics, name string, labels map[string]string) float64 {
+func roomMetricValue(t *testing.T, metrics *observability.Metrics, name string) float64 {
 	t.Helper()
 	families, err := metrics.Gatherer().Gather()
 	require.NoError(t, err)
@@ -63,7 +62,7 @@ func roomMetricValue(t *testing.T, metrics *observability.Metrics, name string, 
 			continue
 		}
 		for _, metric := range family.GetMetric() {
-			if !roomMetricLabelsEqual(metric, labels) {
+			if len(metric.GetLabel()) != 0 {
 				continue
 			}
 			if metric.Gauge != nil {
@@ -75,18 +74,6 @@ func roomMetricValue(t *testing.T, metrics *observability.Metrics, name string, 
 			t.Fatalf("metric %s is not a gauge or counter", name)
 		}
 	}
-	t.Fatalf("metric %s with labels %v was not gathered", name, labels)
+	t.Fatalf("metric %s without labels was not gathered", name)
 	return 0
-}
-
-func roomMetricLabelsEqual(metric *dto.Metric, labels map[string]string) bool {
-	if len(metric.GetLabel()) != len(labels) {
-		return false
-	}
-	for _, pair := range metric.GetLabel() {
-		if labels[pair.GetName()] != pair.GetValue() {
-			return false
-		}
-	}
-	return true
 }

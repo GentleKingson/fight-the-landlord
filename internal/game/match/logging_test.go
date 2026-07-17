@@ -15,6 +15,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/observability"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
@@ -44,7 +45,7 @@ func TestMatcherLogsBoundedEnqueueAndRollbackResults(t *testing.T) {
 	require.True(t, matcher.AddToQueue(clients[1]))
 	require.True(t, matcher.AddToQueue(clients[2]))
 	for _, client := range clients {
-		client.waitForMessage(t, "match_cancelled")
+		client.waitForMessage(t, protocol.MsgMatchCancelled)
 	}
 	matcher.workers.Wait()
 

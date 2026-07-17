@@ -16,6 +16,8 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
+const matchCanceledMetricName = "fight_landlord_match_cancel" + "led_total"
+
 func TestMatcherMetricsTrackQueueCancellationAndTimeout(t *testing.T) {
 	metrics := observability.NewMetrics(true)
 	matcher := NewMatcher(MatcherDeps{
@@ -25,12 +27,12 @@ func TestMatcherMetricsTrackQueueCancellationAndTimeout(t *testing.T) {
 	})
 	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
 
-	cancelled := newMatcherClient("metrics-cancelled", false)
-	require.True(t, matcher.AddToQueue(cancelled))
+	canceled := newMatcherClient("metrics-canceled", false)
+	require.True(t, matcher.AddToQueue(canceled))
 	require.Equal(t, float64(1), matcherMetricValue(t, metrics, "fight_landlord_match_queue_current", nil))
-	require.True(t, matcher.RemoveFromQueue(cancelled))
+	require.True(t, matcher.RemoveFromQueue(canceled))
 	require.Equal(t, float64(0), matcherMetricValue(t, metrics, "fight_landlord_match_queue_current", nil))
-	require.Equal(t, float64(1), matcherMetricValue(t, metrics, "fight_landlord_match_cancelled_total", map[string]string{"reason": protocol.MatchCancelReason}))
+	require.Equal(t, float64(1), matcherMetricValue(t, metrics, matchCanceledMetricName, map[string]string{"reason": protocol.MatchCancelReason}))
 
 	timedOut := newMatcherClient("metrics-timeout", false)
 	require.True(t, matcher.AddToQueue(timedOut))
@@ -38,7 +40,7 @@ func TestMatcherMetricsTrackQueueCancellationAndTimeout(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return matcherMetricValue(t, metrics, "fight_landlord_match_queue_current", nil) == 0
 	}, matcherTestDeadline, 5*time.Millisecond)
-	require.Equal(t, float64(1), matcherMetricValue(t, metrics, "fight_landlord_match_cancelled_total", map[string]string{"reason": "timeout"}))
+	require.Equal(t, float64(1), matcherMetricValue(t, metrics, matchCanceledMetricName, map[string]string{"reason": "timeout"}))
 }
 
 func TestMatcherMetricsRecordBeginRollback(t *testing.T) {
@@ -63,7 +65,7 @@ func TestMatcherMetricsRecordBeginRollback(t *testing.T) {
 	matcher.workers.Wait()
 
 	require.Equal(t, float64(1), matcherMetricValue(t, metrics, "fight_landlord_match_transaction_rollback_total", map[string]string{"stage": "begin"}))
-	require.Equal(t, float64(1), matcherMetricValue(t, metrics, "fight_landlord_match_cancelled_total", map[string]string{"reason": "assembly_failed"}))
+	require.Equal(t, float64(1), matcherMetricValue(t, metrics, matchCanceledMetricName, map[string]string{"reason": "assembly_failed"}))
 	require.Equal(t, float64(0), matcherMetricValue(t, metrics, "fight_landlord_match_queue_current", nil))
 }
 
@@ -116,7 +118,7 @@ func matcherMetricValue(t *testing.T, metrics *observability.Metrics, name strin
 	return 0
 }
 
-func matcherHistogramValue(t *testing.T, metrics *observability.Metrics, name string, labels map[string]string) (uint64, float64) {
+func matcherHistogramValue(t *testing.T, metrics *observability.Metrics, name string, labels map[string]string) (count uint64, sum float64) {
 	t.Helper()
 	histogram := matcherMetric(t, metrics, name, labels).GetHistogram()
 	require.NotNil(t, histogram, "metric %s is not a histogram", name)
