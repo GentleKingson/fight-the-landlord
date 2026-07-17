@@ -42,10 +42,12 @@ func (server *operationalTestServer) OperationalState() string {
 	return server.state
 }
 
-func (server *operationalTestServer) AcquireOperationalAdmission(allowDraining bool) (func(), string, bool) {
+func (server *operationalTestServer) AcquireOperationalAdmission(
+	allowDraining bool,
+) (release func(), operationalState string, admitted bool) {
 	server.mu.RLock()
 	state := server.state
-	if state != operationalNormal && state != "future-state" && !(allowDraining && state == operationalDraining) {
+	if state != operationalNormal && state != "future-state" && (!allowDraining || state != operationalDraining) {
 		server.mu.RUnlock()
 		return nil, state, false
 	}
@@ -78,7 +80,11 @@ type resumedRejectionServer struct {
 	*operationalTestServer
 }
 
-func (server *resumedRejectionServer) AcquireOperationalAdmission(bool) (func(), string, bool) {
+func (server *resumedRejectionServer) AcquireOperationalAdmission(bool) (
+	release func(),
+	operationalState string,
+	admitted bool,
+) {
 	server.setOperationalState(operationalNormal)
 	return nil, operationalDraining, false
 }
@@ -185,9 +191,9 @@ func TestOperationalPauseRejectsReadyAndRematchAdmission(t *testing.T) {
 			handler.handleReady(player, false)
 			require.Len(t, player.SentMessages(), 1)
 			assert.Equal(t, protocol.MsgPlayerReady, player.SentMessages()[0].Type)
-			cancelled, err := codec.ParsePayload[protocol.PlayerReadyPayload](player.SentMessages()[0])
+			canceled, err := codec.ParsePayload[protocol.PlayerReadyPayload](player.SentMessages()[0])
 			require.NoError(t, err)
-			assert.False(t, cancelled.Ready)
+			assert.False(t, canceled.Ready)
 		})
 	}
 }

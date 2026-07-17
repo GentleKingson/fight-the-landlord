@@ -59,19 +59,24 @@ func operationalAdmissionErrorCode(state string) int {
 	return protocol.ErrCodeServerMaintenance
 }
 
-func acquireOperationalAdmission(server types.ServerInterface, allowDraining bool) (func(), string, bool) {
+func acquireOperationalAdmission(
+	server types.ServerInterface,
+	allowDraining bool,
+) (release func(), operationalState string, admitted bool) {
 	provider, ok := server.(operationalAdmissionProvider)
 	if ok {
 		return provider.AcquireOperationalAdmission(allowDraining)
 	}
 	state := currentOperationalState(server)
-	if state != operationalNormal && !(allowDraining && state == operationalDraining) {
+	if state != operationalNormal && (!allowDraining || state != operationalDraining) {
 		return nil, state, false
 	}
 	return func() {}, state, true
 }
 
-func acquireReadyAdmission(server types.ServerInterface) (func(), string, bool) {
+func acquireReadyAdmission(
+	server types.ServerInterface,
+) (release func(), operationalState string, admitted bool) {
 	if provider, ok := server.(operationalAdmissionProvider); ok {
 		return provider.AcquireOperationalAdmission(false)
 	}

@@ -293,28 +293,15 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	var startPlayers []PlayerSnapshot
 	var releaseStartLease func()
 	if shouldStart {
-		if rm.startAdmission != nil {
-			var admitted bool
-			releaseStartLease, admitted = rm.startAdmission()
-			if !admitted {
-				player.Ready = previousReady
-				room.mu.Unlock()
-				room.publishMu.Unlock()
-				rm.mu.RUnlock()
-				return ErrGameStartAdmissionRejected
-			}
-		}
-		if err := room.startGameLocked(); err != nil {
-			if releaseStartLease != nil {
-				releaseStartLease()
-			}
+		var err error
+		startPlayers, releaseStartLease, err = rm.startReadyRoomLocked(room)
+		if err != nil {
 			player.Ready = previousReady
 			room.mu.Unlock()
 			room.publishMu.Unlock()
 			rm.mu.RUnlock()
 			return err
 		}
-		startPlayers = room.snapshotPlayersLocked()
 	}
 	callback := rm.onGameStart
 	room.mu.Unlock()
@@ -340,6 +327,29 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	}
 
 	return nil
+}
+
+// startReadyRoomLocked admits and starts a fully ready room while Room.mu is held.
+func (rm *RoomManager) startReadyRoomLocked(room *Room) (
+	players []PlayerSnapshot,
+	releaseStartLease func(),
+	err error,
+) {
+	if rm.startAdmission != nil {
+		var admitted bool
+		releaseStartLease, admitted = rm.startAdmission()
+		if !admitted {
+			return nil, nil, ErrGameStartAdmissionRejected
+		}
+	}
+
+	if err := room.startGameLocked(); err != nil {
+		if releaseStartLease != nil {
+			releaseStartLease()
+		}
+		return nil, nil, err
+	}
+	return room.snapshotPlayersLocked(), releaseStartLease, nil
 }
 
 func (rm *RoomManager) SetOnGameStart(callback func(*Room, []PlayerSnapshot, func())) {

@@ -71,9 +71,10 @@ func (s *Server) setOperationalState(next uint32) bool {
 	}))
 
 	message := ""
-	if next == operationalDraining {
+	switch next {
+	case operationalDraining:
 		message = "服务器正在排空，已停止新房间、新匹配和人机练习"
-	} else if next == operationalMaintenance {
+	case operationalMaintenance:
 		message = "服务器正在维护，已停止新游戏入口"
 	}
 	if message != "" {
@@ -102,13 +103,15 @@ func (s *Server) setOperationalState(next uint32) bool {
 // AcquireOperationalAdmission linearizes short new-entry mutations with an
 // operational transition. Callers must release the guard after the room or
 // matcher mutation has committed.
-func (s *Server) AcquireOperationalAdmission(allowDraining bool) (func(), string, bool) {
+func (s *Server) AcquireOperationalAdmission(
+	allowDraining bool,
+) (release func(), operationalState string, admitted bool) {
 	if s == nil {
 		return nil, OperationalStateNormal, false
 	}
 	s.operationalAdmissionMu.RLock()
 	state := operationalStateName(s.operationalState.Load())
-	if state != OperationalStateNormal && !(allowDraining && state == OperationalStateDraining) {
+	if state != OperationalStateNormal && (!allowDraining || state != OperationalStateDraining) {
 		s.operationalAdmissionMu.RUnlock()
 		return nil, state, false
 	}
@@ -142,7 +145,11 @@ func (s *Server) AcquireGameStartLease() (func(), bool) {
 	}, true
 }
 
-func (s *Server) operationalQuiescenceSnapshot() (string, int, bool) {
+func (s *Server) operationalQuiescenceSnapshot() (
+	stateName string,
+	activeLeases int,
+	inTransition bool,
+) {
 	if s == nil {
 		return OperationalStateNormal, 0, false
 	}

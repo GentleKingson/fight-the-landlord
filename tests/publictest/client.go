@@ -36,12 +36,12 @@ func eventFromMessage(message *protocol.Message) wireEvent {
 		payload:     append([]byte(nil), message.Payload...),
 	}
 	if message.Event != nil {
-		copy := *message.Event
-		event.event = &copy
+		eventMeta := *message.Event
+		event.event = &eventMeta
 	}
 	if message.Command != nil {
-		copy := *message.Command
-		event.command = &copy
+		commandMeta := *message.Command
+		event.command = &commandMeta
 	}
 	return event
 }
@@ -79,9 +79,9 @@ func dialNegotiatedConnection(ctx context.Context, cfg config, inbox chan<- inco
 	if err != nil {
 		return nil, err
 	}
-	fail := func(cause error) (*physicalConnection, error) {
+	fail := func(cause error) error {
 		_ = conn.Close()
-		return nil, cause
+		return cause
 	}
 
 	hello, err := codec.NewMessage(protocol.MsgHello, protocol.HelloPayload{
@@ -91,25 +91,25 @@ func dialNegotiatedConnection(ctx context.Context, cfg config, inbox chan<- inco
 		ClientKind:      protocol.ClientKindTUI,
 	})
 	if err != nil {
-		return fail(fmt.Errorf("build hello: %w", err))
+		return nil, fail(fmt.Errorf("build hello: %w", err))
 	}
 	hello.Command = &protocol.CommandMeta{RequestID: nextRequestID("hello", index)}
 	frame, err := codec.Encode(hello)
 	codec.PutMessage(hello)
 	if err != nil {
-		return fail(fmt.Errorf("encode hello: %w", err))
+		return nil, fail(fmt.Errorf("encode hello: %w", err))
 	}
 	_ = conn.SetWriteDeadline(time.Now().Add(cfg.OperationTimeout))
 	if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
-		return fail(fmt.Errorf("write hello: %w", err))
+		return nil, fail(fmt.Errorf("write hello: %w", err))
 	}
 	message, err := readProtocolMessage(conn, cfg.OperationTimeout)
 	if err != nil {
-		return fail(fmt.Errorf("read negotiation: %w", err))
+		return nil, fail(fmt.Errorf("read negotiation: %w", err))
 	}
 	defer codec.PutMessage(message)
 	if message.Type != protocol.MsgNegotiated {
-		return fail(fmt.Errorf("negotiation returned %s", message.Type))
+		return nil, fail(fmt.Errorf("negotiation returned %s", message.Type))
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 	_ = conn.SetWriteDeadline(time.Time{})
@@ -522,39 +522,14 @@ func (c *gameClient) actionLoop() {
 
 func (c *gameClient) handleAction(action clientAction) {
 	if action.kind == protocol.MsgReady {
-		defer c.room.readyDone(action.gameID)
-		// GameOver is delivered before the room is reopened for ready-up.
-		timer := time.NewTimer(25 * time.Millisecond)
-		select {
-		case <-timer.C:
-		case <-c.ctx.Done():
-			timer.Stop()
-			return
-		}
-		_, latency, err := c.command(c.ctx, protocol.MsgReady, protocol.MsgPlayerReady, nil, "", 0)
-		c.run.recordLatency(latency)
-		if err != nil {
-			c.run.recordError("client %d rematch ready failed: %v", c.index, err)
-			c.room.failGame(action.gameID)
-		}
+		c.handleReadyAction(action)
 		return
 	}
-	pace := time.NewTimer(publicTestActionDelay)
-	select {
-	case <-pace.C:
-	case <-c.ctx.Done():
-		pace.Stop()
+	if !waitForAction(c.ctx, publicTestActionDelay) {
 		return
 	}
-
-	if c.run.shouldDisconnect() {
-		latency, err := c.reconnect(c.ctx)
-		c.run.recordReconnect(latency, err)
-		if err != nil {
-			c.run.recordError("client %d reconnect failed: %v", c.index, err)
-			c.room.failGame(action.gameID)
-			return
-		}
+	if !c.ensureActionConnection(action) {
+		return
 	}
 
 	snapshot := c.stateSnapshot()
@@ -562,29 +537,13 @@ func (c *gameClient) handleAction(action clientAction) {
 		return
 	}
 
-	var commandType, responseType protocol.MessageType
-	var payload any
-	switch action.kind {
-	case protocol.MsgBid:
-		commandType = protocol.MsgBid
-		responseType = protocol.MsgBidResult
-		payload = protocol.BidPayload{Bid: !snapshot.isGrab}
-	case protocol.MsgPlayCards:
-		cards := legalCards(snapshot)
-		if len(cards) == 0 {
-			if snapshot.mustPlay {
-				c.run.recordError("client %d could not produce a mandatory legal play", c.index)
-				c.room.failGame(action.gameID)
-				return
-			}
-			commandType = protocol.MsgPass
-			responseType = protocol.MsgPlayerPass
-		} else {
-			commandType = protocol.MsgPlayCards
-			responseType = protocol.MsgCardPlayed
-			payload = protocol.PlayCardsPayload{Cards: convert.CardsToInfos(cards)}
-		}
-	default:
+	commandType, responseType, payload, ok, err := actionCommand(action.kind, snapshot)
+	if err != nil {
+		c.run.recordError("client %d %v", c.index, err)
+		c.room.failGame(action.gameID)
+		return
+	}
+	if !ok {
 		return
 	}
 
@@ -594,6 +553,78 @@ func (c *gameClient) handleAction(action clientAction) {
 		c.run.recordError("client %d %s failed for game %s turn %d: %v", c.index, commandType, action.gameID, action.turnID, err)
 		c.room.failGame(action.gameID)
 	}
+}
+
+func (c *gameClient) handleReadyAction(action clientAction) {
+	defer c.room.readyDone(action.gameID)
+	// GameOver is delivered before the room is reopened for ready-up.
+	if !waitForAction(c.ctx, 25*time.Millisecond) {
+		return
+	}
+	_, latency, err := c.command(c.ctx, protocol.MsgReady, protocol.MsgPlayerReady, nil, "", 0)
+	c.run.recordLatency(latency)
+	if err != nil {
+		c.run.recordError("client %d rematch ready failed: %v", c.index, err)
+		c.room.failGame(action.gameID)
+	}
+}
+
+func waitForAction(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (c *gameClient) ensureActionConnection(action clientAction) bool {
+	if !c.run.shouldDisconnect() {
+		return true
+	}
+	latency, err := c.reconnect(c.ctx)
+	c.run.recordReconnect(latency, err)
+	if err == nil {
+		return true
+	}
+	c.run.recordError("client %d reconnect failed: %v", c.index, err)
+	c.room.failGame(action.gameID)
+	return false
+}
+
+func actionCommand(kind protocol.MessageType, state clientState) (
+	commandType, responseType protocol.MessageType,
+	payload any,
+	ok bool,
+	err error,
+) {
+	switch kind {
+	case protocol.MsgBid:
+		return protocol.MsgBid, protocol.MsgBidResult, protocol.BidPayload{Bid: !state.isGrab}, true, nil
+	case protocol.MsgPlayCards:
+		return playCommand(state)
+	default:
+		return "", "", nil, false, nil
+	}
+}
+
+func playCommand(state clientState) (
+	commandType, responseType protocol.MessageType,
+	payload any,
+	ok bool,
+	err error,
+) {
+	cards := legalCards(state)
+	if len(cards) > 0 {
+		playPayload := protocol.PlayCardsPayload{Cards: convert.CardsToInfos(cards)}
+		return protocol.MsgPlayCards, protocol.MsgCardPlayed, playPayload, true, nil
+	}
+	if state.mustPlay {
+		return "", "", nil, false, errors.New("could not produce a mandatory legal play")
+	}
+	return protocol.MsgPass, protocol.MsgPlayerPass, nil, true, nil
 }
 
 func legalCards(state clientState) []card.Card {
@@ -609,9 +640,9 @@ func legalCards(state clientState) []card.Card {
 func (c *gameClient) stateSnapshot() clientState {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
-	copy := c.state
-	copy.hand = slices.Clone(c.state.hand)
-	return copy
+	snapshot := c.state
+	snapshot.hand = slices.Clone(c.state.hand)
+	return snapshot
 }
 
 func (c *gameClient) currentGameID() string {
@@ -780,7 +811,7 @@ func (c *gameClient) applyGameState(snapshot *protocol.GameStateDTO) {
 	c.stateMu.Unlock()
 }
 
-func (c *gameClient) identity() (string, string) {
+func (c *gameClient) identity() (playerID, token string) {
 	c.identityMu.RLock()
 	defer c.identityMu.RUnlock()
 	return c.playerID, c.token

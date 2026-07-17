@@ -242,7 +242,7 @@ func parsePrometheus(reader io.Reader) (map[string]float64, error) {
 	return values, nil
 }
 
-func detectLinearMemoryGrowth(points []resourcePoint) (bool, bool, float64, float64) {
+func detectLinearMemoryGrowth(points []resourcePoint) (assessed, linear bool, slopeBytesMinute, rSquared float64) {
 	// Ignore initial allocation churn and require enough tail samples to make a
 	// linear trend meaningful. The absolute guards avoid flagging allocator
 	// noise as a leak during the short CI override.
@@ -282,8 +282,8 @@ func detectLinearMemoryGrowth(points []resourcePoint) (bool, bool, float64, floa
 		r2 = 1 - residual/total
 	}
 	growth := tail[len(tail)-1].rss - tail[0].rss
-	linear := slope > 1024*1024 && r2 >= 0.80 && growth > 4*1024*1024
-	return true, linear, slope, r2
+	isLinear := slope > 1024*1024 && r2 >= 0.80 && growth > 4*1024*1024
+	return true, isLinear, slope, r2
 }
 
 func cloneMetrics(source map[string]float64) map[string]float64 {

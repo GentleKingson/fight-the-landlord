@@ -310,13 +310,14 @@ func NormalizeLeaderboardType(leaderboardType string) (string, error) {
 }
 
 // NormalizeLeaderboardPagination bounds public queries to a small, predictable page.
-func NormalizeLeaderboardPagination(offset, limit int) (int, int) {
-	offset = max(offset, 0)
-	if limit <= 0 {
-		limit = DefaultLeaderboardLimit
+func NormalizeLeaderboardPagination(offset, limit int) (normalizedOffset, normalizedLimit int) {
+	normalizedOffset = max(offset, 0)
+	normalizedLimit = limit
+	if normalizedLimit <= 0 {
+		normalizedLimit = DefaultLeaderboardLimit
 	}
-	limit = min(limit, MaxLeaderboardLimit)
-	return offset, limit
+	normalizedLimit = min(normalizedLimit, MaxLeaderboardLimit)
+	return normalizedOffset, normalizedLimit
 }
 
 // GetLeaderboard returns one validated leaderboard page.

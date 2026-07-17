@@ -91,7 +91,10 @@ func executeAdminCommand(
 	return nil
 }
 
-func buildAdminCommand(action, playerID string, duration time.Duration) (string, any, error) {
+func buildAdminCommand(
+	action, playerID string,
+	duration time.Duration,
+) (requestMethod string, requestPayload any, buildErr error) {
 	switch action {
 	case "status":
 		return http.MethodGet, nil, nil

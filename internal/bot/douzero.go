@@ -138,20 +138,35 @@ func (e *DouZeroEngine) decidePlayWithProvenance(ctx context.Context, botName st
 	req := e.buildRequest(gctx)
 	action, err := e.callService(ctx, req)
 	if err != nil {
-		reason := invalidActionHTTPError
-		var invalidErr *douzeroActionError
-		if errors.As(err, &invalidErr) {
-			reason = invalidErr.reason
-		}
-		if e.metrics != nil && reason == invalidActionTimeout {
-			e.metrics.BotTimeout("douzero")
-		}
-		return playDecisionResult{cards: e.invalidFallback(botName, reason, gctx), usedRuleFallback: true}
+		return e.serviceErrorDecision(botName, err, gctx)
 	}
+	return e.actionDecision(botName, action, gctx)
+}
 
+func (e *DouZeroEngine) serviceErrorDecision(
+	botName string,
+	err error,
+	gctx GameContext,
+) playDecisionResult {
+	reason := invalidActionHTTPError
+	var invalidErr *douzeroActionError
+	if errors.As(err, &invalidErr) {
+		reason = invalidErr.reason
+	}
+	if e.metrics != nil && reason == invalidActionTimeout {
+		e.metrics.BotTimeout("douzero")
+	}
+	return e.fallbackDecision(botName, reason, gctx)
+}
+
+func (e *DouZeroEngine) actionDecision(
+	botName string,
+	action []int,
+	gctx GameContext,
+) playDecisionResult {
 	if len(action) == 0 {
 		if gctx.MustPlay {
-			return playDecisionResult{cards: e.invalidFallback(botName, invalidActionMustPlayPass, gctx), usedRuleFallback: true}
+			return e.fallbackDecision(botName, invalidActionMustPlayPass, gctx)
 		}
 		log.Printf("🎮 [DouZero] %s: pass", botName)
 		return playDecisionResult{}
@@ -159,20 +174,31 @@ func (e *DouZeroEngine) decidePlayWithProvenance(ctx context.Context, botName st
 
 	cards := e.douzeroToCards(action, gctx.Hand)
 	if cards == nil {
-		return playDecisionResult{cards: e.invalidFallback(botName, invalidActionNotOwned, gctx), usedRuleFallback: true}
+		return e.fallbackDecision(botName, invalidActionNotOwned, gctx)
 	}
 
 	parsed, parseErr := rule.ParseHand(cards)
 	if parseErr != nil || parsed.Type == rule.Invalid {
-		return playDecisionResult{cards: e.invalidFallback(botName, invalidActionInvalidHand, gctx), usedRuleFallback: true}
+		return e.fallbackDecision(botName, invalidActionInvalidHand, gctx)
 	}
 	if !gctx.MustPlay && !gctx.RecentPlays[0].Played.IsEmpty() &&
 		!rule.CanBeat(parsed, gctx.RecentPlays[0].Played) {
-		return playDecisionResult{cards: e.invalidFallback(botName, invalidActionCannotBeat, gctx), usedRuleFallback: true}
+		return e.fallbackDecision(botName, invalidActionCannotBeat, gctx)
 	}
 
 	log.Printf("🎮 [DouZero] %s 出牌: count=%d type=%s", botName, len(cards), parsed.Type.String())
 	return playDecisionResult{cards: cards}
+}
+
+func (e *DouZeroEngine) fallbackDecision(
+	botName string,
+	reason invalidActionReason,
+	gctx GameContext,
+) playDecisionResult {
+	return playDecisionResult{
+		cards:            e.invalidFallback(botName, reason, gctx),
+		usedRuleFallback: true,
+	}
 }
 
 func (e *DouZeroEngine) invalidFallback(botName string, reason invalidActionReason, gctx GameContext) []card.Card {

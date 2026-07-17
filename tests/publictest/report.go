@@ -199,6 +199,20 @@ func buildReport(
 }
 
 func (r *publicTestReport) evaluateThresholds() {
+	r.evaluateGameThresholds()
+	r.evaluateReconnectThresholds()
+	r.evaluateSettlementAndRedisThresholds()
+	r.evaluateCleanupThresholds()
+	r.evaluateMemoryThresholds()
+	r.evaluateReconciliationThresholds()
+	if len(r.ThresholdFailures) == 0 {
+		r.Status = "passed"
+	} else {
+		r.Status = "failed"
+	}
+}
+
+func (r *publicTestReport) evaluateGameThresholds() {
 	if r.GamesStarted == 0 {
 		r.ThresholdFailures = append(r.ThresholdFailures, "no complete-game scenarios started")
 	} else if r.CompleteGameSuccessRate < r.Thresholds.MinCompleteGameSuccessRate {
@@ -208,6 +222,9 @@ func (r *publicTestReport) evaluateThresholds() {
 			r.Thresholds.MinCompleteGameSuccessRate,
 		))
 	}
+}
+
+func (r *publicTestReport) evaluateReconnectThresholds() {
 	if r.Configuration.DisconnectRate > 0 && r.ReconnectsAttempted == 0 {
 		r.ThresholdFailures = append(r.ThresholdFailures, "disconnect-rate was non-zero but no reconnect was attempted")
 	} else if r.ReconnectsAttempted > 0 && r.ReconnectSuccessRate < r.Thresholds.MinReconnectSuccessRate {
@@ -217,6 +234,9 @@ func (r *publicTestReport) evaluateThresholds() {
 			r.Thresholds.MinReconnectSuccessRate,
 		))
 	}
+}
+
+func (r *publicTestReport) evaluateSettlementAndRedisThresholds() {
 	if r.DuplicateSettlements > r.Thresholds.MaxDuplicateSettlements {
 		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("duplicate settlements %d exceeds %d", r.DuplicateSettlements, r.Thresholds.MaxDuplicateSettlements))
 	}
@@ -225,6 +245,9 @@ func (r *publicTestReport) evaluateThresholds() {
 	} else if *r.RedisErrors > r.Thresholds.MaxRedisErrors {
 		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("Redis error delta %d exceeds %d", *r.RedisErrors, r.Thresholds.MaxRedisErrors))
 	}
+}
+
+func (r *publicTestReport) evaluateCleanupThresholds() {
 	if r.RemainingConnections == nil {
 		r.ThresholdFailures = append(r.ThresholdFailures, "final connection telemetry is unavailable")
 	} else if *r.RemainingConnections > r.Thresholds.MaxRemainingConnections {
@@ -243,14 +266,21 @@ func (r *publicTestReport) evaluateThresholds() {
 	} else if growth := *r.FinalGoroutines - *r.InitialGoroutines; growth > r.Thresholds.MaxFinalGoroutineGrowth {
 		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("final goroutine growth %d exceeds %d", growth, r.Thresholds.MaxFinalGoroutineGrowth))
 	}
+}
+
+func (r *publicTestReport) evaluateMemoryThresholds() {
 	duration, durationErr := time.ParseDuration(r.Configuration.Duration)
-	if durationErr == nil && duration >= 10*time.Minute && !r.MemoryTrendAssessed {
+	switch {
+	case durationErr == nil && duration >= 10*time.Minute && !r.MemoryTrendAssessed:
 		r.ThresholdFailures = append(r.ThresholdFailures, "memory trend could not be assessed over a five-minute tail")
-	} else if r.LinearMemoryGrowth == nil {
+	case r.LinearMemoryGrowth == nil:
 		r.ThresholdFailures = append(r.ThresholdFailures, "memory trend telemetry is unavailable")
-	} else if r.MemoryTrendAssessed && *r.LinearMemoryGrowth && !r.Thresholds.AllowLinearMemoryGrowth {
+	case r.MemoryTrendAssessed && *r.LinearMemoryGrowth && !r.Thresholds.AllowLinearMemoryGrowth:
 		r.ThresholdFailures = append(r.ThresholdFailures, "RSS samples show sustained linear memory growth")
 	}
+}
+
+func (r *publicTestReport) evaluateReconciliationThresholds() {
 	if !r.TotalGamesReconciled {
 		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("player total-games mismatch: observed %d, expected %d", r.ObservedPlayerGames, r.ExpectedPlayerGames))
 	}
@@ -270,11 +300,6 @@ func (r *publicTestReport) evaluateThresholds() {
 	}
 	if len(r.Errors) > 0 {
 		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("harness errors: %d", len(r.Errors)))
-	}
-	if len(r.ThresholdFailures) == 0 {
-		r.Status = "passed"
-	} else {
-		r.Status = "failed"
 	}
 }
 

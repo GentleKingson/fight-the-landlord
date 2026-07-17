@@ -52,6 +52,12 @@ type playTurnKey struct {
 	turnID int64
 }
 
+type playTurnContext struct {
+	gameID      string
+	turnID      int64
+	gameContext GameContext
+}
+
 type botState struct {
 	mu            sync.RWMutex
 	gameID        string
@@ -412,19 +418,35 @@ func (b *BotClient) handlePlayTurn(msg *protocol.Message) {
 	if payload.PlayerID != b.id {
 		return
 	}
+
+	turn, ok := b.preparePlayTurn(msg, payload)
+	if !ok {
+		return
+	}
+	decision, ok := b.validatedPlayDecision(turn.gameContext)
+	if !ok {
+		return
+	}
+	b.submitPlayDecision(turn, decision)
+}
+
+func (b *BotClient) preparePlayTurn(
+	msg *protocol.Message,
+	payload *protocol.PlayTurnPayload,
+) (playTurnContext, bool) {
 	if msg.Event == nil || msg.Event.GameID == "" || msg.Event.TurnID <= 0 {
 		recordInvalidAction(b.engine, invalidActionStaleTurn)
 		log.Printf("🤖 %s: stale play turn metadata", b.name)
-		return
+		return playTurnContext{}, false
 	}
 	gameID, turnID := msg.Event.GameID, msg.Event.TurnID
 	if !b.claimPlayTurn(gameID, turnID) {
-		return
+		return playTurnContext{}, false
 	}
 	if !b.isCurrentPlayTurn(gameID, turnID) {
 		recordInvalidAction(b.engine, invalidActionStaleTurn)
 		log.Printf("🤖 %s: play turn became stale before decision", b.name)
-		return
+		return playTurnContext{}, false
 	}
 
 	delay := time.Duration(0)
@@ -435,32 +457,38 @@ func (b *BotClient) handlePlayTurn(msg *protocol.Message) {
 	if !b.isCurrentPlayTurn(gameID, turnID) {
 		recordInvalidAction(b.engine, invalidActionStaleTurn)
 		log.Printf("🤖 %s: play turn became stale before decision", b.name)
-		return
+		return playTurnContext{}, false
 	}
 
 	b.state.mu.RLock()
+	defer b.state.mu.RUnlock()
 	if b.state.gameID != "" && b.state.gameID != gameID {
-		b.state.mu.RUnlock()
 		recordInvalidAction(b.engine, invalidActionStaleTurn)
 		log.Printf("🤖 %s: play turn belongs to a stale game", b.name)
-		return
+		return playTurnContext{}, false
 	}
-	gctx := b.buildGameContext(payload.MustPlay, payload.CanBeat)
-	b.state.mu.RUnlock()
+	return playTurnContext{
+		gameID:      gameID,
+		turnID:      turnID,
+		gameContext: b.buildGameContext(payload.MustPlay, payload.CanBeat),
+	}, true
+}
 
+func (b *BotClient) validatedPlayDecision(gctx GameContext) (playDecisionResult, bool) {
 	decision := decidePlayWithProvenance(b.engine, context.Background(), b.name, gctx)
-	cards := decision.cards
-	usedFallback := decision.usedRuleFallback
-	if reason := validatePlayDecision(cards, gctx); reason != "" {
+	if reason := validatePlayDecision(decision.cards, gctx); reason != "" {
 		recordInvalidAction(b.engine, reason)
-		cards = ruleFallback(gctx)
-		usedFallback = true
-		if validatePlayDecision(cards, gctx) != "" {
+		decision.cards = ruleFallback(gctx)
+		decision.usedRuleFallback = true
+		if validatePlayDecision(decision.cards, gctx) != "" {
 			log.Printf("🤖 %s: rule fallback unavailable", b.name)
-			return
+			return playDecisionResult{}, false
 		}
 	}
+	return decision, true
+}
 
+func (b *BotClient) submitPlayDecision(turn playTurnContext, decision playDecisionResult) {
 	b.sessionMu.RLock()
 	defer b.sessionMu.RUnlock()
 	sess := b.session
@@ -468,12 +496,12 @@ func (b *BotClient) handlePlayTurn(msg *protocol.Message) {
 		log.Printf("🤖 %s: session 未就绪，跳过出牌", b.name)
 		return
 	}
-	if !sess.IsCurrentPlayTurn(b.id, gameID, turnID) {
+	if !sess.IsCurrentPlayTurn(b.id, turn.gameID, turn.turnID) {
 		recordInvalidAction(b.engine, invalidActionStaleTurn)
 		log.Printf("🤖 %s: play turn became stale after decision", b.name)
 		return
 	}
-	playErr := submitPlay(sess, b.id, gameID, turnID, cards)
+	playErr := submitPlay(sess, b.id, turn.gameID, turn.turnID, decision.cards)
 	if playErr == nil {
 		return
 	}
@@ -484,23 +512,23 @@ func (b *BotClient) handlePlayTurn(msg *protocol.Message) {
 	}
 	recordInvalidAction(b.engine, invalidActionSubmitRejected)
 	log.Printf("🤖 %s: play submission failed (%s)", b.name, invalidActionSubmitRejected)
-	if usedFallback {
+	if decision.usedRuleFallback {
 		return
 	}
 
 	// A rejected DouZero action gets one rule-engine retry, but only while the
 	// exact authoritative turn is still current. The versioned session method
 	// repeats this check atomically at commit time.
-	if !sess.IsCurrentPlayTurn(b.id, gameID, turnID) {
+	if !sess.IsCurrentPlayTurn(b.id, turn.gameID, turn.turnID) {
 		recordInvalidAction(b.engine, invalidActionStaleTurn)
 		return
 	}
-	fallback := ruleFallback(gctx)
-	if validatePlayDecision(fallback, gctx) != "" {
+	fallback := ruleFallback(turn.gameContext)
+	if validatePlayDecision(fallback, turn.gameContext) != "" {
 		log.Printf("🤖 %s: rule fallback unavailable", b.name)
 		return
 	}
-	if fallbackErr := submitPlay(sess, b.id, gameID, turnID, fallback); fallbackErr != nil {
+	if fallbackErr := submitPlay(sess, b.id, turn.gameID, turn.turnID, fallback); fallbackErr != nil {
 		if isStalePlayError(fallbackErr) {
 			recordInvalidAction(b.engine, invalidActionStaleTurn)
 			log.Printf("🤖 %s: fallback submission failed (%s)", b.name, invalidActionStaleTurn)

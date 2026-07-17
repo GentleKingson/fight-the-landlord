@@ -23,6 +23,13 @@ type handlerLeaderboardClock struct {
 	now time.Time
 }
 
+type leaderboardHandlerFixture struct {
+	handler     *Handler
+	leaderboard *storage.LeaderboardManager
+	clock       *handlerLeaderboardClock
+	redis       *miniredis.Miniredis
+}
+
 func (c *handlerLeaderboardClock) Now() time.Time {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -35,14 +42,19 @@ func (c *handlerLeaderboardClock) Set(now time.Time) {
 	c.mu.Unlock()
 }
 
-func newLeaderboardHandler(t *testing.T) (*Handler, *storage.LeaderboardManager, *handlerLeaderboardClock, *miniredis.Miniredis) {
+func newLeaderboardHandler(t *testing.T) leaderboardHandlerFixture {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	clock := &handlerLeaderboardClock{now: time.Date(2026, time.January, 5, 10, 0, 0, 0, time.UTC)}
 	leaderboard := storage.NewLeaderboardManager(client, storage.WithLeaderboardClock(clock.Now))
-	return NewHandler(HandlerDeps{Leaderboard: leaderboard}), leaderboard, clock, mr
+	return leaderboardHandlerFixture{
+		handler:     NewHandler(HandlerDeps{Leaderboard: leaderboard}),
+		leaderboard: leaderboard,
+		clock:       clock,
+		redis:       mr,
+	}
 }
 
 func leaderboardRequest(payload protocol.GetLeaderboardPayload) *protocol.Message {
@@ -60,12 +72,12 @@ func requireLeaderboardResult(t *testing.T, client *testutil.SimpleClient) *prot
 
 func TestHandleGetLeaderboardUsesRequestedTypeAndOffset(t *testing.T) {
 	t.Parallel()
-	h, leaderboard, clock, _ := newLeaderboardHandler(t)
+	fixture := newLeaderboardHandler(t)
 	ctx := context.Background()
-	monday := clock.Now()
-	require.NoError(t, leaderboard.RecordGameResult(ctx, "game-1", "p1", "Player1", true, true))
-	clock.Set(monday.Add(24 * time.Hour))
-	require.NoError(t, leaderboard.RecordGameResult(ctx, "game-2", "p2", "Player2", false, true))
+	monday := fixture.clock.Now()
+	require.NoError(t, fixture.leaderboard.RecordGameResult(ctx, "game-1", "p1", "Player1", true, true))
+	fixture.clock.Set(monday.Add(24 * time.Hour))
+	require.NoError(t, fixture.leaderboard.RecordGameResult(ctx, "game-2", "p2", "Player2", false, true))
 
 	tests := []struct {
 		name            string
@@ -79,8 +91,9 @@ func TestHandleGetLeaderboardUsesRequestedTypeAndOffset(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			client := testutil.NewSimpleClient("viewer", "Viewer")
-			h.handleGetLeaderboard(client, leaderboardRequest(protocol.GetLeaderboardPayload{
+			fixture.handler.handleGetLeaderboard(client, leaderboardRequest(protocol.GetLeaderboardPayload{
 				Type: tt.leaderboardType, Offset: tt.offset, Limit: 10,
 			}))
 			result := requireLeaderboardResult(t, client)
@@ -99,16 +112,16 @@ func TestHandleGetLeaderboardUsesRequestedTypeAndOffset(t *testing.T) {
 
 func TestHandleGetLeaderboardNormalizesLimitAndOffset(t *testing.T) {
 	t.Parallel()
-	h, leaderboard, _, _ := newLeaderboardHandler(t)
+	fixture := newLeaderboardHandler(t)
 	ctx := context.Background()
 	for i := range 55 {
-		require.NoError(t, leaderboard.RecordGameResult(
+		require.NoError(t, fixture.leaderboard.RecordGameResult(
 			ctx, fmt.Sprintf("game-%d", i), fmt.Sprintf("p-%02d", i), "Player", false, true,
 		))
 	}
 
 	client := testutil.NewSimpleClient("viewer", "Viewer")
-	h.handleGetLeaderboard(client, leaderboardRequest(protocol.GetLeaderboardPayload{
+	fixture.handler.handleGetLeaderboard(client, leaderboardRequest(protocol.GetLeaderboardPayload{
 		Type: storage.LeaderboardTypeTotal, Offset: -3, Limit: 51,
 	}))
 	result := requireLeaderboardResult(t, client)
@@ -118,9 +131,9 @@ func TestHandleGetLeaderboardNormalizesLimitAndOffset(t *testing.T) {
 
 func TestHandleGetLeaderboardRejectsInvalidType(t *testing.T) {
 	t.Parallel()
-	h, _, _, _ := newLeaderboardHandler(t)
+	fixture := newLeaderboardHandler(t)
 	client := testutil.NewSimpleClient("viewer", "Viewer")
-	h.handleGetLeaderboard(client, leaderboardRequest(protocol.GetLeaderboardPayload{
+	fixture.handler.handleGetLeaderboard(client, leaderboardRequest(protocol.GetLeaderboardPayload{
 		Type: "monthly", Limit: 10,
 	}))
 
@@ -133,10 +146,10 @@ func TestHandleGetLeaderboardRejectsInvalidType(t *testing.T) {
 
 func TestHandleGetLeaderboardReportsRedisError(t *testing.T) {
 	t.Parallel()
-	h, _, _, mr := newLeaderboardHandler(t)
-	mr.Close()
+	fixture := newLeaderboardHandler(t)
+	fixture.redis.Close()
 	client := testutil.NewSimpleClient("viewer", "Viewer")
-	h.handleGetLeaderboard(client, leaderboardRequest(protocol.GetLeaderboardPayload{
+	fixture.handler.handleGetLeaderboard(client, leaderboardRequest(protocol.GetLeaderboardPayload{
 		Type: storage.LeaderboardTypeTotal, Limit: 10,
 	}))
 

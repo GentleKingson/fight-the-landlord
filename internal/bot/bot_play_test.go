@@ -26,17 +26,17 @@ func TestBotPlayTurnSubmitsValidatedActionOnceWithCapturedContext(t *testing.T) 
 	session := newBotPlaySession("game-1", 7)
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3, card.Rank4))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 7, true, true))
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 7, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 7, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 7, true, true))
 
-	plays, passes, gameID, turnID, played := session.submissions()
+	submission := session.submissions()
 	assert.Equal(t, 1, engine.decisionCount())
-	assert.Equal(t, 1, plays)
-	assert.Zero(t, passes)
-	assert.Equal(t, "game-1", gameID)
-	assert.EqualValues(t, 7, turnID)
-	require.Len(t, played, 1)
-	assert.Equal(t, int(card.Rank4), played[0].Rank)
+	assert.Equal(t, 1, submission.plays)
+	assert.Zero(t, submission.passes)
+	assert.Equal(t, "game-1", submission.gameID)
+	assert.EqualValues(t, 7, submission.turnID)
+	require.Len(t, submission.played, 1)
+	assert.Equal(t, int(card.Rank4), submission.played[0].Rank)
 }
 
 func TestBotPlayTurnUsesOneRuleFallbackForInvalidDecision(t *testing.T) {
@@ -46,13 +46,13 @@ func TestBotPlayTurnUsesOneRuleFallbackForInvalidDecision(t *testing.T) {
 	session := newBotPlaySession("game-1", 8)
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3, card.Rank4))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 8, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 8, true, true))
 
-	plays, passes, _, _, played := session.submissions()
-	assert.Equal(t, 1, plays, "the invalid external action must never be submitted")
-	assert.Zero(t, passes)
-	require.Len(t, played, 1)
-	assert.Equal(t, int(card.Rank3), played[0].Rank)
+	submission := session.submissions()
+	assert.Equal(t, 1, submission.plays, "the invalid external action must never be submitted")
+	assert.Zero(t, submission.passes)
+	require.Len(t, submission.played, 1)
+	assert.Equal(t, int(card.Rank3), submission.played[0].Rank)
 	assert.Equal(t, []invalidActionReason{invalidActionNotOwned}, engine.recordedReasons())
 }
 
@@ -64,11 +64,11 @@ func TestBotPlayTurnDoesNotRetryRejectedFallbackForInvalidDecision(t *testing.T)
 	session.rejections = []error{errors.New("fallback rejected")}
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3, card.Rank4))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 8, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 8, true, true))
 
-	plays, passes, _, _, _ := session.submissions()
-	assert.Equal(t, 1, plays)
-	assert.Zero(t, passes)
+	submission := session.submissions()
+	assert.Equal(t, 1, submission.plays)
+	assert.Zero(t, submission.passes)
 	assert.Equal(t, []invalidActionReason{
 		invalidActionNotOwned,
 		invalidActionSubmitRejected,
@@ -95,12 +95,12 @@ func TestBotPlayTurnDoesNotRetryRejectedDouZeroFallback(t *testing.T) {
 	botClient.state.douzeroPos = DouZeroPosLandlord
 	botClient.state.mu.Unlock()
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 8, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 8, true, true))
 
-	plays, passes, _, _, _ := session.submissions()
+	submission := session.submissions()
 	assert.EqualValues(t, 1, serviceRequests.Load())
-	assert.Equal(t, 1, plays)
-	assert.Zero(t, passes)
+	assert.Equal(t, 1, submission.plays)
+	assert.Zero(t, submission.passes)
 	assertInvalidActionMetrics(t, metrics, map[invalidActionReason]float64{
 		invalidActionNotOwned:       1,
 		invalidActionSubmitRejected: 1,
@@ -121,16 +121,16 @@ func TestBotPlayTurnDoesNotSubmitResultAfterTurnChanges(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 9, true, true))
+		botClient.handlePlayTurn(playTurnMessage(botClient.id, 9, true, true))
 	}()
 	<-decisionStarted
 	session.setTurn("game-1", 10)
 	close(releaseDecision)
 	<-done
 
-	plays, passes, _, _, _ := session.submissions()
-	assert.Zero(t, plays)
-	assert.Zero(t, passes)
+	submission := session.submissions()
+	assert.Zero(t, submission.plays)
+	assert.Zero(t, submission.passes)
 	assert.Equal(t, []invalidActionReason{invalidActionStaleTurn}, engine.recordedReasons())
 }
 
@@ -141,12 +141,12 @@ func TestBotPlayTurnSkipsAlreadyStaleEventBeforeCallingEngine(t *testing.T) {
 	session := newBotPlaySession("game-2", 1)
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 99, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 99, true, true))
 
-	plays, passes, _, _, _ := session.submissions()
+	submission := session.submissions()
 	assert.Zero(t, engine.decisionCount())
-	assert.Zero(t, plays)
-	assert.Zero(t, passes)
+	assert.Zero(t, submission.plays)
+	assert.Zero(t, submission.passes)
 	assert.Equal(t, []invalidActionReason{invalidActionStaleTurn}, engine.recordedReasons())
 }
 
@@ -158,14 +158,14 @@ func TestBotPlayTurnRetriesRejectedSubmitOnceWithRuleFallback(t *testing.T) {
 	session.rejections = []error{errors.New("submission rejected"), nil}
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3, card.Rank4))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 11, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 11, true, true))
 
-	plays, passes, _, _, played := session.submissions()
-	assert.Equal(t, 2, plays)
-	assert.Zero(t, passes)
+	submission := session.submissions()
+	assert.Equal(t, 2, submission.plays)
+	assert.Zero(t, submission.passes)
 	assert.Equal(t, 1, engine.decisionCount())
-	require.Len(t, played, 1)
-	assert.Equal(t, int(card.Rank3), played[0].Rank)
+	require.Len(t, submission.played, 1)
+	assert.Equal(t, int(card.Rank3), submission.played[0].Rank)
 	assert.Equal(t, []invalidActionReason{invalidActionSubmitRejected}, engine.recordedReasons())
 }
 
@@ -177,11 +177,11 @@ func TestBotPlayTurnDoesNotLoopWhenFallbackSubmitIsRejected(t *testing.T) {
 	session.rejections = []error{errors.New("submission rejected"), errors.New("fallback rejected")}
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3, card.Rank4))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 11, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 11, true, true))
 
-	plays, passes, _, _, _ := session.submissions()
-	assert.Equal(t, 2, plays)
-	assert.Zero(t, passes)
+	submission := session.submissions()
+	assert.Equal(t, 2, submission.plays)
+	assert.Zero(t, submission.passes)
 	assert.Equal(t, 1, engine.decisionCount())
 	assert.Equal(t, []invalidActionReason{invalidActionSubmitRejected}, engine.recordedReasons())
 }
@@ -194,11 +194,11 @@ func TestBotPlayTurnNeverRetriesStaleSubmit(t *testing.T) {
 	session.rejections = []error{apperrors.ErrStaleTurn}
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3, card.Rank4))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 11, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 11, true, true))
 
-	plays, passes, _, _, _ := session.submissions()
-	assert.Equal(t, 1, plays)
-	assert.Zero(t, passes)
+	submission := session.submissions()
+	assert.Equal(t, 1, submission.plays)
+	assert.Zero(t, submission.passes)
 	assert.Equal(t, []invalidActionReason{invalidActionStaleTurn}, engine.recordedReasons())
 }
 
@@ -214,17 +214,17 @@ func TestBotPlayTurnUsesEngineAgainOnLaterTurn(t *testing.T) {
 	session := newBotPlaySession("game-1", 11)
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3, card.Rank4))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 11, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 11, true, true))
 	session.setTurn("game-1", 12)
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 12, true, true))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 12, true, true))
 
-	plays, passes, _, turnID, played := session.submissions()
+	submission := session.submissions()
 	assert.Equal(t, 2, engine.decisionCount())
-	assert.Equal(t, 2, plays)
-	assert.Zero(t, passes)
-	assert.EqualValues(t, 12, turnID)
-	require.Len(t, played, 1)
-	assert.Equal(t, int(card.Rank4), played[0].Rank)
+	assert.Equal(t, 2, submission.plays)
+	assert.Zero(t, submission.passes)
+	assert.EqualValues(t, 12, submission.turnID)
+	require.Len(t, submission.played, 1)
+	assert.Equal(t, int(card.Rank4), submission.played[0].Rank)
 	assert.Equal(t, []invalidActionReason{invalidActionNotOwned}, engine.recordedReasons())
 }
 
@@ -233,13 +233,13 @@ func TestBotPlayTurnSubmitsPassAtCapturedContext(t *testing.T) {
 	session := newBotPlaySession("game-1", 12)
 	botClient := newPlayTestBot(engine, session, faultCards(card.Rank3))
 
-	botClient.handlePlayTurn(playTurnMessage(botClient.id, "game-1", 12, false, false))
+	botClient.handlePlayTurn(playTurnMessage(botClient.id, 12, false, false))
 
-	plays, passes, gameID, turnID, _ := session.submissions()
-	assert.Zero(t, plays)
-	assert.Equal(t, 1, passes)
-	assert.Equal(t, "game-1", gameID)
-	assert.EqualValues(t, 12, turnID)
+	submission := session.submissions()
+	assert.Zero(t, submission.plays)
+	assert.Equal(t, 1, submission.passes)
+	assert.Equal(t, "game-1", submission.gameID)
+	assert.EqualValues(t, 12, submission.turnID)
 }
 
 func TestInstrumentedDouZeroForwardsTurnAndSubmitReasons(t *testing.T) {
@@ -267,13 +267,13 @@ func newPlayTestBot(engine DecisionEngine, session SessionInterface, hand []card
 	return botClient
 }
 
-func playTurnMessage(playerID, gameID string, turnID int64, mustPlay, canBeat bool) *protocol.Message {
+func playTurnMessage(playerID string, turnID int64, mustPlay, canBeat bool) *protocol.Message {
 	message := codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
 		PlayerID: playerID,
 		MustPlay: mustPlay,
 		CanBeat:  canBeat,
 	})
-	message.Event = &protocol.EventMeta{GameID: gameID, TurnID: turnID}
+	message.Event = &protocol.EventMeta{GameID: "game-1", TurnID: turnID}
 	return message
 }
 
@@ -326,6 +326,14 @@ type botPlaySession struct {
 	played     []protocol.CardInfo
 }
 
+type botPlaySubmissions struct {
+	plays  int
+	passes int
+	gameID string
+	turnID int64
+	played []protocol.CardInfo
+}
+
 func newBotPlaySession(gameID string, turnID int64) *botPlaySession {
 	return &botPlaySession{gameID: gameID, turnID: turnID}
 }
@@ -351,7 +359,7 @@ func (s *botPlaySession) HandlePlayCardsAt(_ string, cards []protocol.CardInfo, 
 	return s.nextRejectionLocked()
 }
 
-func (s *botPlaySession) HandlePassAt(_ string, gameID string, turnID int64) error {
+func (s *botPlaySession) HandlePassAt(_, gameID string, turnID int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.passes++
@@ -376,8 +384,14 @@ func (s *botPlaySession) setTurn(gameID string, turnID int64) {
 	s.mu.Unlock()
 }
 
-func (s *botPlaySession) submissions() (int, int, string, int64, []protocol.CardInfo) {
+func (s *botPlaySession) submissions() botPlaySubmissions {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.plays, s.passes, s.gotGame, s.gotTurn, append([]protocol.CardInfo(nil), s.played...)
+	return botPlaySubmissions{
+		plays:  s.plays,
+		passes: s.passes,
+		gameID: s.gotGame,
+		turnID: s.gotTurn,
+		played: append([]protocol.CardInfo(nil), s.played...),
+	}
 }
