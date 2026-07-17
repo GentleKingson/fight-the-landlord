@@ -91,24 +91,42 @@ func parseConfig(args []string) (config, error) {
 }
 
 func (c *config) validate() error {
-	parsed, err := url.Parse(strings.TrimSpace(c.URL))
+	parsed, err := normalizeWebSocketURL(c.URL)
 	if err != nil {
-		return fmt.Errorf("parse WebSocket URL: %w", err)
+		return err
+	}
+	c.URL = parsed.String()
+
+	if err := c.normalizeMetricsURL(parsed); err != nil {
+		return err
+	}
+	if err := c.validateWorkload(); err != nil {
+		return err
+	}
+	return c.validateThresholds()
+}
+
+func normalizeWebSocketURL(rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return nil, fmt.Errorf("parse WebSocket URL: %w", err)
 	}
 	if parsed.Scheme != "ws" && parsed.Scheme != "wss" {
-		return errors.New("WebSocket URL must use ws or wss")
+		return nil, errors.New("WebSocket URL must use ws or wss")
 	}
 	if parsed.Host == "" {
-		return errors.New("WebSocket URL must include a host")
+		return nil, errors.New("WebSocket URL must include a host")
 	}
 	if parsed.Path == "" || parsed.Path == "/" {
 		parsed.Path = "/ws"
 	}
-	c.URL = parsed.String()
+	return parsed, nil
+}
 
+func (c *config) normalizeMetricsURL(webSocketURL *url.URL) error {
 	switch strings.ToLower(strings.TrimSpace(c.MetricsURL)) {
 	case "auto", "":
-		metrics := *parsed
+		metrics := *webSocketURL
 		if metrics.Scheme == "ws" {
 			metrics.Scheme = "http"
 		} else {
@@ -126,7 +144,10 @@ func (c *config) validate() error {
 			return errors.New("metrics URL must use http or https, or be auto/none")
 		}
 	}
+	return nil
+}
 
+func (c config) validateWorkload() error {
 	if c.Connections < 1 {
 		return errors.New("connections must be at least 1")
 	}
@@ -151,6 +172,10 @@ func (c *config) validate() error {
 	if strings.TrimSpace(c.JSONOut) == "" || strings.TrimSpace(c.MarkdownOut) == "" {
 		return errors.New("both report paths are required")
 	}
+	return nil
+}
+
+func (c config) validateThresholds() error {
 	for name, value := range map[string]float64{
 		"min-connection-success-rate": c.Thresholds.MinConnectionSuccessRate,
 		"min-reconnect-success-rate":  c.Thresholds.MinReconnectSuccessRate,

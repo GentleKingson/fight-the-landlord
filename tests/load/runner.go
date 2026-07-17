@@ -38,32 +38,7 @@ func runLoad(ctx context.Context, cfg config) loadReport {
 	state := &runState{}
 	telemetry := startTelemetryMonitor(cfg.MetricsURL, cfg.MetricsInterval)
 	generator := startGeneratorMonitor()
-
-	report := loadReport{
-		SchemaVersion: 1,
-		Status:        "running",
-		StartedAt:     started.UTC(),
-		Config: reportConfig{
-			URL:                cfg.URL,
-			MetricsURL:         cfg.MetricsURL,
-			Connections:        cfg.Connections,
-			ConnectConcurrency: cfg.ConnectConcurrency,
-			IdleDuration:       cfg.Duration.String(),
-			Reconnects:         cfg.Reconnects,
-			RoomOperations:     cfg.RoomOperations,
-			MatchOperations:    cfg.MatchOperations,
-			MatchTimeouts:      cfg.MatchTimeouts,
-		},
-		ConnectionsAttempted: cfg.Connections,
-		Thresholds:           cfg.Thresholds,
-		Limitations: []string{
-			"The load generator does not inject Redis pause/restart or measure Redis failover recovery.",
-			"DouZero timeout, invalid-response, and fallback behavior are not exercised by this client.",
-			"No complete games are played; games_started and games_finished come from optional server telemetry.",
-			"Slow-reader buffer exhaustion, SIGTERM/restart recovery, and multi-instance ownership require the separate chaos harness.",
-			"server_crash_count is null because a remote client cannot distinguish a process restart from a network outage; the workflow separately checks server liveness.",
-		},
-	}
+	report := newLoadReport(cfg, started)
 
 	clients := connectClients(ctx, cfg, state)
 	report.ConnectionsSuccessful = len(clients)
@@ -110,8 +85,47 @@ func runLoad(ctx context.Context, cfg config) loadReport {
 		}
 	}
 
-	serverTelemetry := telemetry.finish()
-	generatorTelemetry := generator.finish()
+	applyTelemetry(&report, telemetry.finish(), generator.finish())
+	applyRunState(&report, state)
+	report.FinishedAt = time.Now().UTC()
+	report.DurationMS = report.FinishedAt.Sub(report.StartedAt).Milliseconds()
+	report.evaluateThresholds()
+	if ctx.Err() != nil {
+		report.Status = "canceled"
+		report.ThresholdFailures = append(report.ThresholdFailures, "load test context was canceled")
+	}
+	return report
+}
+
+func newLoadReport(cfg config, started time.Time) loadReport {
+	return loadReport{
+		SchemaVersion: 1,
+		Status:        "running",
+		StartedAt:     started.UTC(),
+		Config: reportConfig{
+			URL:                cfg.URL,
+			MetricsURL:         cfg.MetricsURL,
+			Connections:        cfg.Connections,
+			ConnectConcurrency: cfg.ConnectConcurrency,
+			IdleDuration:       cfg.Duration.String(),
+			Reconnects:         cfg.Reconnects,
+			RoomOperations:     cfg.RoomOperations,
+			MatchOperations:    cfg.MatchOperations,
+			MatchTimeouts:      cfg.MatchTimeouts,
+		},
+		ConnectionsAttempted: cfg.Connections,
+		Thresholds:           cfg.Thresholds,
+		Limitations: []string{
+			"The load generator does not inject Redis pause/restart or measure Redis failover recovery.",
+			"DouZero timeout, invalid-response, and fallback behavior are not exercised by this client.",
+			"No complete games are played; games_started and games_finished come from optional server telemetry.",
+			"Slow-reader buffer exhaustion, SIGTERM/restart recovery, and multi-instance ownership require the separate chaos harness.",
+			"server_crash_count is null because a remote client cannot distinguish a process restart from a network outage; the workflow separately checks server liveness.",
+		},
+	}
+}
+
+func applyTelemetry(report *loadReport, serverTelemetry telemetrySnapshot, generatorTelemetry generatorSnapshot) {
 	report.PeakRSSBytes = serverTelemetry.PeakRSSBytes
 	report.PeakGoroutines = serverTelemetry.PeakGoroutines
 	report.BaselineGoroutines = serverTelemetry.BaselineGoroutines
@@ -135,7 +149,9 @@ func runLoad(ctx context.Context, cfg config) loadReport {
 	report.LoadGeneratorPeakGoroutines = generatorTelemetry.PeakGoroutines
 	report.LoadGeneratorFinalHeapBytes = generatorTelemetry.FinalHeapBytes
 	report.LoadGeneratorFinalGoroutines = generatorTelemetry.FinalGoroutines
+}
 
+func applyRunState(report *loadReport, state *runState) {
 	state.mu.Lock()
 	report.Errors = append(report.Errors, state.errors...)
 	report.ConnectionLatencyMS = summarizeLatency(state.connectionLatencies)
@@ -151,15 +167,6 @@ func runLoad(ctx context.Context, cfg config) loadReport {
 	combined = append(combined, state.idleLatencies...)
 	state.mu.Unlock()
 	report.LatencyMS = summarizeLatency(combined)
-
-	report.FinishedAt = time.Now().UTC()
-	report.DurationMS = report.FinishedAt.Sub(report.StartedAt).Milliseconds()
-	report.evaluateThresholds()
-	if ctx.Err() != nil {
-		report.Status = "cancelled"
-		report.ThresholdFailures = append(report.ThresholdFailures, "load test context was cancelled")
-	}
-	return report
 }
 
 type matchScenarioResults struct {
@@ -188,8 +195,8 @@ func runMatchScenarios(ctx context.Context, cfg config, clients []*loadClient, s
 			remaining -= batchSize
 			continue
 		}
-		cancelled := runConcurrentMatchCommands(ctx, cfg, queued, false, state)
-		results.operationsSuccessful += len(cancelled)
+		canceled := runConcurrentMatchCommands(ctx, cfg, queued, false, state)
+		results.operationsSuccessful += len(canceled)
 		remaining -= batchSize
 	}
 	for results.timeoutsAttempted < cfg.MatchTimeouts && len(active) > 0 {
@@ -317,8 +324,8 @@ func connectClients(ctx context.Context, cfg config, state *runState) []*loadCli
 	return clients
 }
 
-func reconnectClients(ctx context.Context, cfg config, clients []*loadClient, state *runState) (int, int) {
-	attempted := cfg.Reconnects
+func reconnectClients(ctx context.Context, cfg config, clients []*loadClient, state *runState) (attempted, successful int) {
+	attempted = cfg.Reconnects
 	if attempted > len(clients) {
 		attempted = len(clients)
 	}
@@ -345,7 +352,6 @@ func reconnectClients(ctx context.Context, cfg config, clients []*loadClient, st
 	group.Wait()
 	close(results)
 
-	successful := 0
 	for result := range results {
 		state.recordLatency(&state.reconnectLatencies, result.latency)
 		if result.err != nil {
@@ -363,6 +369,12 @@ type roomScenarioResults struct {
 	created    int
 	joined     int
 	left       int
+}
+
+type roomJoinResult struct {
+	joined     int
+	left       int
+	successful bool
 }
 
 func runRoomScenarios(ctx context.Context, cfg config, clients []*loadClient, state *runState) roomScenarioResults {
@@ -384,23 +396,10 @@ func runRoomScenarios(ctx context.Context, cfg config, clients []*loadClient, st
 		scenarioOK := true
 
 		if len(active) > 1 {
-			joiner := active[(scenario+1)%len(active)]
-			joinLatency, joinErr := joinRoom(ctx, cfg, joiner, roomCode)
-			state.recordLatency(&state.roomLatencies, joinLatency)
-			if joinErr != nil {
-				state.recordError("room[%d] join: %v", scenario, joinErr)
-				scenarioOK = false
-			} else {
-				results.joined++
-				leaveLatency, leaveErr := leaveRoom(ctx, cfg, joiner)
-				state.recordLatency(&state.roomLatencies, leaveLatency)
-				if leaveErr != nil {
-					state.recordError("room[%d] joiner leave: %v", scenario, leaveErr)
-					scenarioOK = false
-				} else {
-					results.left++
-				}
-			}
+			joinResult := runRoomJoinerScenario(ctx, cfg, active, scenario, roomCode, state)
+			results.joined += joinResult.joined
+			results.left += joinResult.left
+			scenarioOK = joinResult.successful
 		}
 
 		leaveLatency, leaveErr := leaveRoom(ctx, cfg, owner)
@@ -416,6 +415,27 @@ func runRoomScenarios(ctx context.Context, cfg config, clients []*loadClient, st
 		}
 	}
 	return results
+}
+
+func runRoomJoinerScenario(ctx context.Context, cfg config, active []*loadClient, scenario int, roomCode string, state *runState) roomJoinResult {
+	joiner := active[(scenario+1)%len(active)]
+	joinLatency, joinErr := joinRoom(ctx, cfg, joiner, roomCode)
+	state.recordLatency(&state.roomLatencies, joinLatency)
+	if joinErr != nil {
+		state.recordError("room[%d] join: %v", scenario, joinErr)
+		return roomJoinResult{}
+	}
+
+	result := roomJoinResult{joined: 1}
+	leaveLatency, leaveErr := leaveRoom(ctx, cfg, joiner)
+	state.recordLatency(&state.roomLatencies, leaveLatency)
+	if leaveErr != nil {
+		state.recordError("room[%d] joiner leave: %v", scenario, leaveErr)
+		return result
+	}
+	result.left = 1
+	result.successful = true
+	return result
 }
 
 func createRoom(ctx context.Context, cfg config, client *loadClient) (string, time.Duration, error) {
@@ -446,10 +466,11 @@ func activeClients(clients []*loadClient) []*loadClient {
 	return active
 }
 
-func pingClients(ctx context.Context, cfg config, clients []*loadClient, state *runState) (int, int) {
+func pingClients(ctx context.Context, cfg config, clients []*loadClient, state *runState) (attempted, successful int) {
 	if len(clients) == 0 {
 		return 0, 0
 	}
+	attempted = len(clients)
 	type result struct {
 		index   int
 		latency time.Duration
@@ -470,7 +491,6 @@ func pingClients(ctx context.Context, cfg config, clients []*loadClient, state *
 	group.Wait()
 	close(results)
 
-	successful := 0
 	for result := range results {
 		state.recordLatency(&state.idleLatencies, result.latency)
 		if result.err != nil {
@@ -479,5 +499,5 @@ func pingClients(ctx context.Context, cfg config, clients []*loadClient, state *
 		}
 		successful++
 	}
-	return len(clients), successful
+	return attempted, successful
 }

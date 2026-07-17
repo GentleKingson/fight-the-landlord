@@ -173,7 +173,7 @@ func runProbeRestart(args []string) {
 	if err != nil {
 		fatalf("encode result: %v", err)
 	}
-	if err := os.WriteFile(*outputPath, append(encoded, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(*outputPath, append(encoded, '\n'), 0o600); err != nil {
 		fatalf("write result: %v", err)
 	}
 }

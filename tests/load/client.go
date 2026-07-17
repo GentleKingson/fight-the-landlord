@@ -394,7 +394,7 @@ func (c *loadClient) awaitMatchTimeout(ctx context.Context) (time.Duration, erro
 		return time.Since(started), err
 	}
 	if payload.Reason != "timeout" {
-		return time.Since(started), fmt.Errorf("match cancelled for %q instead of timeout", payload.Reason)
+		return time.Since(started), fmt.Errorf("match canceled for %q instead of timeout", payload.Reason)
 	}
 	return time.Since(started), nil
 }

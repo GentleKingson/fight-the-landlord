@@ -19,6 +19,12 @@ type latencySummary struct {
 	Max   float64 `json:"max"`
 }
 
+type rateThresholdCheck struct {
+	name string
+	got  float64
+	want float64
+}
+
 type reportConfig struct {
 	URL                string `json:"url"`
 	MetricsURL         string `json:"metrics_url,omitempty"`
@@ -133,94 +139,112 @@ func successRate(successful, attempted int) float64 {
 }
 
 func (r *loadReport) evaluateThresholds() {
-	checks := []struct {
-		name string
-		got  float64
-		want float64
-	}{
-		{"connection success rate", r.ConnectionSuccessRate, r.Thresholds.MinConnectionSuccessRate},
-		{"idle success rate", r.IdleSuccessRate, r.Thresholds.MinIdleSuccessRate},
-	}
-	if r.ReconnectsAttempted > 0 {
-		checks = append(checks, struct {
-			name string
-			got  float64
-			want float64
-		}{"reconnect success rate", r.ReconnectSuccessRate, r.Thresholds.MinReconnectSuccessRate})
-	}
-	if r.RoomScenariosAttempted > 0 {
-		checks = append(checks, struct {
-			name string
-			got  float64
-			want float64
-		}{"room success rate", r.RoomSuccessRate, r.Thresholds.MinRoomSuccessRate})
-	}
-	matchAttempted := r.MatchOperationsAttempted + r.MatchTimeoutsAttempted
-	if matchAttempted > 0 {
-		checks = append(checks, struct {
-			name string
-			got  float64
-			want float64
-		}{"match success rate", r.MatchSuccessRate, r.Thresholds.MinMatchSuccessRate})
-	}
-	for _, check := range checks {
+	for _, check := range r.rateThresholdChecks() {
 		if check.got < check.want {
 			r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("%s %.4f is below %.4f", check.name, check.got, check.want))
 		}
 	}
+	r.evaluateLatencyThreshold()
+	r.evaluateServerRSS()
+	r.evaluateServerGoroutines()
+	r.evaluateFinalGoroutineDelta()
+	r.evaluateRedisErrors()
+	r.evaluateFinalConnectionDelta()
 
-	if r.Thresholds.MaxP99LatencyMS > 0 {
-		if r.LatencyMS.Count == 0 {
-			r.ThresholdFailures = append(r.ThresholdFailures, "p99 latency threshold configured but no latency samples were recorded")
-		} else if r.LatencyMS.P99 > r.Thresholds.MaxP99LatencyMS {
-			r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("p99 latency %.2fms exceeds %.2fms", r.LatencyMS.P99, r.Thresholds.MaxP99LatencyMS))
-		}
-	}
-	if r.Thresholds.MaxServerRSSBytes > 0 {
-		if r.PeakRSSBytes == nil {
-			r.ThresholdFailures = append(r.ThresholdFailures, "server RSS threshold configured but telemetry is unavailable")
-		} else if *r.PeakRSSBytes > r.Thresholds.MaxServerRSSBytes {
-			r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("server RSS %d exceeds %d bytes", *r.PeakRSSBytes, r.Thresholds.MaxServerRSSBytes))
-		}
-	}
-	if r.Thresholds.MaxServerGoroutines > 0 {
-		if r.PeakGoroutines == nil {
-			r.ThresholdFailures = append(r.ThresholdFailures, "server goroutine threshold configured but telemetry is unavailable")
-		} else if *r.PeakGoroutines > r.Thresholds.MaxServerGoroutines {
-			r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("server goroutines %d exceeds %d", *r.PeakGoroutines, r.Thresholds.MaxServerGoroutines))
-		}
-	}
-	if r.Thresholds.MaxFinalGoroutinesDelta >= 0 {
-		if r.BaselineGoroutines == nil || r.FinalGoroutines == nil {
-			r.ThresholdFailures = append(r.ThresholdFailures, "final goroutine threshold configured but telemetry is unavailable")
-		} else {
-			delta := *r.FinalGoroutines - *r.BaselineGoroutines
-			if delta > r.Thresholds.MaxFinalGoroutinesDelta {
-				r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("final goroutine delta %d exceeds %d", delta, r.Thresholds.MaxFinalGoroutinesDelta))
-			}
-		}
-	}
-	if r.Thresholds.MaxRedisErrors >= 0 {
-		if r.RedisErrorCount == nil {
-			r.ThresholdFailures = append(r.ThresholdFailures, "Redis error threshold configured but telemetry is unavailable")
-		} else if *r.RedisErrorCount > r.Thresholds.MaxRedisErrors {
-			r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("Redis error delta %d exceeds %d", *r.RedisErrorCount, r.Thresholds.MaxRedisErrors))
-		}
-	}
-	if r.Thresholds.MaxFinalConnectionsDelta >= 0 {
-		if r.BaselineConnections == nil || r.FinalConnections == nil {
-			r.ThresholdFailures = append(r.ThresholdFailures, "connection cleanup threshold configured but telemetry is unavailable")
-		} else {
-			delta := *r.FinalConnections - *r.BaselineConnections
-			if delta > r.Thresholds.MaxFinalConnectionsDelta {
-				r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("final connection delta %d exceeds %d", delta, r.Thresholds.MaxFinalConnectionsDelta))
-			}
-		}
-	}
 	if len(r.ThresholdFailures) == 0 {
 		r.Status = "passed"
 	} else {
 		r.Status = "failed"
+	}
+}
+
+func (r *loadReport) rateThresholdChecks() []rateThresholdCheck {
+	checks := []rateThresholdCheck{
+		{"connection success rate", r.ConnectionSuccessRate, r.Thresholds.MinConnectionSuccessRate},
+		{"idle success rate", r.IdleSuccessRate, r.Thresholds.MinIdleSuccessRate},
+	}
+	if r.ReconnectsAttempted > 0 {
+		checks = append(checks, rateThresholdCheck{"reconnect success rate", r.ReconnectSuccessRate, r.Thresholds.MinReconnectSuccessRate})
+	}
+	if r.RoomScenariosAttempted > 0 {
+		checks = append(checks, rateThresholdCheck{"room success rate", r.RoomSuccessRate, r.Thresholds.MinRoomSuccessRate})
+	}
+	matchAttempted := r.MatchOperationsAttempted + r.MatchTimeoutsAttempted
+	if matchAttempted > 0 {
+		checks = append(checks, rateThresholdCheck{"match success rate", r.MatchSuccessRate, r.Thresholds.MinMatchSuccessRate})
+	}
+	return checks
+}
+
+func (r *loadReport) evaluateLatencyThreshold() {
+	if r.Thresholds.MaxP99LatencyMS <= 0 {
+		return
+	}
+	if r.LatencyMS.Count == 0 {
+		r.ThresholdFailures = append(r.ThresholdFailures, "p99 latency threshold configured but no latency samples were recorded")
+	} else if r.LatencyMS.P99 > r.Thresholds.MaxP99LatencyMS {
+		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("p99 latency %.2fms exceeds %.2fms", r.LatencyMS.P99, r.Thresholds.MaxP99LatencyMS))
+	}
+}
+
+func (r *loadReport) evaluateServerRSS() {
+	if r.Thresholds.MaxServerRSSBytes <= 0 {
+		return
+	}
+	if r.PeakRSSBytes == nil {
+		r.ThresholdFailures = append(r.ThresholdFailures, "server RSS threshold configured but telemetry is unavailable")
+	} else if *r.PeakRSSBytes > r.Thresholds.MaxServerRSSBytes {
+		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("server RSS %d exceeds %d bytes", *r.PeakRSSBytes, r.Thresholds.MaxServerRSSBytes))
+	}
+}
+
+func (r *loadReport) evaluateServerGoroutines() {
+	if r.Thresholds.MaxServerGoroutines <= 0 {
+		return
+	}
+	if r.PeakGoroutines == nil {
+		r.ThresholdFailures = append(r.ThresholdFailures, "server goroutine threshold configured but telemetry is unavailable")
+	} else if *r.PeakGoroutines > r.Thresholds.MaxServerGoroutines {
+		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("server goroutines %d exceeds %d", *r.PeakGoroutines, r.Thresholds.MaxServerGoroutines))
+	}
+}
+
+func (r *loadReport) evaluateFinalGoroutineDelta() {
+	if r.Thresholds.MaxFinalGoroutinesDelta < 0 {
+		return
+	}
+	if r.BaselineGoroutines == nil || r.FinalGoroutines == nil {
+		r.ThresholdFailures = append(r.ThresholdFailures, "final goroutine threshold configured but telemetry is unavailable")
+		return
+	}
+	delta := *r.FinalGoroutines - *r.BaselineGoroutines
+	if delta > r.Thresholds.MaxFinalGoroutinesDelta {
+		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("final goroutine delta %d exceeds %d", delta, r.Thresholds.MaxFinalGoroutinesDelta))
+	}
+}
+
+func (r *loadReport) evaluateRedisErrors() {
+	if r.Thresholds.MaxRedisErrors < 0 {
+		return
+	}
+	if r.RedisErrorCount == nil {
+		r.ThresholdFailures = append(r.ThresholdFailures, "Redis error threshold configured but telemetry is unavailable")
+	} else if *r.RedisErrorCount > r.Thresholds.MaxRedisErrors {
+		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("Redis error delta %d exceeds %d", *r.RedisErrorCount, r.Thresholds.MaxRedisErrors))
+	}
+}
+
+func (r *loadReport) evaluateFinalConnectionDelta() {
+	if r.Thresholds.MaxFinalConnectionsDelta < 0 {
+		return
+	}
+	if r.BaselineConnections == nil || r.FinalConnections == nil {
+		r.ThresholdFailures = append(r.ThresholdFailures, "connection cleanup threshold configured but telemetry is unavailable")
+		return
+	}
+	delta := *r.FinalConnections - *r.BaselineConnections
+	if delta > r.Thresholds.MaxFinalConnectionsDelta {
+		r.ThresholdFailures = append(r.ThresholdFailures, fmt.Sprintf("final connection delta %d exceeds %d", delta, r.Thresholds.MaxFinalConnectionsDelta))
 	}
 }
 
@@ -240,10 +264,17 @@ func writeReports(report loadReport, jsonPath, markdownPath string) error {
 }
 
 func writeReportFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	cleanPath := filepath.Clean(path)
+	directory := filepath.Dir(cleanPath)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.WriteFile(filepath.Base(cleanPath), data, 0o600)
 }
 
 func renderMarkdown(report loadReport) string {
