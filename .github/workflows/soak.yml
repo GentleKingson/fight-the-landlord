@@ -1,0 +1,182 @@
+name: Soak
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      connections:
+        description: Concurrent idle connections
+        required: true
+        default: "500"
+        type: choice
+        options: ["100", "500", "1000"]
+      duration:
+        description: Idle hold duration
+        required: true
+        default: "15m"
+        type: choice
+        options: ["5m", "15m", "30m"]
+      reconnects:
+        description: Concurrent reconnect attempts
+        required: true
+        default: "50"
+        type: choice
+        options: ["10", "50", "100"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: WebSocket capacity soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      SERVER_ENV: development
+      SERVER_PORT: "1784"
+      SERVER_MAX_CONNECTIONS: "2000"
+      SERVER_MIN_CLIENT_VERSION: ""
+      REDIS_ADDR: 127.0.0.1:6379
+      BOT_ENABLED: "false"
+      DOUZERO_ENABLED: "false"
+      SECURITY_ALLOWED_ORIGINS: "*"
+      SECURITY_RATE_LIMIT_PER_SECOND: "5000"
+      SECURITY_RATE_LIMIT_PER_MINUTE: "100000"
+      SECURITY_MESSAGE_LIMIT_PER_SECOND: "100000"
+      SECURITY_CHAT_LIMIT_PER_SECOND: "100000"
+      SECURITY_CHAT_LIMIT_PER_MINUTE: "100000"
+      OBSERVABILITY_METRICS_ENABLED: "true"
+      OBSERVABILITY_LOG_FORMAT: json
+      GAME_SHUTDOWN_TIMEOUT: "1"
+      GAME_SHUTDOWN_CHECK_INTERVAL: "1"
+    services:
+      redis:
+        image: redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+          --label fight-landlord.chaos-scope=${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test load generator
+        run: go test ./tests/load -count=1
+
+      - name: Build and start isolated server
+        id: start_server
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/soak
+          go build -o "$RUNNER_TEMP/fight-landlord-soak-server" ./cmd/server
+          "$RUNNER_TEMP/fight-landlord-soak-server" > artifacts/soak/server.log 2>&1 &
+          server_pid=$!
+          printf '%s\n' "$server_pid" > "$RUNNER_TEMP/fight-landlord-soak-server.pid"
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:1784/readyz >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat artifacts/soak/server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat artifacts/soak/server.log
+          exit 1
+
+      - name: Run configurable soak
+        env:
+          LOAD_TEST_URL: ws://127.0.0.1:1784/ws
+          LOAD_TEST_METRICS_URL: http://127.0.0.1:1784/metrics
+          SOAK_CONNECTIONS: ${{ inputs.connections || '500' }}
+          SOAK_DURATION: ${{ inputs.duration || '15m' }}
+          SOAK_RECONNECTS: ${{ inputs.reconnects || '50' }}
+          SOAK_ROOM_OPERATIONS: "25"
+          SOAK_MATCH_OPERATIONS: "10"
+          SOAK_MATCH_TIMEOUTS: "1"
+          SOAK_CONNECT_CONCURRENCY: "20"
+          SOAK_MAX_REDIS_ERRORS: "0"
+          SOAK_MAX_FINAL_CONNECTIONS_DELTA: "0"
+          SOAK_MAX_FINAL_GOROUTINES_DELTA: "10"
+        run: ./scripts/run-soak-test.sh
+
+      - name: Run controlled fault matrix
+        env:
+          CHAOS_REDIS_CONTAINER_ID: ${{ job.services.redis.id }}
+          CHAOS_SCOPE: ${{ github.run_id }}-${{ github.run_attempt }}
+          CHAOS_SERVER_BINARY: ${{ runner.temp }}/fight-landlord-soak-server
+          CHAOS_SERVER_PID_FILE: ${{ runner.temp }}/fight-landlord-soak-server.pid
+          CHAOS_SERVER_LOG: artifacts/soak/server.log
+          CHAOS_OUTPUT_DIR: artifacts/soak/chaos
+        run: ./scripts/run-chaos-test.sh
+
+      - name: Verify server survived
+        if: always() && steps.start_server.outcome == 'success'
+        run: |
+          set -euo pipefail
+          server_pid=$(cat "$RUNNER_TEMP/fight-landlord-soak-server.pid")
+          kill -0 "$server_pid"
+          curl --fail http://127.0.0.1:1784/livez
+          curl --fail http://127.0.0.1:1784/readyz
+          curl --fail http://127.0.0.1:1784/metrics > artifacts/soak/final-metrics.txt
+
+      - name: Capture diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts/soak
+          curl --silent --show-error http://127.0.0.1:1784/metrics > artifacts/soak/last-metrics.txt 2>&1 || true
+          ps -eo pid,ppid,rss,etime,command > artifacts/soak/processes.txt
+
+      - name: Stop isolated server
+        if: always()
+        run: |
+          set -euo pipefail
+          pid_file="$RUNNER_TEMP/fight-landlord-soak-server.pid"
+          if [ ! -f "$pid_file" ]; then
+            exit 0
+          fi
+          server_pid=$(cat "$pid_file")
+          if kill -0 "$server_pid" 2>/dev/null; then
+            kill -TERM "$server_pid"
+            for _ in $(seq 1 30); do
+              if ! kill -0 "$server_pid" 2>/dev/null; then
+                exit 0
+              fi
+              sleep 1
+            done
+            kill -KILL "$server_pid"
+          fi
+          for _ in $(seq 1 10); do
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server process $server_pid survived cleanup" >&2
+          exit 1
+
+      - name: Upload soak evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: websocket-soak-evidence
+          path: artifacts/soak/
+          if-no-files-found: warn
+          retention-days: 14

@@ -164,6 +164,128 @@ jobs:
       - name: Run mock Playwright accessibility and screenshot tests
         run: npm run test:e2e
 
+  load-smoke:
+    name: Short WebSocket load smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test load generator
+        run: go test ./tests/load -count=1
+
+      - name: Build and start smoke server
+        id: start_load_server
+        env:
+          SERVER_ENV: development
+          SERVER_PORT: "1783"
+          SERVER_MAX_CONNECTIONS: "100"
+          SERVER_MIN_CLIENT_VERSION: ""
+          REDIS_ADDR: 127.0.0.1:6379
+          BOT_ENABLED: "false"
+          DOUZERO_ENABLED: "false"
+          SECURITY_ALLOWED_ORIGINS: "*"
+          SECURITY_RATE_LIMIT_PER_SECOND: "100"
+          SECURITY_RATE_LIMIT_PER_MINUTE: "1000"
+          SECURITY_MESSAGE_LIMIT_PER_SECOND: "100"
+          OBSERVABILITY_METRICS_ENABLED: "true"
+          OBSERVABILITY_LOG_FORMAT: json
+          GAME_SHUTDOWN_TIMEOUT: "1"
+          GAME_SHUTDOWN_CHECK_INTERVAL: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/load-smoke
+          go build -o "$RUNNER_TEMP/fight-landlord-load-server" ./cmd/server
+          "$RUNNER_TEMP/fight-landlord-load-server" > artifacts/load-smoke/server.log 2>&1 &
+          server_pid=$!
+          printf '%s\n' "$server_pid" > "$RUNNER_TEMP/fight-landlord-load-server.pid"
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:1783/readyz >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat artifacts/load-smoke/server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat artifacts/load-smoke/server.log
+          exit 1
+
+      - name: Run short load smoke
+        env:
+          LOAD_TEST_URL: ws://127.0.0.1:1783/ws
+          LOAD_TEST_METRICS_URL: http://127.0.0.1:1783/metrics
+          LOAD_TEST_CONNECTIONS: "10"
+          LOAD_TEST_CONNECT_CONCURRENCY: "5"
+          LOAD_TEST_DURATION: 5s
+          LOAD_TEST_COOLDOWN: 2s
+          LOAD_TEST_RECONNECTS: "3"
+          LOAD_TEST_ROOM_OPERATIONS: "3"
+          LOAD_TEST_MATCH_OPERATIONS: "2"
+          LOAD_TEST_MATCH_TIMEOUTS: "0"
+          LOAD_TEST_MAX_REDIS_ERRORS: "0"
+          LOAD_TEST_MAX_FINAL_CONNECTIONS_DELTA: "0"
+          LOAD_TEST_MAX_FINAL_GOROUTINES_DELTA: "10"
+          LOAD_TEST_JSON_OUT: artifacts/load-smoke/load-test.json
+          LOAD_TEST_MARKDOWN_OUT: artifacts/load-smoke/load-test.md
+        run: ./scripts/run-load-test.sh
+
+      - name: Verify smoke server survived
+        if: always() && steps.start_load_server.outcome == 'success'
+        run: |
+          set -euo pipefail
+          server_pid=$(cat "$RUNNER_TEMP/fight-landlord-load-server.pid")
+          kill -0 "$server_pid"
+          curl --fail http://127.0.0.1:1783/livez
+          curl --fail http://127.0.0.1:1783/metrics > artifacts/load-smoke/final-metrics.txt
+
+      - name: Stop smoke server
+        if: always()
+        run: |
+          set -euo pipefail
+          pid_file="$RUNNER_TEMP/fight-landlord-load-server.pid"
+          if [ ! -f "$pid_file" ]; then
+            exit 0
+          fi
+          server_pid=$(cat "$pid_file")
+          if kill -0 "$server_pid" 2>/dev/null; then
+            kill -TERM "$server_pid"
+            for _ in $(seq 1 20); do
+              if ! kill -0 "$server_pid" 2>/dev/null; then
+                exit 0
+              fi
+              sleep 1
+            done
+            kill -KILL "$server_pid"
+          fi
+
+      - name: Upload load smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: websocket-load-smoke
+          path: artifacts/load-smoke/
+          if-no-files-found: warn
+
   production-e2e:
     name: Shipped-image production E2E
     needs: [go, web]
