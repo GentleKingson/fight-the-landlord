@@ -1,7 +1,7 @@
 services:
   # 游戏服务器
   poker-server:
-    image: ${GAME_IMAGE:-gentlekingson/fight-the-landlord}:${IMAGE_TAG:-latest}
+    image: ${GAME_IMAGE_REF:-${GAME_IMAGE:-gentlekingson/fight-the-landlord}:${IMAGE_TAG:-latest}}
     restart: unless-stopped
     stop_grace_period: ${GAME_SHUTDOWN_TIMEOUT:-30}m
     stop_signal: SIGTERM
@@ -33,12 +33,12 @@ services:
       GAME_ROOM_CLEANUP_DELAY: ${GAME_ROOM_CLEANUP_DELAY:-30}
       GAME_OFFLINE_WAIT_TIMEOUT: ${GAME_OFFLINE_WAIT_TIMEOUT:-30}
     ports:
-      - "${SERVER_PORT:-1780}:1780"
+      - "${SERVER_BIND_ADDRESS:-127.0.0.1}:${SERVER_PORT:-1780}:1780"
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/app/server", "-healthcheck"]
+      test: ["CMD", "/app/server", "-healthcheck", "-healthcheck-url", "http://127.0.0.1:1780/readyz"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -48,7 +48,7 @@ services:
 
   # DouZero 推理服务
   douzero:
-    image: ${DOUZERO_IMAGE:-gentlekingson/fight-the-landlord-douzero}:${IMAGE_TAG:-latest}
+    image: ${DOUZERO_IMAGE_REF:-${DOUZERO_IMAGE:-gentlekingson/fight-the-landlord-douzero}:${IMAGE_TAG:-latest}}
     profiles: ["douzero"]
     restart: unless-stopped
     networks:

@@ -15,8 +15,8 @@ server:
 observability:
   metrics_enabled: true
   metrics_path: "/metrics"
-  # Production deployments should keep JSON; local development may use text.
-  log_format: "text"
+  # JSON is the shipped default; local development may opt into text explicitly.
+  log_format: "json"
 
 redis:
   addr: "localhost:6379"

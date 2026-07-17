@@ -298,6 +298,14 @@ func TestDefault(t *testing.T) {
 	assert.Equal(t, "json", cfg.Observability.LogFormat)
 }
 
+func TestShippedConfigUsesJSONLogs(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := Load(filepath.Join("..", "..", "config.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "json", cfg.Observability.LogFormat)
+}
+
 func TestGameConfig_DurationMethods(t *testing.T) {
 	t.Parallel()
 

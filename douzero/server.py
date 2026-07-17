@@ -2,20 +2,21 @@
 """
 DouZero HTTP service — ONNX runtime edition.
 
-Models are downloaded from HuggingFace on first startup.
+Models are verified and downloaded from an immutable Hugging Face revision
+when they are not already embedded in the image.
 No torch required.
 """
 
 import os
 import json
 import traceback
-import urllib.request
 from collections import Counter
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import numpy as np
 import onnxruntime as ort
 
+from model_assets import download_models
 from src import move_detector as md, move_selector as ms
 from src.move_generator import MovesGener
 from src.game import InfoSet
@@ -23,25 +24,10 @@ from src.env import get_obs
 
 MODEL_DIR = os.environ.get("DOUZERO_MODELS", os.path.join(os.path.dirname(__file__), "models"))
 PORT = int(os.environ.get("PORT", 2021))
-HF_BASE = "https://huggingface.co/palemoky/douzero-baselines/resolve/main/models_onnx/douzero_WP"
 
 POSITIONS = ["landlord", "landlord_down", "landlord_up"]
 
 sessions: dict[str, ort.InferenceSession] = {}
-
-
-def download_models() -> None:
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    for pos in POSITIONS:
-        path = os.path.join(MODEL_DIR, f"{pos}.onnx")
-        if os.path.exists(path):
-            print(f"  Found   {pos}.onnx")
-            continue
-        url = f"{HF_BASE}/{pos}.onnx"
-        print(f"  Downloading {pos}.onnx ...")
-        urllib.request.urlretrieve(url, path)
-        print(f"  Saved → {path}")
-
 
 def load_sessions() -> None:
     providers = ["CPUExecutionProvider"]
@@ -244,8 +230,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("Downloading ONNX models from HuggingFace (if needed) ...")
-    download_models()
+    print("Verifying ONNX models (and downloading missing files) ...")
+    download_models(MODEL_DIR)
     print(f"\nLoading ONNX sessions ...")
     load_sessions()
     server = HTTPServer(("0.0.0.0", PORT), Handler)
