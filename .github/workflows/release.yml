@@ -17,9 +17,48 @@ env:
   IMAGE_NAME: gentlekingson/${{ github.event.repository.name }}
 
 jobs:
+  release-metadata:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    steps:
+      - name: Parse release version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          version="${TAG#v}"
+          # metadata-action omits build metadata from {{version}}, which could
+          # overwrite the core release tag.
+          release_version_regex='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
+
+          if [[ "$TAG" != v* || ! "$version" =~ $release_version_regex ]]; then
+            echo "Release tag must match vMAJOR.MINOR.PATCH[-PRERELEASE] without build metadata: $TAG" >&2
+            exit 1
+          fi
+
+          is_prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease="${version#*-}"
+            IFS='.' read -r -a identifiers <<< "$prerelease"
+            for identifier in "${identifiers[@]}"; do
+              if [[ "$identifier" =~ ^[0-9]+$ && "$identifier" == 0[0-9]* ]]; then
+                echo "Numeric prerelease identifiers must not contain leading zeroes: $TAG" >&2
+                exit 1
+              fi
+            done
+            is_prerelease=true
+          fi
+
+          echo "is_prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
+
   # 构建客户端二进制文件
   build-client:
     name: Build client binaries
+    needs: release-metadata
     runs-on: ubuntu-latest
     env:
       GO_TRIXIE_DIGEST: sha256:4e603da0ea8df4a8ab10cbf0b3061f7823d277e82ea210a47c32a5fafb43cc43
@@ -108,7 +147,7 @@ jobs:
   # 创建 GitHub Release
   create-release:
     name: Create GitHub release
-    needs: build-client
+    needs: [release-metadata, build-client, build-and-push-docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -129,11 +168,12 @@ jobs:
           files: artifacts/*
           generate_release_notes: true
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.release-metadata.outputs.is_prerelease == 'true' }}
 
   # 构建并推送 Docker 镜像
   build-and-push-docker:
     name: Build and push Docker image
+    needs: [release-metadata, build-client]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -171,18 +211,20 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=auto
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest
 
       - name: Extract DouZero metadata
         id: meta_douzero
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-douzero
+          flavor: |
+            latest=auto
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest
 
       - name: Extract Go Version
         id: go_version

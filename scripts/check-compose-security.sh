@@ -6,12 +6,56 @@ command -v docker >/dev/null
 command -v jq >/dev/null
 command -v python3 >/dev/null
 
-# This value is only used to render the Compose model. Production receives the
-# real value from its secret manager when Compose creates redis_password.
-export REDIS_PASSWORD="${REDIS_PASSWORD:-compose-security-check-only}"
-export REDIS_DEBUG_PORT=6379
+# Render every fixture from the checked-in Compose file and env example. Shell
+# variables take precedence over --env-file, so remove every model variable
+# before applying the few overrides a fixture intentionally exercises.
+compose_variable_unsets=()
+while read -r variable; do
+  [[ "$variable" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+    echo >&2 "unexpected Compose variable name: $variable"
+    exit 1
+  }
+  compose_variable_unsets+=(-u "$variable")
+done < <(
+  COMPOSE_PROJECT_NAME=compose-security-check \
+    COMPOSE_PROFILES='' \
+    docker compose \
+      --file docker-compose.yml \
+      --env-file .env.example \
+      config --variables --format json | jq -r 'keys[]'
+)
 
-default_config="$(docker compose --env-file .env.example config --format json)"
+test "${#compose_variable_unsets[@]}" -gt 0
+
+compose_security_password="compose-security-check-only"
+
+render_compose_config() {
+  local -a isolated_environment=(
+    env
+    "${compose_variable_unsets[@]}"
+    -u COMPOSE_FILE
+    -u COMPOSE_PROFILES
+    -u COMPOSE_PROJECT_NAME
+    -u COMPOSE_ENV_FILES
+    -u COMPOSE_DISABLE_ENV_FILE
+    COMPOSE_PROJECT_NAME=compose-security-check
+    REDIS_PASSWORD="$compose_security_password"
+  )
+
+  while [[ "$#" -gt 0 && "$1" == *=* ]]; do
+    isolated_environment+=("$1")
+    shift
+  done
+
+  "${isolated_environment[@]}" \
+    docker compose \
+      --file docker-compose.yml \
+      --env-file .env.example \
+      "$@" \
+      config --format json
+}
+
+default_config="$(render_compose_config)"
 
 jq -e '
   (.services.redis.ports // []) == [] and
@@ -58,9 +102,9 @@ if grep -R -n -E 'huggingface\.co/.*/resolve/(main|master)/' douzero/Dockerfile 
 fi
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s douzero -p 'test_model_assets.py'
 
-jq -e '
+jq -e --arg redis_password "$compose_security_password" '
   .services["poker-server"].environment.SERVER_ENV == "production" and
-  .services["poker-server"].environment.REDIS_PASSWORD == env.REDIS_PASSWORD and
+  .services["poker-server"].environment.REDIS_PASSWORD == $redis_password and
   .services["poker-server"].environment.SERVER_MAX_CONNECTIONS == "10000" and
   .services["poker-server"].environment.SECURITY_RATE_LIMIT_PER_SECOND == "10" and
   .services["poker-server"].environment.SECURITY_RATE_LIMIT_PER_MINUTE == "60" and
@@ -68,11 +112,11 @@ jq -e '
 ' <<<"$default_config" >/dev/null
 
 load_config="$(
-  SERVER_MAX_CONNECTIONS=2000 \
-  SECURITY_RATE_LIMIT_PER_SECOND=2000 \
-  SECURITY_RATE_LIMIT_PER_MINUTE=100000 \
-  SECURITY_MESSAGE_LIMIT_PER_SECOND=100 \
-  docker compose --env-file .env.example config --format json
+  render_compose_config \
+    SERVER_MAX_CONNECTIONS=2000 \
+    SECURITY_RATE_LIMIT_PER_SECOND=2000 \
+    SECURITY_RATE_LIMIT_PER_MINUTE=100000 \
+    SECURITY_MESSAGE_LIMIT_PER_SECOND=100
 )"
 jq -e '
   .services["poker-server"].environment.SERVER_MAX_CONNECTIONS == "2000" and
@@ -82,16 +126,17 @@ jq -e '
 ' <<<"$load_config" >/dev/null
 
 digest_config="$(
-  GAME_IMAGE_REF='gentlekingson/fight-the-landlord@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
-  DOUZERO_IMAGE_REF='gentlekingson/fight-the-landlord-douzero@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
-  docker compose --env-file .env.example --profile douzero config --format json
+  render_compose_config \
+    GAME_IMAGE_REF='gentlekingson/fight-the-landlord@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    DOUZERO_IMAGE_REF='gentlekingson/fight-the-landlord-douzero@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+    --profile douzero
 )"
 jq -e '
   .services["poker-server"].image == "gentlekingson/fight-the-landlord@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" and
   .services.douzero.image == "gentlekingson/fight-the-landlord-douzero@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 ' <<<"$digest_config" >/dev/null
 
-debug_config="$(docker compose --env-file .env.example --profile redis-debug config --format json)"
+debug_config="$(render_compose_config --profile redis-debug)"
 
 jq -e '
   .services["redis-debug"].profiles == ["redis-debug"] and

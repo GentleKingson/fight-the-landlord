@@ -64,10 +64,19 @@ reject_regex douzero/README.md 'docker build -t palemoky/fight-the-landlord'
 require_literal .github/workflows/release.yml 'IMAGE_NAME: gentlekingson/${{ github.event.repository.name }}'
 require_literal .github/workflows/release.yml 'images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}'
 require_literal .github/workflows/release.yml 'images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-douzero'
-if [[ "$(grep -Fc 'type=raw,value=latest' .github/workflows/release.yml)" -ne 2 ]]; then
-  fail "release workflow must publish latest for both semver-tagged images"
+if [[ "$(grep -Fc 'type=semver,pattern={{version}}' .github/workflows/release.yml)" -ne 2 ]]; then
+  fail "release workflow must derive both image tags from SemVer metadata"
 fi
-reject_regex .github/workflows/release.yml 'type=raw,value=latest,enable=\{\{is_default_branch\}\}'
+if [[ "$(grep -Fc 'latest=auto' .github/workflows/release.yml)" -ne 2 ]]; then
+  fail "release workflow must exclude prerelease images from both latest tags"
+fi
+if grep -Fq 'type=raw,value=latest' .github/workflows/release.yml; then
+  fail "release workflow must let SemVer latest=auto exclude prerelease images"
+fi
+require_literal .github/workflows/release.yml 'needs: [release-metadata, build-client, build-and-push-docker]'
+require_literal .github/workflows/release.yml 'needs: [release-metadata, build-client]'
+require_literal .github/workflows/release.yml "prerelease: \${{ needs.release-metadata.outputs.is_prerelease == 'true' }}"
+require_literal .github/workflows/release.yml 'without build metadata: $TAG'
 require_literal .github/workflows/release.yml 'GO_TRIXIE_DIGEST: sha256:'
 require_literal .github/workflows/release.yml '"golang:${GO_VERSION}-trixie@${GO_TRIXIE_DIGEST}"'
 
