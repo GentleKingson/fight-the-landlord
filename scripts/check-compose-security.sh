@@ -60,7 +60,8 @@ default_config="$(render_compose_config)"
 jq -e '
   (.services.redis.ports // []) == [] and
   (.services.redis.image | contains("@sha256:")) and
-  .services["poker-server"].image == "gentlekingson/fight-the-landlord:latest"
+  .services["poker-server"].image == "gentlekingson/fight-the-landlord:v0.6.0-rc.1" and
+  (.services | has("douzero") | not)
 ' <<<"$default_config" >/dev/null
 
 jq -e '
@@ -72,6 +73,16 @@ jq -e '
     "protocol": "tcp"
   }] and
   (.services["poker-server"].healthcheck.test | join(" ") | contains("/readyz"))
+' <<<"$default_config" >/dev/null
+
+jq -e '
+  .services.redis.restart == "unless-stopped" and
+  .services["poker-server"].restart == "unless-stopped" and
+  .services["poker-server"].depends_on.redis.condition == "service_healthy" and
+  (.services.redis.healthcheck.test | join(" ") | contains("redis-cli ping")) and
+  (.services.redis.volumes | any(.type == "volume" and .source == "redis-data" and .target == "/data")) and
+  .volumes["redis-data"].driver == "local" and
+  (.services.redis.command | join(" ") | contains("--appendonly yes"))
 ' <<<"$default_config" >/dev/null
 
 jq -e '
@@ -90,6 +101,13 @@ grep -Eq '^ARG GO_DIGEST=sha256:[0-9a-f]{64}$' Dockerfile
 grep -Eq '^ARG NODE_DIGEST=sha256:[0-9a-f]{64}$' Dockerfile
 grep -Eq '^ARG RUNTIME_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile
 grep -Fq 'http://127.0.0.1:1780/readyz' Dockerfile
+grep -Eq '^  host: "127\.0\.0\.1"$' config.yaml
+grep -Eq '^  max_connections: 100$' config.yaml
+grep -Eq '^  douzero_enabled: false$' config.yaml
+if grep -Eq '^    - "\*"$' config.yaml; then
+  echo >&2 "wildcard Origin found in shipped config.yaml"
+  exit 1
+fi
 grep -Eq '^  log_format: "json"$' config.yaml
 
 # Model artifacts must come from an immutable Hub commit and every expected
@@ -105,7 +123,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s douzero -p 'test_model
 jq -e --arg redis_password "$compose_security_password" '
   .services["poker-server"].environment.SERVER_ENV == "production" and
   .services["poker-server"].environment.REDIS_PASSWORD == $redis_password and
-  .services["poker-server"].environment.SERVER_MAX_CONNECTIONS == "10000" and
+  .services["poker-server"].environment.SERVER_MAX_CONNECTIONS == "100" and
   .services["poker-server"].environment.SECURITY_RATE_LIMIT_PER_SECOND == "10" and
   .services["poker-server"].environment.SECURITY_RATE_LIMIT_PER_MINUTE == "60" and
   .services["poker-server"].environment.SECURITY_MESSAGE_LIMIT_PER_SECOND == "20"

@@ -216,6 +216,10 @@ docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q poker
 
 ## 升级和回滚
 
+升级前先使用 [Redis 备份脚本](redis-backup.md) 创建并校验恢复点。Redis 恢复
+不能恢复单进程内存中的活动牌局或 WebSocket 会话，因此恢复必须在 draining 后的
+维护窗口执行。
+
 生产环境设置了 `GAME_IMAGE_REF`/`DOUZERO_IMAGE_REF` 后，`IMAGE_TAG` 不再生效。
 升级和回滚都应直接编辑 `.env` 中已经过 cosign、SBOM 和 provenance 验证的完整
 `repository@sha256:...` 引用，并保存上一个 digest：

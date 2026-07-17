@@ -21,10 +21,10 @@ import (
 
 // 默认配置值
 const (
-	defaultHost                  = "0.0.0.0"
+	defaultHost                  = "127.0.0.1"
 	defaultEnvironment           = "development"
 	defaultPort                  = 1780
-	defaultMaxConnections        = 10000
+	defaultMaxConnections        = 100
 	defaultRedisAddr             = "localhost:6379"
 	defaultTurnTimeout           = 30
 	defaultBidTimeout            = 15

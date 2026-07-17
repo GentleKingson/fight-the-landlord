@@ -297,8 +297,9 @@ func TestDefault(t *testing.T) {
 	require.NotNil(t, cfg)
 
 	// Verify defaults are set
-	assert.Equal(t, defaultHost, cfg.Server.Host)
+	assert.Equal(t, "127.0.0.1", cfg.Server.Host)
 	assert.Equal(t, defaultPort, cfg.Server.Port)
+	assert.Equal(t, 100, cfg.Server.MaxConnections)
 	assert.Equal(t, defaultTurnTimeout, cfg.Game.TurnTimeout)
 	assert.True(t, cfg.Observability.MetricsEnabled)
 	assert.Equal(t, "/metrics", cfg.Observability.MetricsPath)

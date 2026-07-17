@@ -1,7 +1,7 @@
 services:
   # 游戏服务器
   poker-server:
-    image: ${GAME_IMAGE_REF:-${GAME_IMAGE:-gentlekingson/fight-the-landlord}:${IMAGE_TAG:-latest}}
+    image: ${GAME_IMAGE_REF:-${GAME_IMAGE:-gentlekingson/fight-the-landlord}:${IMAGE_TAG:-v0.6.0-rc.1}}
     restart: unless-stopped
     stop_grace_period: ${GAME_SHUTDOWN_TIMEOUT:-30}m
     stop_signal: SIGTERM
@@ -12,7 +12,7 @@ services:
       # listens on 1780 so changing the host port cannot break the mapping.
       SERVER_PORT: 1780
       SERVER_ENV: ${SERVER_ENV:-production}
-      SERVER_MAX_CONNECTIONS: ${SERVER_MAX_CONNECTIONS:-10000}
+      SERVER_MAX_CONNECTIONS: ${SERVER_MAX_CONNECTIONS:-100}
       SERVER_MIN_CLIENT_VERSION: ${SERVER_MIN_CLIENT_VERSION:-}
       OBSERVABILITY_METRICS_ENABLED: ${OBSERVABILITY_METRICS_ENABLED:-true}
       OBSERVABILITY_METRICS_PATH: ${OBSERVABILITY_METRICS_PATH:-/metrics}
@@ -53,7 +53,7 @@ services:
 
   # DouZero 推理服务
   douzero:
-    image: ${DOUZERO_IMAGE_REF:-${DOUZERO_IMAGE:-gentlekingson/fight-the-landlord-douzero}:${IMAGE_TAG:-latest}}
+    image: ${DOUZERO_IMAGE_REF:-${DOUZERO_IMAGE:-gentlekingson/fight-the-landlord-douzero}:${IMAGE_TAG:-v0.6.0-rc.1}}
     profiles: ["douzero"]
     restart: unless-stopped
     networks:
