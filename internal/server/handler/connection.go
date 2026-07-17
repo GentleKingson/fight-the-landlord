@@ -29,8 +29,14 @@ func (h *Handler) handlePing(client types.ClientInterface, msg *protocol.Message
 
 // handleReconnect 处理断线重连
 func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Message) {
+	if h.metrics != nil {
+		h.metrics.ReconnectAttempt()
+	}
 	payload, err := codec.ParsePayload[protocol.ReconnectPayload](msg)
 	if err != nil {
+		if h.metrics != nil {
+			h.metrics.ReconnectFailure("decode")
+		}
 		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, protocol.MsgReconnect))
 		return
 	}
@@ -40,6 +46,9 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	// Reject before consuming either reconnect credential; clients must leave
 	// their provisional room before restoring another identity.
 	if client.GetRoom() != "" {
+		if h.metrics != nil {
+			h.metrics.ReconnectFailure("already_bound")
+		}
 		sendMessage(client, codec.NewCommandErrorMessageWithText(
 			protocol.ErrCodeReconnectInvalid,
 			"当前连接已加入房间，无法恢复其他身份",
@@ -72,16 +81,25 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 
 	restoredRoom, responseSent, restoreErr := h.restoreReconnectRoom(client, restored, &reconnectPayload)
 	if errors.Is(restoreErr, room.ErrReconnectResponseDelivery) {
+		if h.metrics != nil {
+			h.metrics.ReconnectFailure("delivery")
+		}
 		h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName)
 		return
 	}
 	if restoredRoom == nil {
 		sent, sendErr := h.sendReconnected(client, restored, nil, &reconnectPayload)
 		if sendErr != nil || !sent {
+			if h.metrics != nil {
+				h.metrics.ReconnectFailure("delivery")
+			}
 			h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName)
 			return
 		}
 	} else if !responseSent {
+		if h.metrics != nil {
+			h.metrics.ReconnectFailure("snapshot_skipped")
+		}
 		h.closeSkippedReconnect(client, previous, restored.PlayerID)
 		return
 	}
@@ -97,6 +115,9 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	}
 
 	log.Printf("🔄 玩家 %s (%s) 重连成功", restored.PlayerName, restored.PlayerID)
+	if h.metrics != nil {
+		h.metrics.ReconnectSuccess()
+	}
 }
 
 func (h *Handler) restoreReconnectSession(
@@ -111,6 +132,13 @@ func (h *Handler) restoreReconnectSession(
 	code := protocol.ErrCodeReconnectInvalid
 	if errors.Is(err, session.ErrReconnectExpired) {
 		code = protocol.ErrCodeReconnectExpired
+	}
+	if h.metrics != nil {
+		reason := "invalid"
+		if errors.Is(err, session.ErrReconnectExpired) {
+			reason = "expired"
+		}
+		h.metrics.ReconnectFailure(reason)
 	}
 	sendMessage(client, codec.NewCommandErrorMessage(code, protocol.MsgReconnect))
 	return nil, false
@@ -129,6 +157,9 @@ func (h *Handler) rebindRestoredClient(
 	}
 	if !h.sessionManager.RollbackRestore(restored) {
 		h.sessionManager.SetOffline(restored.PlayerID)
+	}
+	if h.metrics != nil {
+		h.metrics.ReconnectFailure("rebind")
 	}
 	log.Printf("重连身份绑定失败: %v", err)
 	sendMessage(client, codec.NewCommandErrorMessageWithText(

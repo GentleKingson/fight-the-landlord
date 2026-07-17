@@ -40,6 +40,7 @@ func (rm *RoomManager) createRoom(client types.ClientInterface, publishResponse 
 	room.playerOrder = append(room.playerOrder, creator.ID)
 	rm.rooms[code] = room
 	rm.mu.Unlock()
+	rm.reportRoomCount()
 	if publishResponse {
 		message := codec.MustNewMessage(protocol.MsgRoomCreated, protocol.RoomCreatedPayload{
 			RoomCode: room.Code,

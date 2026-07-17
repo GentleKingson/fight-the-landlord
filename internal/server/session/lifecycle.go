@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand/v2"
 	"slices"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
@@ -20,6 +21,11 @@ func (gs *GameSession) Start() {
 		gs.mu.Unlock()
 		gs.actionMu.Unlock()
 		return
+	}
+	if gs.metrics != nil && !gs.metricStarted {
+		gs.metricStarted = true
+		gs.metricStartedAt = time.Now()
+		gs.metrics.GameStarted()
 	}
 	gs.startBiddingRound()
 	work := gs.takePendingWorkLocked()
@@ -37,6 +43,10 @@ func (gs *GameSession) Retire() {
 	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
 	gs.retired = true
+	if gs.metrics != nil && gs.metricStarted && !gs.metricFinished {
+		gs.metricFinished = true
+		gs.metrics.GameAborted()
+	}
 	gs.mu.Unlock()
 	gs.stopTimer()
 }
@@ -167,6 +177,10 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	gs.stopTimer()
 	gs.state = GameStateEnded
 	gs.room.SetState(RoomStateEnded)
+	if gs.metrics != nil && gs.metricStarted && !gs.metricFinished {
+		gs.metricFinished = true
+		gs.metrics.GameFinished(time.Since(gs.metricStartedAt))
+	}
 
 	// 计算最终倍数与各玩家得分
 	multiplier := gs.finalMultiplier(winner)

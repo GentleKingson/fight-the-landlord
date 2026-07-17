@@ -43,6 +43,13 @@ func (rm *RoomManager) removePublishedRoomLocked(gameRoom *Room, reason RoomRemo
 }
 
 func (rm *RoomManager) dispatchRoomRemoval(dispatch roomRemovalDispatch) {
+	rm.mu.RLock()
+	metrics := rm.metrics
+	rm.mu.RUnlock()
+	if metrics != nil {
+		metrics.RoomCleaned()
+	}
+	rm.reportRoomCount()
 	// Retire sessions and unlink external lifecycle state before any Close or
 	// delivery can block. RoomManager and Room locks were released by callers.
 	if dispatch.callback != nil {

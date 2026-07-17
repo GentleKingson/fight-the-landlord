@@ -48,6 +48,15 @@ func (s *Server) httpHandler(assets fs.FS) http.Handler {
 	mux.HandleFunc("/readyz", s.handleReadyz)
 	mux.HandleFunc("/version", s.handleVersion)
 	mux.HandleFunc("/session/revoke", s.handleSessionRevoke)
+	if s.config != nil && s.config.Observability.MetricsPath != "" {
+		metricsHandler := http.NotFoundHandler()
+		if s.config.Observability.MetricsEnabled && s.metrics != nil {
+			metricsHandler = s.metrics.Handler()
+		}
+		// Register even when disabled so the SPA fallback cannot turn the
+		// configured metrics path into a misleading HTTP 200 response.
+		mux.Handle(s.config.Observability.MetricsPath, metricsHandler)
+	}
 
 	if assets != nil {
 		staticHandler, err := newSPAHandler(assets, Version)

@@ -135,16 +135,23 @@ func (c *Client) ReadPump() {
 
 func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
 	if frameType != websocket.BinaryMessage {
+		if c.server != nil && c.server.metrics != nil {
+			c.server.metrics.ProtocolError("non_binary_frame")
+		}
 		_ = c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeInvalidMsg, "消息必须使用二进制 protobuf 帧"))
 		return true
 	}
 	msg, err := codec.Decode(frame)
 	if err != nil {
+		if c.server != nil && c.server.metrics != nil {
+			c.server.metrics.ProtocolError("decode")
+		}
 		log.Printf("消息解析错误: %v", err)
 		_ = c.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
 		return true
 	}
 	defer codec.PutMessage(msg)
+	started := time.Now()
 
 	c.attachLegacyChatCommand(msg)
 	requestID := ""
@@ -152,6 +159,14 @@ func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
 		requestID = msg.Command.RequestID
 	}
 	if !isClientCommand(msg.Type) || !validRequestID(requestID) {
+		if c.server != nil && c.server.metrics != nil {
+			reason := "invalid_request_id"
+			if !isClientCommand(msg.Type) {
+				reason = "invalid_command"
+			}
+			c.server.metrics.ProtocolError(reason)
+			c.server.metrics.ObserveCommand(string(msg.Type), "invalid", time.Since(started))
+		}
 		correlatedRequestID := requestID
 		if !validRequestID(correlatedRequestID) {
 			correlatedRequestID = ""
@@ -173,32 +188,56 @@ func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
 	lookup, err := cache.begin(playerID, requestID, commandFingerprint(msg))
 	if err != nil {
 		code := protocol.ErrCodeCommandCacheFull
+		result := "unavailable"
 		if errors.Is(err, errRequestConflict) {
 			code = protocol.ErrCodeRequestConflict
+			result = "conflict"
+			if c.server.metrics != nil {
+				c.server.metrics.IdempotencyConflict()
+			}
+		}
+		if c.server.metrics != nil {
+			c.server.metrics.ObserveCommand(string(msg.Type), result, time.Since(started))
 		}
 		_ = c.SendMessage(codec.NewCorrelatedCommandErrorMessage(code, "", requestID, msg.Type))
 		return true
 	}
 	if len(lookup.responses) > 0 {
+		if c.server.metrics != nil {
+			c.server.metrics.IdempotencyHit()
+			c.server.metrics.ObserveCommand(string(msg.Type), "cache_hit", time.Since(started))
+		}
 		c.replayCommandResponses(lookup.responses)
 		return true
 	}
 	if lookup.wait != nil {
+		if c.server.metrics != nil {
+			c.server.metrics.IdempotencyHit()
+		}
 		c.initializeLifecycle()
 		select {
 		case <-lookup.wait:
 			c.replayCommandResponses(cache.responsesAfter(lookup.entry))
 		case <-c.done:
 		}
+		if c.server.metrics != nil {
+			c.server.metrics.ObserveCommand(string(msg.Type), "cache_hit", time.Since(started))
+		}
 		return true
 	}
 
 	allowed, keepConnection := c.checkMessageRateLimit(playerID, requestID, msg.Type, cache, lookup.entry)
 	if !allowed {
+		if c.server.metrics != nil {
+			c.server.metrics.ObserveCommand(string(msg.Type), "rate_limited", time.Since(started))
+		}
 		return keepConnection
 	}
 
-	c.executeCommand(msg, lookup.entry, cache)
+	result := c.executeCommand(msg, lookup.entry, cache)
+	if c.server.metrics != nil {
+		c.server.metrics.ObserveCommand(string(msg.Type), result, time.Since(started))
+	}
 	return true
 }
 
@@ -236,7 +275,7 @@ func (c *Client) checkMessageRateLimit(
 	return false, false
 }
 
-func (c *Client) executeCommand(msg *protocol.Message, entry *commandCacheEntry, cache *commandCache) {
+func (c *Client) executeCommand(msg *protocol.Message, entry *commandCacheEntry, cache *commandCache) string {
 	requestID := msg.Command.RequestID
 	c.beginCommandExecution(requestID, msg.Type)
 	finished := false
@@ -255,20 +294,21 @@ func (c *Client) executeCommand(msg *protocol.Message, entry *commandCacheEntry,
 		_ = c.endCommandExecution()
 		cache.finish(entry, []*protocol.Message{response}, c.GetID(), requestID)
 		finished = true
-		return
+		return "unavailable"
 	}
 	c.server.handler.Handle(c, msg)
 	responses := c.endCommandExecution()
 	if commandResponsesContainError(responses) {
 		cache.finish(entry, responses, c.GetID(), requestID)
 		finished = true
-		return
+		return "error"
 	}
 	ack := codec.NewCommandAckMessage(requestID, msg.Type)
 	_ = c.SendMessage(ack)
 	responses = append(responses, ack)
 	cache.finish(entry, responses, c.GetID(), requestID)
 	finished = true
+	return "ok"
 }
 
 func (c *Client) replayCommandResponses(responses []*protocol.Message) {
@@ -592,6 +632,9 @@ func (c *Client) disconnectSlowClient() {
 		log.Printf("客户端 %s 发送缓冲区已满，断开慢连接", c.GetID())
 		if c.server != nil {
 			c.server.slowClientDisconnects.Add(1)
+			if c.server.metrics != nil {
+				c.server.metrics.SlowClientDisconnected()
+			}
 		}
 		c.Close()
 	})

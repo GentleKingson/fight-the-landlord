@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -41,17 +42,28 @@ const (
 	defaultChatCooldown          = 5
 	defaultBotFillTimeout        = 30
 	defaultDouZeroURL            = "http://localhost:2021"
+	defaultMetricsPath           = "/metrics"
+	defaultLogFormat             = "json"
 )
 
 var semanticVersionPattern = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 
 // Config 服务端配置
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Redis    RedisConfig    `yaml:"redis"`
-	Game     GameConfig     `yaml:"game"`
-	Security SecurityConfig `yaml:"security"`
-	BOT      BotConfig      `yaml:"bot"`
+	Server        ServerConfig        `yaml:"server"`
+	Redis         RedisConfig         `yaml:"redis"`
+	Game          GameConfig          `yaml:"game"`
+	Security      SecurityConfig      `yaml:"security"`
+	BOT           BotConfig           `yaml:"bot"`
+	Observability ObservabilityConfig `yaml:"observability"`
+}
+
+// ObservabilityConfig controls the public Prometheus endpoint and server log
+// encoding. Metric labels are fixed by the application and are not configurable.
+type ObservabilityConfig struct {
+	MetricsEnabled bool   `yaml:"metrics_enabled"`
+	MetricsPath    string `yaml:"metrics_path"`
+	LogFormat      string `yaml:"log_format"`
 }
 
 // BotConfig 机器人配置
@@ -275,6 +287,9 @@ func loadFromEnv(cfg *Config) error {
 		func() error { return getEnvInt("BOT_FILL_TIMEOUT", &cfg.BOT.BotFillTimeout) },
 		func() error { return getEnvBool("DOUZERO_ENABLED", &cfg.BOT.DouZeroEnabled) },
 		func() error { return getEnvStr("DOUZERO_URL", &cfg.BOT.DouZeroURL, false) },
+		func() error { return getEnvBool("OBSERVABILITY_METRICS_ENABLED", &cfg.Observability.MetricsEnabled) },
+		func() error { return getEnvStr("OBSERVABILITY_METRICS_PATH", &cfg.Observability.MetricsPath, false) },
+		func() error { return getEnvStr("OBSERVABILITY_LOG_FORMAT", &cfg.Observability.LogFormat, false) },
 		func() error { return getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins, false) },
 		func() error {
 			return getEnvStrSlice("SECURITY_TRUSTED_PROXY_CIDRS", &cfg.Security.TrustedProxyCIDRs, true)
@@ -337,6 +352,11 @@ func defaultConfig() *Config {
 			BotFillTimeout: defaultBotFillTimeout,
 			DouZeroURL:     defaultDouZeroURL,
 		},
+		Observability: ObservabilityConfig{
+			MetricsEnabled: true,
+			MetricsPath:    defaultMetricsPath,
+			LogFormat:      defaultLogFormat,
+		},
 	}
 }
 
@@ -363,7 +383,29 @@ func (c *Config) Validate() error {
 	if err := validateSecurityConfig(c.Security, environment); err != nil {
 		return err
 	}
+	if err := validateObservabilityConfig(c.Observability); err != nil {
+		return err
+	}
 	return validatePositiveLimits(c.Security)
+}
+
+func validateObservabilityConfig(observability ObservabilityConfig) error {
+	metricsPath := observability.MetricsPath
+	if metricsPath == "" || metricsPath != strings.TrimSpace(metricsPath) || !strings.HasPrefix(metricsPath, "/") ||
+		path.Clean(metricsPath) != metricsPath || strings.HasSuffix(metricsPath, "/") {
+		return fmt.Errorf("observability.metrics_path must be a clean absolute HTTP path")
+	}
+	switch metricsPath {
+	case "/", "/ws", "/health", "/livez", "/readyz", "/version", "/session/revoke":
+		return fmt.Errorf("observability.metrics_path conflicts with reserved route %q", metricsPath)
+	}
+	if strings.ContainsAny(metricsPath, "?#") {
+		return fmt.Errorf("observability.metrics_path must not contain a query or fragment")
+	}
+	if format := strings.ToLower(strings.TrimSpace(observability.LogFormat)); format != "json" && format != "text" {
+		return fmt.Errorf("observability.log_format must be json or text")
+	}
+	return nil
 }
 
 func validateServerConfig(server ServerConfig) (string, error) {

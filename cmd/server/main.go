@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 	"github.com/palemoky/fight-the-landlord/internal/server"
 )
 
@@ -40,6 +42,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置文件失败: %v", err)
 	}
+	if _, err := observability.ConfigureDefaultLogger(cfg.Observability.LogFormat, os.Stderr); err != nil {
+		log.Fatalf("配置日志失败: %v", err)
+	}
 
 	// 创建服务器
 	srv, err := server.NewServer(cfg)
@@ -53,15 +58,16 @@ func main() {
 
 	// 启动服务器
 	go func() {
-		log.Println("🎮 斗地主服务器启动中...")
+		slog.Info("server starting", "event", "server_starting", "protocol_version", server.Version)
 		if err := srv.Start(); err != nil {
-			log.Fatalf("服务器启动失败: %v", err)
+			slog.Error("server start failed", "event", "server_start_failed", "error_code", "listen_failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	// 等待关闭信号
 	<-ctx.Done()
-	log.Println("📢 收到关闭信号，开始优雅关闭...")
+	slog.Info("shutdown signal received", "event", "shutdown_started")
 	srv.GracefulShutdown(cfg.Game.ShutdownTimeoutDuration())
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
@@ -128,6 +129,7 @@ type RoomManager struct {
 	persistenceWG     sync.WaitGroup
 	saveRoomFunc      func(context.Context, string, *storage.RoomData) error
 	deleteRoomFunc    func(context.Context, string) error
+	metrics           *observability.Metrics
 }
 
 // NewRoomManager 创建房间管理器
@@ -166,4 +168,32 @@ func newRoomManager(parent context.Context, rs *storage.RedisStore, gameConfig c
 	}()
 
 	return rm
+}
+
+// SetMetrics installs the process-local metric recorder. It is expected to be
+// called during server construction before rooms are mutated.
+func (rm *RoomManager) SetMetrics(metrics *observability.Metrics) {
+	if rm == nil {
+		return
+	}
+	rm.mu.Lock()
+	rm.metrics = metrics
+	count := len(rm.rooms)
+	rm.mu.Unlock()
+	if metrics != nil {
+		metrics.SetRoomsCurrent(count)
+	}
+}
+
+func (rm *RoomManager) reportRoomCount() {
+	if rm == nil {
+		return
+	}
+	rm.mu.RLock()
+	metrics := rm.metrics
+	count := len(rm.rooms)
+	rm.mu.RUnlock()
+	if metrics != nil {
+		metrics.SetRoomsCurrent(count)
+	}
 }

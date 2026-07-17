@@ -90,7 +90,10 @@ func (tx *MatchRoomTransaction) Join(client types.ClientInterface) error {
 
 	rm := tx.manager
 	rm.mu.Lock()
-	defer rm.mu.Unlock()
+	defer func() {
+		rm.mu.Unlock()
+		rm.reportRoomCount()
+	}()
 	if rm.closed {
 		return ErrMatchRoomTransactionEnded
 	}

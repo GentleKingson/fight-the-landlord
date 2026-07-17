@@ -7,6 +7,7 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
@@ -22,6 +23,7 @@ type HandlerDeps struct {
 	ChatLimiter    types.ChatLimiter
 	Leaderboard    *storage.LeaderboardManager
 	SessionManager *session.SessionManager
+	Metrics        *observability.Metrics
 }
 
 // Handler 消息处理器
@@ -32,6 +34,7 @@ type Handler struct {
 	chatLimiter    types.ChatLimiter
 	leaderboard    *storage.LeaderboardManager
 	sessionManager *session.SessionManager
+	metrics        *observability.Metrics
 	handlers       map[protocol.MessageType]handlerFunc
 	games          map[string]gameRegistration
 	gamesMu        sync.RWMutex
@@ -66,6 +69,7 @@ func NewHandler(deps HandlerDeps) *Handler {
 		chatLimiter:    deps.ChatLimiter,
 		leaderboard:    deps.Leaderboard,
 		sessionManager: deps.SessionManager,
+		metrics:        deps.Metrics,
 		games:          make(map[string]gameRegistration),
 	}
 	h.initHandlers()

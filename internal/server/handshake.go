@@ -155,6 +155,9 @@ func compatibleClientVersion(clientVersion, minimumVersion, serverVersion string
 }
 
 func (s *Server) rejectProtocol(conn *websocket.Conn, reason, requestID string) {
+	if s != nil && s.metrics != nil {
+		s.metrics.ProtocolError("handshake")
+	}
 	minimum := ""
 	if s != nil && s.config != nil {
 		minimum = s.config.Server.MinClientVersion

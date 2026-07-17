@@ -189,6 +189,9 @@ func (s *Server) Shutdown() {
 
 func (s *Server) shutdown() {
 	s.shuttingDown.Store(true)
+	if s.metrics != nil {
+		s.metrics.SetReady(false)
+	}
 	s.stopClientPumps()
 	s.stopHTTPServer()
 	if s.runtimeCancel != nil {

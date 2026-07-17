@@ -11,6 +11,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
@@ -120,6 +121,7 @@ type Matcher struct {
 	botFactory      BotFactory
 	queueTimeout    time.Duration
 	botFillDelay    time.Duration
+	metrics         *observability.Metrics
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -157,6 +159,7 @@ type MatcherDeps struct {
 	QueueTimeout        time.Duration
 	BotFillDelay        time.Duration
 	Context             context.Context
+	Metrics             *observability.Metrics
 }
 
 // NewMatcher creates a matcher whose timers and workers are rooted in one
@@ -194,6 +197,7 @@ func NewMatcher(deps MatcherDeps) *Matcher {
 		botFactory:      factory,
 		queueTimeout:    timeout,
 		botFillDelay:    fillDelay,
+		metrics:         deps.Metrics,
 		ctx:             ctx,
 		cancel:          cancel,
 		closedDone:      make(chan struct{}),
@@ -275,6 +279,7 @@ func (m *Matcher) AddToQueue(client types.ClientInterface) bool {
 	}
 	queueLength := len(m.queue)
 	m.mu.Unlock()
+	m.reportQueueCurrent()
 
 	log.Printf("🔍 玩家 %s 加入匹配队列，当前队列长度: %d", client.GetName(), queueLength)
 	current, delivered := m.publishQueuedEntry(entry, client, false, "match queued")
@@ -325,6 +330,9 @@ func (m *Matcher) expireEntry(entry *QueueEntry) {
 	if entry.State != QueueStateQueued {
 		m.cancelEntryLocked(entry, "timeout", "")
 		m.mu.Unlock()
+		if m.metrics != nil {
+			m.metrics.MatchCancelled("timeout")
+		}
 		return
 	}
 	client := entry.client
@@ -350,6 +358,10 @@ func (m *Matcher) expireEntry(entry *QueueEntry) {
 		m.scheduleBotFillLocked()
 	}
 	m.mu.Unlock()
+	m.reportQueueCurrent()
+	if m.metrics != nil {
+		m.metrics.MatchCancelled("timeout")
+	}
 }
 
 // RemoveFromQueue cancels both queued and not-yet-committed inflight work.
@@ -380,6 +392,12 @@ func (m *Matcher) cancelEntry(client types.ClientInterface, reason, canceledBy s
 	}
 	accepted := m.cancelEntryLocked(entry, reason, canceledBy)
 	m.mu.Unlock()
+	if accepted {
+		m.reportQueueCurrent()
+		if m.metrics != nil {
+			m.metrics.MatchCancelled(reason)
+		}
+	}
 	return accepted
 }
 
@@ -584,6 +602,14 @@ func (m *Matcher) runAttempt(attempt *matchAttempt) {
 		m.failAttempt(attempt, assembly, roomLifecycleOwnsBots, protocol.MatchCancelReason, attempt.ctx.Err())
 		return
 	}
+	if m.metrics != nil {
+		for _, entry := range attempt.entries {
+			if !entry.ownedBot {
+				m.metrics.ObserveMatchWait(time.Since(entry.JoinedAt))
+			}
+		}
+	}
+	m.reportQueueCurrent()
 
 	m.publishCommittedMatch(attempt, gameRoom, clients, startingPlayers)
 }
@@ -714,7 +740,22 @@ type attemptRollback struct {
 }
 
 func (m *Matcher) failAttempt(attempt *matchAttempt, assembly RoomAssembly, roomLifecycleOwnsBots bool, fallbackReason string, cause error) {
+	if m.metrics != nil {
+		stage := "commit"
+		switch {
+		case fallbackReason == "participant_unavailable":
+			stage = "validate"
+		case assembly == nil:
+			stage = "begin"
+		case fallbackReason == protocol.MatchCancelReason || errors.Is(cause, context.Canceled):
+			stage = "cancel"
+		}
+		m.metrics.MatchRollback(stage)
+	}
 	rollback := m.markAttemptRolledBack(attempt, fallbackReason)
+	if m.metrics != nil && rollback.reason != protocol.MatchCancelReason && rollback.reason != "disconnected" && rollback.reason != "connection_replaced" {
+		m.metrics.MatchCancelled(rollback.reason)
+	}
 	m.rollbackRoomAssembly(assembly, rollback.reason, cause)
 	m.notifyRolledBackEntries(rollback, roomLifecycleOwnsBots)
 	m.releaseRolledBackEntries(attempt, rollback.entries)
@@ -789,6 +830,7 @@ func (m *Matcher) releaseRolledBackEntries(attempt *matchAttempt, entries []*Que
 		m.scheduleBotFillLocked()
 	}
 	m.mu.Unlock()
+	m.reportQueueCurrent()
 }
 
 func (m *Matcher) isCurrent(entry *QueueEntry) bool {
@@ -913,6 +955,7 @@ func (m *Matcher) newPublishedSession(attempt *matchAttempt, gameRoom *room.Room
 		return nil, false
 	}
 	gs := session.NewGameSessionWithPlayers(gameRoom, sessionPlayers, m.leaderboard, m.gameConfig)
+	gs.SetMetrics(m.metrics)
 	gs.SetRoomManager(m.roomManager)
 	if !m.registerPublishedSession(attempt, gameRoom, gs) {
 		gs.Retire()
@@ -1247,6 +1290,16 @@ func (m *Matcher) GetQueueLength() int {
 	return len(m.queue)
 }
 
+func (m *Matcher) reportQueueCurrent() {
+	if m == nil || m.metrics == nil {
+		return
+	}
+	m.mu.Lock()
+	current := len(m.entries)
+	m.mu.Unlock()
+	m.metrics.SetMatchQueueCurrent(current)
+}
+
 // Close cancels authoritative deadlines, bot fill, and inflight transactions,
 // then waits until every matcher-owned worker has exited.
 func (m *Matcher) Close() error {
@@ -1275,6 +1328,7 @@ func (m *Matcher) Close() error {
 		published[gameRoom] = attempt
 	}
 	m.mu.Unlock()
+	m.reportQueueCurrent()
 
 	for gameRoom, attempt := range published {
 		attempt.publishMu.Lock()
@@ -1309,6 +1363,7 @@ func (m *Matcher) Close() error {
 		entry.deliveryMu.Unlock()
 	}
 	m.workers.Wait()
+	m.reportQueueCurrent()
 	close(m.closedDone)
 	return nil
 }

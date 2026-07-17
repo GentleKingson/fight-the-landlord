@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -25,6 +26,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// 维护模式检查（最优先）
 	if s.shuttingDown.Load() || s.IsMaintenanceMode() {
+		s.recordWebSocketRejection("maintenance", clientIP)
 		log.Printf("🔧 维护模式，拒绝新连接: %s", clientIP)
 		http.Error(w, "Server is under maintenance, please try again later",
 			http.StatusServiceUnavailable)
@@ -36,6 +38,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// releases it only when the WebSocket is actually closed.
 	lease, acquired := s.activeConnectionLimiter().tryAcquire()
 	if !acquired {
+		s.recordWebSocketRejection("capacity", clientIP)
 		log.Printf("🚫 达到最大连接数限制 (%d), IP: %s", s.maxConnections, clientIP)
 		http.Error(w, "Server Full", http.StatusServiceUnavailable)
 		return
@@ -49,6 +52,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// IP 过滤检查
 	if !s.ipFilter.IsAllowed(clientIP) {
+		s.recordWebSocketRejection("ip_filter", clientIP)
 		log.Printf("🚫 IP %s 被过滤器拒绝", clientIP)
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
@@ -56,6 +60,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// 来源验证
 	if !s.originChecker.Check(r) {
+		s.recordWebSocketRejection("origin", clientIP)
 		log.Printf("🚫 来源验证失败: %s (IP: %s)", r.Header.Get("Origin"), clientIP)
 		http.Error(w, "Origin not allowed", http.StatusForbidden)
 		return
@@ -63,6 +68,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// 速率限制检查
 	if !s.rateLimiter.Allow(clientIP) {
+		s.recordWebSocketRejection("rate_limit", clientIP)
 		log.Printf("🚫 IP %s 请求过于频繁", clientIP)
 		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 		return
@@ -70,12 +76,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		s.recordWebSocketRejection("upgrade", clientIP)
 		log.Printf("WebSocket 升级失败: %v", err)
 		return
 	}
 	lease.activate()
 	negotiated, err := s.negotiateWebSocket(conn)
 	if err != nil {
+		s.recordWebSocketRejection("handshake", clientIP)
 		log.Printf("协议握手失败 (IP: %s): %v", clientIP, err)
 		_ = conn.Close()
 		return
@@ -101,6 +109,7 @@ func (s *Server) activateWebSocketClient(
 	playerName := client.GetName()
 	playerSession, err := s.sessionManager.CreateSession(playerID, playerName)
 	if err != nil {
+		s.recordWebSocketRejection("session", clientIP)
 		log.Printf("创建安全会话失败: %v", err)
 		s.unregisterClient(client)
 		_ = conn.Close()
@@ -113,6 +122,7 @@ func (s *Server) activateWebSocketClient(
 		ReconnectToken: playerSession.ReconnectToken,
 	})
 	if err := client.SendMessage(connected); err != nil {
+		s.recordWebSocketRejection("delivery", clientIP)
 		log.Printf("发送连接确认失败: %v", err)
 		s.unregisterClient(client)
 		s.sessionManager.DeleteSession(playerID)
@@ -121,14 +131,37 @@ func (s *Server) activateWebSocketClient(
 	}
 
 	if !s.startClientPumps(client) {
+		s.recordWebSocketRejection("shutdown", clientIP)
 		client.Close()
 		s.unregisterClient(client)
 		s.sessionManager.DeleteSession(playerID)
 		_ = conn.Close()
 		return false
 	}
+	if s.metrics != nil {
+		s.metrics.ConnectionAccepted()
+	}
+	logger := s.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Info("websocket connected",
+		"event", "websocket_connected",
+		"player_id", playerID,
+		"client_kind", client.clientKind,
+		"protocol_version", protocol.ProtocolVersion,
+	)
 	log.Printf("✅ 玩家 %s (%s) 已连接", playerName, playerID)
 	return true
+}
+
+func (s *Server) recordWebSocketRejection(reason, clientIP string) {
+	if s.metrics != nil {
+		s.metrics.ConnectionRejected()
+	}
+	if s.logger != nil {
+		s.logger.Warn("websocket rejected", "event", "websocket_rejected", "error_code", reason, "client_ip", clientIP)
+	}
 }
 
 func (s *Server) startClientPumps(client *Client) bool {
@@ -173,14 +206,23 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	if s.shuttingDown.Load() || s.readinessCheck == nil {
+		if s.metrics != nil {
+			s.metrics.SetReady(false)
+		}
 		http.Error(w, "NOT READY", http.StatusServiceUnavailable)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 	defer cancel()
 	if err := s.readinessCheck(ctx); err != nil {
+		if s.metrics != nil {
+			s.metrics.SetReady(false)
+		}
 		http.Error(w, "NOT READY", http.StatusServiceUnavailable)
 		return
+	}
+	if s.metrics != nil {
+		s.metrics.SetReady(true)
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("READY"))

@@ -115,6 +115,9 @@ func TestLoad_AppliesDefaults(t *testing.T) {
 	assert.Equal(t, defaultTurnTimeout, cfg.Game.TurnTimeout)
 	assert.Equal(t, defaultBidTimeout, cfg.Game.BidTimeout)
 	assert.Equal(t, []string{"*"}, cfg.Security.AllowedOrigins)
+	assert.True(t, cfg.Observability.MetricsEnabled)
+	assert.Equal(t, defaultMetricsPath, cfg.Observability.MetricsPath)
+	assert.Equal(t, defaultLogFormat, cfg.Observability.LogFormat)
 }
 
 func TestLoad_PreservesExplicitUnlimitedMaxConnections(t *testing.T) {
@@ -196,6 +199,10 @@ func TestConfigValidateRejectsUnsafeRuntimeValues(t *testing.T) {
 		{name: "chat cooldown overflow", mutate: func(cfg *Config) {
 			cfg.Security.ChatLimit.Cooldown = overflowDurationValue(time.Second)
 		}, field: "security.chat_limit.cooldown"},
+		{name: "relative metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "metrics" }, field: "observability.metrics_path"},
+		{name: "unclean metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/ops/../metrics" }, field: "observability.metrics_path"},
+		{name: "reserved metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/readyz" }, field: "observability.metrics_path"},
+		{name: "invalid log format", mutate: func(cfg *Config) { cfg.Observability.LogFormat = "yaml" }, field: "observability.log_format"},
 	}
 
 	for _, testCase := range tests {
@@ -286,6 +293,9 @@ func TestDefault(t *testing.T) {
 	assert.Equal(t, defaultHost, cfg.Server.Host)
 	assert.Equal(t, defaultPort, cfg.Server.Port)
 	assert.Equal(t, defaultTurnTimeout, cfg.Game.TurnTimeout)
+	assert.True(t, cfg.Observability.MetricsEnabled)
+	assert.Equal(t, "/metrics", cfg.Observability.MetricsPath)
+	assert.Equal(t, "json", cfg.Observability.LogFormat)
 }
 
 func TestGameConfig_DurationMethods(t *testing.T) {
@@ -344,6 +354,9 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("SECURITY_CHAT_COOLDOWN", "6")
 	t.Setenv("BOT_ENABLED", "false")
 	t.Setenv("DOUZERO_ENABLED", "false")
+	t.Setenv("OBSERVABILITY_METRICS_ENABLED", "false")
+	t.Setenv("OBSERVABILITY_METRICS_PATH", "/internal/metrics")
+	t.Setenv("OBSERVABILITY_LOG_FORMAT", "text")
 
 	// Create minimal config file
 	content := `
@@ -379,6 +392,9 @@ bot:
 	assert.Equal(t, 6, cfg.Security.ChatLimit.Cooldown)
 	assert.False(t, cfg.BOT.Enabled)
 	assert.False(t, cfg.BOT.DouZeroEnabled)
+	assert.False(t, cfg.Observability.MetricsEnabled)
+	assert.Equal(t, "/internal/metrics", cfg.Observability.MetricsPath)
+	assert.Equal(t, "text", cfg.Observability.LogFormat)
 }
 
 func validTestConfig() *Config {
