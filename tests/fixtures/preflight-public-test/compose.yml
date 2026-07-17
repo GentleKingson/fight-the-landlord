@@ -1,0 +1,25 @@
+services:
+  poker-server:
+    image: ${GAME_IMAGE_REF:-registry.example.test/fight-the-landlord:v1.2.3}
+    environment:
+      SERVER_ENV: ${SERVER_ENV:-}
+      SERVER_MAX_CONNECTIONS: ${SERVER_MAX_CONNECTIONS:-}
+      SECURITY_ALLOWED_ORIGINS: ${SECURITY_ALLOWED_ORIGINS:-}
+      SECURITY_TRUSTED_PROXY_CIDRS: ${SECURITY_TRUSTED_PROXY_CIDRS:-}
+      SECURITY_RATE_LIMIT_PER_SECOND: ${SECURITY_RATE_LIMIT_PER_SECOND:-}
+      SECURITY_RATE_LIMIT_PER_MINUTE: ${SECURITY_RATE_LIMIT_PER_MINUTE:-}
+      SECURITY_MESSAGE_LIMIT_PER_SECOND: ${SECURITY_MESSAGE_LIMIT_PER_SECOND:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      DOUZERO_ENABLED: ${DOUZERO_ENABLED:-false}
+      OBSERVABILITY_METRICS_ENABLED: ${OBSERVABILITY_METRICS_ENABLED:-false}
+      OBSERVABILITY_METRICS_PATH: ${OBSERVABILITY_METRICS_PATH:-/metrics}
+    ports:
+      - "${SERVER_BIND_ADDRESS:-0.0.0.0}:1780:1780"
+
+  redis:
+    image: redis:8-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+  douzero:
+    image: ${DOUZERO_IMAGE_REF:-registry.example.test/fight-the-landlord-douzero:v1.2.3}
+    profiles: ["douzero"]
+
