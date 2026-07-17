@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # GitHub/Compose/PowerShell expressions are literal test fixtures.
 
 set -euo pipefail
 
@@ -63,6 +64,10 @@ reject_regex douzero/README.md 'docker build -t palemoky/fight-the-landlord'
 require_literal .github/workflows/release.yml 'IMAGE_NAME: gentlekingson/${{ github.event.repository.name }}'
 require_literal .github/workflows/release.yml 'images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}'
 require_literal .github/workflows/release.yml 'images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-douzero'
+if [[ "$(grep -Fc 'type=raw,value=latest' .github/workflows/release.yml)" -ne 2 ]]; then
+  fail "release workflow must publish latest for both semver-tagged images"
+fi
+reject_regex .github/workflows/release.yml 'type=raw,value=latest,enable=\{\{is_default_branch\}\}'
 require_literal .github/workflows/release.yml 'GO_TRIXIE_DIGEST: sha256:'
 require_literal .github/workflows/release.yml '"golang:${GO_VERSION}-trixie@${GO_TRIXIE_DIGEST}"'
 
