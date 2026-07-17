@@ -25,10 +25,20 @@ func main() {
 	devDefaults := flag.Bool("dev-defaults", false, "配置加载失败时使用开发默认值")
 	healthcheck := flag.Bool("healthcheck", false, "检查本地服务健康状态后退出")
 	healthcheckURL := flag.String("healthcheck-url", defaultHealthcheckURL(), "健康检查地址")
+	adminAction := flag.String("admin-action", "", "在容器内执行本机管理操作后退出")
+	adminPlayer := flag.String("admin-player", "", "管理操作的玩家 ID")
+	adminDuration := flag.Duration("admin-duration", 0, "禁言或封禁时长，例如 30m")
 	flag.Parse()
 	if *healthcheck {
 		if err := checkHealth(*healthcheckURL); err != nil {
 			log.Printf("健康检查失败: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *adminAction != "" {
+		if err := runAdminCommand(*adminAction, *adminPlayer, *adminDuration, os.Stdout); err != nil {
+			log.Printf("管理操作失败: %v", err)
 			os.Exit(1)
 		}
 		return

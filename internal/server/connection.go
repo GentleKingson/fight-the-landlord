@@ -19,11 +19,9 @@ import (
 // handleWebSocket 处理 WebSocket 连接
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	clientIP := s.webSocketClientIP(r)
-	if s.shuttingDown.Load() || s.IsMaintenanceMode() {
-		s.recordWebSocketRejection("maintenance", clientIP)
-		log.Printf("🔧 维护模式，拒绝新连接: %s", clientIP)
-		http.Error(w, "Server is under maintenance, please try again later",
-			http.StatusServiceUnavailable)
+	if s.shuttingDown.Load() {
+		s.recordWebSocketRejection("shutdown", clientIP)
+		http.Error(w, "Server is shutting down", http.StatusServiceUnavailable)
 		return
 	}
 

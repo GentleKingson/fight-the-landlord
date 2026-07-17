@@ -205,6 +205,8 @@ func TestConfigValidateRejectsUnsafeRuntimeValues(t *testing.T) {
 		{name: "session commit metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/session/commit" }, field: "observability.metrics_path"},
 		{name: "session refresh metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/session/refresh" }, field: "observability.metrics_path"},
 		{name: "invalid log format", mutate: func(cfg *Config) { cfg.Observability.LogFormat = "yaml" }, field: "observability.log_format"},
+		{name: "short admin key", mutate: func(cfg *Config) { cfg.Admin.Key = "too-short" }, field: "ADMIN_KEY"},
+		{name: "admin key newline", mutate: func(cfg *Config) { cfg.Admin.Key = strings.Repeat("k", 32) + "\n" }, field: "ADMIN_KEY"},
 	}
 
 	for _, testCase := range tests {
@@ -231,6 +233,9 @@ func TestConfigValidateProductionSecurityPolicy(t *testing.T) {
 	require.ErrorContains(t, cfg.Validate(), "security.allowed_origins")
 
 	cfg.Security.AllowedOrigins = []string{"https://game.example"}
+	require.ErrorContains(t, cfg.Validate(), "ADMIN_KEY")
+
+	cfg.Admin.Key = strings.Repeat("k", 32)
 	require.NoError(t, cfg.Validate())
 }
 
@@ -298,6 +303,7 @@ func TestDefault(t *testing.T) {
 	assert.True(t, cfg.Observability.MetricsEnabled)
 	assert.Equal(t, "/metrics", cfg.Observability.MetricsPath)
 	assert.Equal(t, "json", cfg.Observability.LogFormat)
+	assert.Empty(t, cfg.Admin.Key)
 }
 
 func TestShippedConfigUsesJSONLogs(t *testing.T) {
@@ -367,6 +373,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("OBSERVABILITY_METRICS_ENABLED", "false")
 	t.Setenv("OBSERVABILITY_METRICS_PATH", "/internal/metrics")
 	t.Setenv("OBSERVABILITY_LOG_FORMAT", "text")
+	t.Setenv("ADMIN_KEY", strings.Repeat("a", 32))
 
 	// Create minimal config file
 	content := `
@@ -405,6 +412,7 @@ bot:
 	assert.False(t, cfg.Observability.MetricsEnabled)
 	assert.Equal(t, "/internal/metrics", cfg.Observability.MetricsPath)
 	assert.Equal(t, "text", cfg.Observability.LogFormat)
+	assert.Equal(t, strings.Repeat("a", 32), cfg.Admin.Key)
 }
 
 func validTestConfig() *Config {

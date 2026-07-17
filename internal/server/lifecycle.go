@@ -65,28 +65,6 @@ func (s *Server) monitorStats(ctx context.Context) {
 	}
 }
 
-// EnterMaintenanceMode 进入维护模式
-func (s *Server) EnterMaintenanceMode() {
-	s.maintenanceMu.Lock()
-	s.maintenanceMode = true
-	s.maintenanceMu.Unlock()
-
-	// 通知大厅用户服务器即将关闭
-	s.BroadcastToLobby(codec.MustNewMessage(protocol.MsgError, protocol.ErrorPayload{
-		Code:    protocol.ErrCodeServerMaintenance,
-		Message: "👷🏻‍♂️ 维护模式：停止新的房间创建",
-	}))
-
-	log.Println("🔧 进入维护模式：停止新连接和房间创建")
-}
-
-// IsMaintenanceMode 检查是否在维护模式
-func (s *Server) IsMaintenanceMode() bool {
-	s.maintenanceMu.RLock()
-	defer s.maintenanceMu.RUnlock()
-	return s.maintenanceMode
-}
-
 // GracefulShutdown 优雅关闭服务器
 func (s *Server) GracefulShutdown(timeout time.Duration) {
 	s.shuttingDown.Store(true)

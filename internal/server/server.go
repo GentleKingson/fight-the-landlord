@@ -92,9 +92,13 @@ type Server struct {
 	clientPumpsClosed     bool
 	clientPumpsWG         sync.WaitGroup
 
-	// 维护模式
-	maintenanceMode bool
-	maintenanceMu   sync.RWMutex
+	// 运营控制
+	operationalMu    sync.Mutex
+	operationalState atomic.Uint32
+	moderationOnce   sync.Once
+	moderation       *moderationStore
+	adminLimiterOnce sync.Once
+	adminLimiter     *adminRateLimiter
 }
 
 type browserRevokeDrain struct {

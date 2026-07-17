@@ -12,10 +12,14 @@ import (
 
 // handleCreateRoom 处理创建房间
 func (h *Handler) handleCreateRoom(client types.ClientInterface) {
-	// 维护模式检查
-	if h.server.IsMaintenanceMode() {
+	state := currentOperationalState(h.server)
+	if state != operationalNormal {
+		text := "服务器维护中，暂停创建房间"
+		if state == operationalDraining {
+			text = "服务器正在排空，暂停创建房间"
+		}
 		sendMessage(client, codec.NewCommandErrorMessageWithText(
-			protocol.ErrCodeServerMaintenance, "服务器维护中，暂停创建房间", protocol.MsgCreateRoom))
+			operationalAdmissionErrorCode(state), text, protocol.MsgCreateRoom))
 		return
 	}
 
@@ -37,8 +41,7 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 
 // handleJoinRoom 处理加入房间
 func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Message) {
-	// 维护模式检查
-	if h.server.IsMaintenanceMode() {
+	if currentOperationalState(h.server) == operationalMaintenance {
 		sendMessage(client, codec.NewCommandErrorMessageWithText(
 			protocol.ErrCodeServerMaintenance, "服务器维护中，暂停加入房间", protocol.MsgJoinRoom))
 		return
@@ -111,10 +114,14 @@ func (h *Handler) leaveRoomBeforeCommand(client types.ClientInterface, command p
 
 // handleQuickMatch 处理快速匹配
 func (h *Handler) handleQuickMatch(client types.ClientInterface) {
-	// 维护模式检查
-	if h.server.IsMaintenanceMode() {
+	state := currentOperationalState(h.server)
+	if state != operationalNormal {
+		text := "服务器维护中，暂停快速匹配"
+		if state == operationalDraining {
+			text = "服务器正在排空，暂停快速匹配"
+		}
 		sendMessage(client, codec.NewCommandErrorMessageWithText(
-			protocol.ErrCodeServerMaintenance, "服务器维护中，暂停快速匹配", protocol.MsgQuickMatch))
+			operationalAdmissionErrorCode(state), text, protocol.MsgQuickMatch))
 		return
 	}
 
@@ -138,9 +145,14 @@ func (h *Handler) handleQuickMatch(client types.ClientInterface) {
 
 // handlePracticeMatch 处理人机练习
 func (h *Handler) handlePracticeMatch(client types.ClientInterface) {
-	if h.server.IsMaintenanceMode() {
+	state := currentOperationalState(h.server)
+	if state != operationalNormal {
+		text := "服务器维护中，暂停人机练习"
+		if state == operationalDraining {
+			text = "服务器正在排空，暂停人机练习"
+		}
 		sendMessage(client, codec.NewCommandErrorMessageWithText(
-			protocol.ErrCodeServerMaintenance, "服务器维护中，暂停人机练习", protocol.MsgPracticeMatch))
+			operationalAdmissionErrorCode(state), text, protocol.MsgPracticeMatch))
 		return
 	}
 
@@ -183,6 +195,18 @@ func (h *Handler) handleReady(client types.ClientInterface, ready bool) {
 	command := protocol.MsgReady
 	if !ready {
 		command = protocol.MsgCancelReady
+	}
+	if ready {
+		state, controlled := providedOperationalState(h.server)
+		if controlled && state != operationalNormal {
+			text := "服务器维护中，暂停开始新牌局"
+			if state == operationalDraining {
+				text = "服务器正在排空，暂停开始新牌局"
+			}
+			sendMessage(client, codec.NewCommandErrorMessageWithText(
+				operationalAdmissionErrorCode(state), text, protocol.MsgReady))
+			return
+		}
 	}
 	if h.roomManager == nil {
 		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, command))

@@ -56,6 +56,14 @@ type Config struct {
 	Security      SecurityConfig      `yaml:"security"`
 	BOT           BotConfig           `yaml:"bot"`
 	Observability ObservabilityConfig `yaml:"observability"`
+	Admin         AdminConfig         `yaml:"-"`
+}
+
+// AdminConfig is environment-only so the management credential cannot be
+// checked into config.yaml by accident. An empty key disables admin access in
+// development and test; production requires an explicit strong value.
+type AdminConfig struct {
+	Key string `yaml:"-"`
 }
 
 // ObservabilityConfig controls the public Prometheus endpoint and server log
@@ -290,6 +298,7 @@ func loadFromEnv(cfg *Config) error {
 		func() error { return getEnvBool("OBSERVABILITY_METRICS_ENABLED", &cfg.Observability.MetricsEnabled) },
 		func() error { return getEnvStr("OBSERVABILITY_METRICS_PATH", &cfg.Observability.MetricsPath, false) },
 		func() error { return getEnvStr("OBSERVABILITY_LOG_FORMAT", &cfg.Observability.LogFormat, false) },
+		func() error { return getEnvStr("ADMIN_KEY", &cfg.Admin.Key, true) },
 		func() error { return getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins, false) },
 		func() error {
 			return getEnvStrSlice("SECURITY_TRUSTED_PROXY_CIDRS", &cfg.Security.TrustedProxyCIDRs, true)
@@ -386,7 +395,30 @@ func (c *Config) Validate() error {
 	if err := validateObservabilityConfig(c.Observability); err != nil {
 		return err
 	}
+	if err := validateAdminConfig(c.Admin, environment); err != nil {
+		return err
+	}
 	return validatePositiveLimits(c.Security)
+}
+
+func validateAdminConfig(admin AdminConfig, environment string) error {
+	key := admin.Key
+	if key == "" {
+		if environment == "production" {
+			return fmt.Errorf("ADMIN_KEY must not be empty in production")
+		}
+		return nil
+	}
+	if key != strings.TrimSpace(key) || strings.ContainsAny(key, "\x00\r\n") {
+		return fmt.Errorf("ADMIN_KEY must not contain surrounding whitespace or control characters")
+	}
+	if len(key) < 32 {
+		return fmt.Errorf("ADMIN_KEY must be at least 32 bytes")
+	}
+	if len(key) > 1024 {
+		return fmt.Errorf("ADMIN_KEY must not exceed 1024 bytes")
+	}
+	return nil
 }
 
 func validateObservabilityConfig(observability ObservabilityConfig) error {
@@ -396,7 +428,9 @@ func validateObservabilityConfig(observability ObservabilityConfig) error {
 		return fmt.Errorf("observability.metrics_path must be a clean absolute HTTP path")
 	}
 	switch metricsPath {
-	case "/", "/ws", "/health", "/livez", "/readyz", "/version", "/session/commit", "/session/refresh", "/session/revoke":
+	case "/", "/ws", "/health", "/livez", "/readyz", "/version", "/session/commit", "/session/refresh", "/session/revoke",
+		"/admin/status", "/admin/drain", "/admin/maintenance", "/admin/resume", "/admin/disconnect", "/admin/mute",
+		"/admin/unmute", "/admin/ban", "/admin/unban":
 		return fmt.Errorf("observability.metrics_path conflicts with reserved route %q", metricsPath)
 	}
 	if strings.ContainsAny(metricsPath, "?#") {
