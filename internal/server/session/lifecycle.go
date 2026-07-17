@@ -311,6 +311,7 @@ func (gs *GameSession) queueGameResultsLocked(winner *GamePlayer) {
 		}
 
 		gs.pendingResults = append(gs.pendingResults, pendingGameResult{
+			gameID:     gs.gameID,
 			playerID:   p.ID,
 			playerName: playerName,
 			isLandlord: p.IsLandlord,

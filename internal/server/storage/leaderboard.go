@@ -7,17 +7,32 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	// Redis key
-	playerStatsKey    = "player:stats:"
-	leaderboardKey    = "leaderboard:score"
-	dailyLeaderboard  = "leaderboard:daily:"
-	weeklyLeaderboard = "leaderboard:weekly:"
+	playerStatsKey       = "player:stats:"
+	leaderboardKey       = "leaderboard:score"
+	dailyLeaderboard     = "leaderboard:daily:"
+	weeklyLeaderboard    = "leaderboard:weekly:"
+	settledGameKey       = "leaderboard:settlement:"
+	dailyLeaderboardTTL  = 48 * time.Hour
+	weeklyLeaderboardTTL = 8 * 24 * time.Hour
+
+	LeaderboardTypeTotal    = "total"
+	LeaderboardTypeDaily    = "daily"
+	LeaderboardTypeWeekly   = "weekly"
+	DefaultLeaderboardLimit = 10
+	MaxLeaderboardLimit     = 50
+)
+
+var (
+	ErrInvalidLeaderboardType = errors.New("invalid leaderboard type")
+	ErrInvalidGameResult      = errors.New("game ID and player ID are required")
+	ErrLeaderboardUnavailable = errors.New("leaderboard storage is unavailable")
 )
 
 // PlayerStats 玩家统计数据
@@ -74,11 +89,28 @@ type LeaderboardEntry struct {
 // LeaderboardManager 排行榜管理器
 type LeaderboardManager struct {
 	redis *redis.Client
+	now   func() time.Time
 }
 
 // NewLeaderboardManager 创建排行榜管理器
-func NewLeaderboardManager(client *redis.Client) *LeaderboardManager {
-	return &LeaderboardManager{redis: client}
+func NewLeaderboardManager(client *redis.Client, options ...LeaderboardOption) *LeaderboardManager {
+	lm := &LeaderboardManager{redis: client, now: time.Now}
+	for _, option := range options {
+		option(lm)
+	}
+	return lm
+}
+
+// LeaderboardOption customizes a leaderboard manager.
+type LeaderboardOption func(*LeaderboardManager)
+
+// WithLeaderboardClock injects the clock used to select daily and weekly buckets.
+func WithLeaderboardClock(now func() time.Time) LeaderboardOption {
+	return func(lm *LeaderboardManager) {
+		if now != nil {
+			lm.now = now
+		}
+	}
 }
 
 // IsReady 检查 Redis 客户端是否可用
@@ -88,6 +120,9 @@ func (lm *LeaderboardManager) IsReady() bool {
 
 // GetPlayerStats 获取玩家统计
 func (lm *LeaderboardManager) GetPlayerStats(ctx context.Context, playerID string) (*PlayerStats, error) {
+	if !lm.IsReady() {
+		return nil, ErrLeaderboardUnavailable
+	}
 	key := playerStatsKey + playerID
 	data, err := lm.redis.Get(ctx, key).Bytes()
 	if err != nil {
@@ -106,30 +141,15 @@ func (lm *LeaderboardManager) GetPlayerStats(ctx context.Context, playerID strin
 
 // SavePlayerStats 保存玩家统计
 func (lm *LeaderboardManager) SavePlayerStats(ctx context.Context, stats *PlayerStats) error {
+	if !lm.IsReady() {
+		return ErrLeaderboardUnavailable
+	}
 	key := playerStatsKey + stats.PlayerID
 	data, err := json.Marshal(stats)
 	if err != nil {
 		return err
 	}
 	return lm.redis.Set(ctx, key, data, 0).Err()
-}
-
-// getOrCreateStats 获取或创建玩家统计
-func (lm *LeaderboardManager) getOrCreateStats(ctx context.Context, playerID, playerName string) (*PlayerStats, error) {
-	stats, err := lm.GetPlayerStats(ctx, playerID)
-	if err != nil {
-		return nil, err
-	}
-
-	if stats == nil {
-		return &PlayerStats{
-			PlayerID:   playerID,
-			PlayerName: playerName,
-			CreatedAt:  time.Now().Unix(),
-		}, nil
-	}
-
-	return stats, nil
 }
 
 // updateRoleStats 更新角色相关统计并返回基础积分变化
@@ -181,84 +201,137 @@ func calculateStreakBonus(streak int) int {
 	}
 }
 
-// RecordGameResult 记录游戏结果
-func (lm *LeaderboardManager) RecordGameResult(ctx context.Context, playerID, playerName string, isLandlord, isWinner bool) error {
-	stats, err := lm.getOrCreateStats(ctx, playerID, playerName)
+// RecordGameResult records one player's settlement exactly once per game.
+// WATCH keeps the JSON read-modify-write and all leaderboard indexes atomic.
+func (lm *LeaderboardManager) RecordGameResult(
+	ctx context.Context,
+	gameID, playerID, playerName string,
+	isLandlord, isWinner bool,
+) error {
+	if !lm.IsReady() {
+		return ErrLeaderboardUnavailable
+	}
+	if strings.TrimSpace(gameID) == "" || strings.TrimSpace(playerID) == "" {
+		return ErrInvalidGameResult
+	}
+
+	now := lm.now()
+	statsKey := playerStatsKey + playerID
+	settlementKey := settledGameKey + gameID
+	dailyKey := dailyLeaderboardKey(now)
+	weeklyKey := weeklyLeaderboardKey(now)
+
+	for range 32 {
+		err := lm.redis.Watch(ctx, func(tx *redis.Tx) error {
+			settled, err := tx.SIsMember(ctx, settlementKey, playerID).Result()
+			if err != nil {
+				return err
+			}
+			if settled {
+				return nil
+			}
+
+			stats, err := getOrCreateStatsFromCmd(ctx, tx, statsKey, playerID, playerName, now)
+			if err != nil {
+				return err
+			}
+			stats.PlayerName = playerName
+			stats.TotalGames++
+			stats.LastPlayedAt = now.Unix()
+
+			scoreChange := updateRoleStats(stats, isLandlord, isWinner)
+			updateWinLossStats(stats, isWinner)
+			scoreChange += calculateStreakBonus(stats.CurrentStreak)
+			stats.Score = max(0, stats.Score+scoreChange)
+
+			data, err := json.Marshal(stats)
+			if err != nil {
+				return err
+			}
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Set(ctx, statsKey, data, 0)
+				pipe.ZAdd(ctx, leaderboardKey, redis.Z{Score: float64(stats.Score), Member: playerID})
+				pipe.ZIncrBy(ctx, dailyKey, float64(scoreChange), playerID)
+				pipe.Expire(ctx, dailyKey, dailyLeaderboardTTL)
+				pipe.ZIncrBy(ctx, weeklyKey, float64(scoreChange), playerID)
+				pipe.Expire(ctx, weeklyKey, weeklyLeaderboardTTL)
+				pipe.SAdd(ctx, settlementKey, playerID)
+				return nil
+			})
+			return err
+		}, statsKey, settlementKey)
+		if !errors.Is(err, redis.TxFailedErr) {
+			return err
+		}
+	}
+	return redis.TxFailedErr
+}
+
+type statsGetter interface {
+	Get(context.Context, string) *redis.StringCmd
+}
+
+func getOrCreateStatsFromCmd(
+	ctx context.Context,
+	cmd statsGetter,
+	key, playerID, playerName string,
+	now time.Time,
+) (*PlayerStats, error) {
+	data, err := cmd.Get(ctx, key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return &PlayerStats{
+			PlayerID: playerID, PlayerName: playerName, CreatedAt: now.Unix(),
+		}, nil
+	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	// 更新基本信息
-	stats.PlayerName = playerName
-	stats.TotalGames++
-	stats.LastPlayedAt = time.Now().Unix()
-
-	// 更新角色和胜负统计
-	scoreChange := updateRoleStats(stats, isLandlord, isWinner)
-	updateWinLossStats(stats, isWinner)
-
-	// 计算连胜加成并更新积分
-	scoreChange += calculateStreakBonus(stats.CurrentStreak)
-	stats.Score = max(0, stats.Score+scoreChange)
-
-	// 保存并更新排行榜
-	if err := lm.SavePlayerStats(ctx, stats); err != nil {
-		return err
+	var stats PlayerStats
+	if err := json.Unmarshal(data, &stats); err != nil {
+		return nil, err
 	}
-	return lm.UpdateLeaderboard(ctx, stats)
+	return &stats, nil
 }
 
-// UpdateLeaderboard 更新排行榜
-func (lm *LeaderboardManager) UpdateLeaderboard(ctx context.Context, stats *PlayerStats) error {
-	// 更新总排行榜
-	if err := lm.redis.ZAdd(ctx, leaderboardKey, redis.Z{
-		Score:  float64(stats.Score),
-		Member: stats.PlayerID,
-	}).Err(); err != nil {
-		return err
+// NormalizeLeaderboardType applies the backwards-compatible default and rejects unknown boards.
+func NormalizeLeaderboardType(leaderboardType string) (string, error) {
+	leaderboardType = strings.TrimSpace(strings.ToLower(leaderboardType))
+	if leaderboardType == "" {
+		return LeaderboardTypeTotal, nil
 	}
-
-	// 更新每日排行榜
-	today := time.Now().Format("2006-01-02")
-	dailyKey := dailyLeaderboard + today
-	if err := lm.redis.ZAdd(ctx, dailyKey, redis.Z{
-		Score:  float64(stats.Score),
-		Member: stats.PlayerID,
-	}).Err(); err != nil {
-		return err
-	}
-	// 设置过期时间（2天）
-	lm.redis.Expire(ctx, dailyKey, 48*time.Hour)
-
-	// 更新每周排行榜
-	year, week := time.Now().ISOWeek()
-	weeklyKey := fmt.Sprintf("%s%d-W%02d", weeklyLeaderboard, year, week)
-	if err := lm.redis.ZAdd(ctx, weeklyKey, redis.Z{
-		Score:  float64(stats.Score),
-		Member: stats.PlayerID,
-	}).Err(); err != nil {
-		return err
-	}
-	// 设置过期时间（8天）
-	lm.redis.Expire(ctx, weeklyKey, 8*24*time.Hour)
-
-	return nil
-}
-
-// GetLeaderboard 获取排行榜
-func (lm *LeaderboardManager) GetLeaderboard(ctx context.Context, limit int) ([]*LeaderboardEntry, error) {
-	leaderboardType := "total"
-	offset := 0
-	// 确定使用哪个排行榜
-	key := leaderboardKey
 	switch leaderboardType {
-	case "daily":
-		today := time.Now().Format("2006-01-02")
-		key = dailyLeaderboard + today
-	case "weekly":
-		year, week := time.Now().ISOWeek()
-		key = fmt.Sprintf("%s%d-W%02d", weeklyLeaderboard, year, week)
+	case LeaderboardTypeTotal, LeaderboardTypeDaily, LeaderboardTypeWeekly:
+		return leaderboardType, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrInvalidLeaderboardType, leaderboardType)
 	}
+}
+
+// NormalizeLeaderboardPagination bounds public queries to a small, predictable page.
+func NormalizeLeaderboardPagination(offset, limit int) (int, int) {
+	offset = max(offset, 0)
+	if limit <= 0 {
+		limit = DefaultLeaderboardLimit
+	}
+	limit = min(limit, MaxLeaderboardLimit)
+	return offset, limit
+}
+
+// GetLeaderboard returns one validated leaderboard page.
+func (lm *LeaderboardManager) GetLeaderboard(
+	ctx context.Context,
+	leaderboardType string,
+	offset, limit int,
+) ([]*LeaderboardEntry, error) {
+	if !lm.IsReady() {
+		return nil, ErrLeaderboardUnavailable
+	}
+	leaderboardType, err := NormalizeLeaderboardType(leaderboardType)
+	if err != nil {
+		return nil, err
+	}
+	offset, limit = NormalizeLeaderboardPagination(offset, limit)
+	key := lm.leaderboardKey(leaderboardType, lm.now())
 
 	// 获取排行榜（从高到低）
 	results, err := lm.redis.ZRevRangeWithScores(ctx, key, int64(offset), int64(offset+limit-1)).Result()
@@ -268,11 +341,17 @@ func (lm *LeaderboardManager) GetLeaderboard(ctx context.Context, limit int) ([]
 
 	entries := make([]*LeaderboardEntry, 0, len(results))
 	for i, result := range results {
-		playerID := result.Member.(string)
+		playerID, ok := result.Member.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected leaderboard member type %T", result.Member)
+		}
 
 		// 获取玩家详细统计
 		stats, err := lm.GetPlayerStats(ctx, playerID)
-		if err != nil || stats == nil {
+		if err != nil {
+			return nil, err
+		}
+		if stats == nil {
 			continue
 		}
 
@@ -294,8 +373,31 @@ func (lm *LeaderboardManager) GetLeaderboard(ctx context.Context, limit int) ([]
 	return entries, nil
 }
 
+func (lm *LeaderboardManager) leaderboardKey(leaderboardType string, now time.Time) string {
+	switch leaderboardType {
+	case LeaderboardTypeDaily:
+		return dailyLeaderboardKey(now)
+	case LeaderboardTypeWeekly:
+		return weeklyLeaderboardKey(now)
+	default:
+		return leaderboardKey
+	}
+}
+
+func dailyLeaderboardKey(now time.Time) string {
+	return dailyLeaderboard + now.Format("2006-01-02")
+}
+
+func weeklyLeaderboardKey(now time.Time) string {
+	year, week := now.ISOWeek()
+	return fmt.Sprintf("%s%d-W%02d", weeklyLeaderboard, year, week)
+}
+
 // GetPlayerRank 获取玩家排名
 func (lm *LeaderboardManager) GetPlayerRank(ctx context.Context, playerID string) (int64, error) {
+	if !lm.IsReady() {
+		return -1, ErrLeaderboardUnavailable
+	}
 	rank, err := lm.redis.ZRevRank(ctx, leaderboardKey, playerID).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {

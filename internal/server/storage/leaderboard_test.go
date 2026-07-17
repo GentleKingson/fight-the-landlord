@@ -2,155 +2,280 @@ package storage
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func newTestLeaderboardManager(t *testing.T) (*LeaderboardManager, *miniredis.Miniredis) {
-	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("failed to start miniredis: %v", err)
-	}
-
-	client := redis.NewClient(&redis.Options{
-		Addr: mr.Addr(),
-	})
-
-	lm := NewLeaderboardManager(client)
-	return lm, mr
+type fakeLeaderboardClock struct {
+	mu  sync.RWMutex
+	now time.Time
 }
 
-func TestLeaderboard_RecordGameResult_NewPlayer(t *testing.T) {
-	t.Parallel()
+func (c *fakeLeaderboardClock) Now() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.now
+}
 
-	lm, mr := newTestLeaderboardManager(t)
-	defer mr.Close()
+func (c *fakeLeaderboardClock) Set(now time.Time) {
+	c.mu.Lock()
+	c.now = now
+	c.mu.Unlock()
+}
+
+func newTestLeaderboardManager(t *testing.T) (*LeaderboardManager, *miniredis.Miniredis, *fakeLeaderboardClock) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	clock := &fakeLeaderboardClock{now: time.Date(2026, time.January, 5, 10, 0, 0, 0, time.UTC)}
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	return NewLeaderboardManager(client, WithLeaderboardClock(clock.Now)), mr, clock
+}
+
+func TestLeaderboardRecordGameResult(t *testing.T) {
+	t.Parallel()
+	lm, _, _ := newTestLeaderboardManager(t)
 	ctx := context.Background()
 
-	// Record result for new player
-	// Landlord, Win
-	err := lm.RecordGameResult(ctx, "p1", "Player1", true, true)
-	assert.NoError(t, err)
-
+	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Player1", true, true))
 	stats, err := lm.GetPlayerStats(ctx, "p1")
-	assert.NoError(t, err)
-
-	assert.Equal(t, "p1", stats.PlayerID)
+	require.NoError(t, err)
+	require.NotNil(t, stats)
 	assert.Equal(t, 1, stats.TotalGames)
 	assert.Equal(t, 1, stats.Wins)
 	assert.Equal(t, 1, stats.LandlordGames)
 	assert.Equal(t, 1, stats.LandlordWins)
 	assert.Equal(t, 30, stats.Score)
 	assert.Equal(t, 1, stats.CurrentStreak)
-}
 
-func TestLeaderboard_RecordGameResult_Update(t *testing.T) {
-	t.Parallel()
-
-	lm, mr := newTestLeaderboardManager(t)
-	defer mr.Close()
-	ctx := context.Background()
-
-	// Initial record (Farmer Win) -> Score 15
-	err := lm.RecordGameResult(ctx, "p1", "Player1", false, true)
-	assert.NoError(t, err)
-
-	// Second record (Landlord Loss) -> Score 15 - 20 = -5 -> 0 (min 0)
-	err = lm.RecordGameResult(ctx, "p1", "Player1", true, false)
-	assert.NoError(t, err)
-
-	stats, err := lm.GetPlayerStats(ctx, "p1")
-	assert.NoError(t, err)
-
+	require.NoError(t, lm.RecordGameResult(ctx, "game-2", "p1", "Player1", true, false))
+	stats, err = lm.GetPlayerStats(ctx, "p1")
+	require.NoError(t, err)
 	assert.Equal(t, 2, stats.TotalGames)
-	assert.Equal(t, 1, stats.Wins)
 	assert.Equal(t, 1, stats.Losses)
-	assert.Equal(t, 0, stats.Score)
+	assert.Equal(t, 10, stats.Score)
 	assert.Equal(t, -1, stats.CurrentStreak)
 }
 
-func TestLeaderboard_StreakBonus(t *testing.T) {
+func TestLeaderboardStreakBonus(t *testing.T) {
 	t.Parallel()
-
-	lm, mr := newTestLeaderboardManager(t)
-	defer mr.Close()
+	lm, _, _ := newTestLeaderboardManager(t)
 	ctx := context.Background()
 
-	// Win 3 times as Farmer (15 * 3 = 45)
-	// Bonus: 3rd win gets StreakBonus3 (5)
-	// Expected score: 15 + 15 + (15 + 5) = 50?
-	// Let's check logic:
-	// currentStreak increased BEFORE bonus check.
-	// 1st: streak 1.
-	// 2nd: streak 2.
-	// 3rd: streak 3. -> check streak >= 3 -> add bonus.
-
-	for i := 0; i < 3; i++ {
-		err := lm.RecordGameResult(ctx, "p1", "Player1", false, true)
-		assert.NoError(t, err)
+	for i := range 3 {
+		require.NoError(t, lm.RecordGameResult(
+			ctx, fmt.Sprintf("game-%d", i), "p1", "Player1", false, true,
+		))
 	}
-
-	stats, _ := lm.GetPlayerStats(ctx, "p1")
-
-	// 1st: 15, streak 1
-	// 2nd: 30, streak 2
-	// 3rd: 30 + 15 + 5 = 50, streak 3
+	stats, err := lm.GetPlayerStats(ctx, "p1")
+	require.NoError(t, err)
 	assert.Equal(t, 50, stats.Score)
 	assert.Equal(t, 3, stats.CurrentStreak)
 }
 
-func TestLeaderboard_GetLeaderboard(t *testing.T) {
+func TestLeaderboardPeriodicScoresAndClockBoundaries(t *testing.T) {
 	t.Parallel()
-
-	lm, mr := newTestLeaderboardManager(t)
-	defer mr.Close()
+	lm, _, clock := newTestLeaderboardManager(t)
 	ctx := context.Background()
+	monday := clock.Now()
 
-	// Create p1: Score 30
-	err := lm.RecordGameResult(ctx, "p1", "Player1", true, true)
-	assert.NoError(t, err)
-	// Create p2: Score 15
-	err = lm.RecordGameResult(ctx, "p2", "Player2", false, true)
-	assert.NoError(t, err)
+	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Player1", false, true))
+	require.NoError(t, lm.RecordGameResult(ctx, "game-2", "p2", "Player2", true, true))
 
-	entries, err := lm.GetLeaderboard(ctx, 10)
-	assert.NoError(t, err)
-	assert.Len(t, entries, 2)
+	daily, err := lm.GetLeaderboard(ctx, LeaderboardTypeDaily, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, daily, 2)
+	assert.Equal(t, "p2", daily[0].PlayerID)
+	assert.Equal(t, 30, daily[0].Score)
+	assert.Equal(t, 15, daily[1].Score)
 
-	e1, e2 := entries[0], entries[1]
+	clock.Set(monday.Add(24 * time.Hour))
+	require.NoError(t, lm.RecordGameResult(ctx, "game-3", "p1", "Player1", true, true))
+	daily, err = lm.GetLeaderboard(ctx, LeaderboardTypeDaily, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, daily, 1)
+	assert.Equal(t, 30, daily[0].Score, "daily score must not contain lifetime points")
 
-	assert.Equal(t, "p1", e1.PlayerID) // Rank 1
-	assert.Equal(t, 30, e1.Score)
-	assert.Equal(t, "p2", e2.PlayerID) // Rank 2
-	assert.Equal(t, 15, e2.Score)
+	weekly, err := lm.GetLeaderboard(ctx, LeaderboardTypeWeekly, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, weekly, 2)
+	assert.Equal(t, 45, weekly[0].Score)
+
+	clock.Set(monday.Add(7 * 24 * time.Hour))
+	require.NoError(t, lm.RecordGameResult(ctx, "game-4", "p1", "Player1", false, false))
+	weekly, err = lm.GetLeaderboard(ctx, LeaderboardTypeWeekly, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, weekly, 1)
+	assert.Equal(t, -10, weekly[0].Score, "weekly score must contain only this week's change")
+
+	total, err := lm.GetLeaderboard(ctx, LeaderboardTypeTotal, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, total, 2)
+	assert.Equal(t, 35, total[0].Score)
+
+	clock.Set(monday)
+	daily, err = lm.GetLeaderboard(ctx, LeaderboardTypeDaily, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, daily, 2)
+	assert.Equal(t, 15, daily[1].Score)
 }
 
-func TestLeaderboard_GetPlayerRank(t *testing.T) {
+func TestLeaderboardPaginationAndLimitBounds(t *testing.T) {
 	t.Parallel()
-
-	lm, mr := newTestLeaderboardManager(t)
-	defer mr.Close()
+	lm, _, _ := newTestLeaderboardManager(t)
 	ctx := context.Background()
 
-	err := lm.RecordGameResult(ctx, "p1", "Player1", true, true) // Score 30
-	assert.NoError(t, err)
-	err = lm.RecordGameResult(ctx, "p2", "Player2", false, true) // Score 15
-	assert.NoError(t, err)
+	for i := range 55 {
+		id := fmt.Sprintf("p-%02d", i)
+		stats := &PlayerStats{PlayerID: id, PlayerName: id, Score: i, TotalGames: 1}
+		require.NoError(t, lm.SavePlayerStats(ctx, stats))
+		require.NoError(t, lm.redis.ZAdd(ctx, leaderboardKey, redis.Z{Score: float64(i), Member: id}).Err())
+	}
+
+	entries, err := lm.GetLeaderboard(ctx, LeaderboardTypeTotal, 10, 5)
+	require.NoError(t, err)
+	require.Len(t, entries, 5)
+	assert.Equal(t, 11, entries[0].Rank)
+	assert.Equal(t, "p-44", entries[0].PlayerID)
+
+	entries, err = lm.GetLeaderboard(ctx, LeaderboardTypeTotal, -5, 100)
+	require.NoError(t, err)
+	assert.Len(t, entries, MaxLeaderboardLimit)
+	assert.Equal(t, 1, entries[0].Rank)
+
+	entries, err = lm.GetLeaderboard(ctx, LeaderboardTypeTotal, 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, entries, DefaultLeaderboardLimit)
+}
+
+func TestLeaderboardRejectsInvalidType(t *testing.T) {
+	t.Parallel()
+	lm, _, _ := newTestLeaderboardManager(t)
+	_, err := lm.GetLeaderboard(context.Background(), "monthly", 0, 10)
+	assert.ErrorIs(t, err, ErrInvalidLeaderboardType)
+}
+
+func TestLeaderboardDeduplicatesSettlement(t *testing.T) {
+	t.Parallel()
+	lm, mr, clock := newTestLeaderboardManager(t)
+	ctx := context.Background()
+
+	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Player1", false, true))
+	settlementTTL, err := lm.redis.TTL(ctx, settledGameKey+"game-1").Result()
+	require.NoError(t, err)
+	assert.Less(t, settlementTTL, time.Duration(0), "settlement marker must not expire")
+	mr.FastForward(365 * 24 * time.Hour)
+	clock.Set(clock.Now().Add(365 * 24 * time.Hour))
+	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Renamed", true, false))
+	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p2", "Player2", true, false))
+
+	stats, err := lm.GetPlayerStats(ctx, "p1")
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.TotalGames)
+	assert.Equal(t, 15, stats.Score)
+	assert.Equal(t, "Player1", stats.PlayerName)
+
+	stats, err = lm.GetPlayerStats(ctx, "p2")
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.TotalGames, "different players in one game must each settle")
+
+	weekly, err := lm.GetLeaderboard(ctx, LeaderboardTypeWeekly, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, weekly, 1)
+	assert.Equal(t, "p2", weekly[0].PlayerID)
+}
+
+func TestLeaderboardConcurrentSettlementsDoNotLoseUpdates(t *testing.T) {
+	t.Parallel()
+	lm, _, _ := newTestLeaderboardManager(t)
+	ctx := context.Background()
+
+	const games = 20
+	errs := make(chan error, games)
+	var wg sync.WaitGroup
+	for i := range games {
+		wg.Add(1)
+		go func(game int) {
+			defer wg.Done()
+			errs <- lm.RecordGameResult(
+				ctx, fmt.Sprintf("game-%d", game), "p1", "Player1", false, true,
+			)
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	stats, err := lm.GetPlayerStats(ctx, "p1")
+	require.NoError(t, err)
+	assert.Equal(t, games, stats.TotalGames)
+	assert.Equal(t, games, stats.Wins)
+
+	total, err := lm.GetLeaderboard(ctx, LeaderboardTypeTotal, 0, 10)
+	require.NoError(t, err)
+	daily, err := lm.GetLeaderboard(ctx, LeaderboardTypeDaily, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, total, 1)
+	require.Len(t, daily, 1)
+	assert.Equal(t, total[0].Score, daily[0].Score)
+}
+
+func TestLeaderboardRedisErrorsAndAtomicValidation(t *testing.T) {
+	t.Parallel()
+	lm, mr, clock := newTestLeaderboardManager(t)
+	ctx := context.Background()
+
+	require.NoError(t, lm.redis.Set(ctx, playerStatsKey+"p1", "not-json", 0).Err())
+	err := lm.RecordGameResult(ctx, "game-1", "p1", "Player1", false, true)
+	require.Error(t, err)
+	totalCount, countErr := lm.redis.ZCard(ctx, leaderboardKey).Result()
+	require.NoError(t, countErr)
+	dailyCount, countErr := lm.redis.ZCard(ctx, dailyLeaderboardKey(clock.Now())).Result()
+	require.NoError(t, countErr)
+	settled, settledErr := lm.redis.SIsMember(ctx, settledGameKey+"game-1", "p1").Result()
+	require.NoError(t, settledErr)
+	assert.Zero(t, totalCount)
+	assert.Zero(t, dailyCount)
+	assert.False(t, settled)
+
+	mr.Close()
+	_, err = lm.GetLeaderboard(ctx, LeaderboardTypeTotal, 0, 10)
+	assert.Error(t, err)
+	err = lm.RecordGameResult(ctx, "game-2", "p2", "Player2", false, true)
+	assert.Error(t, err)
+}
+
+func TestLeaderboardGetPlayerRank(t *testing.T) {
+	t.Parallel()
+	lm, _, _ := newTestLeaderboardManager(t)
+	ctx := context.Background()
+	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Player1", true, true))
+	require.NoError(t, lm.RecordGameResult(ctx, "game-2", "p2", "Player2", false, true))
 
 	rank, err := lm.GetPlayerRank(ctx, "p1")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, int64(1), rank)
-
 	rank, err = lm.GetPlayerRank(ctx, "p2")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, int64(2), rank)
+	rank, err = lm.GetPlayerRank(ctx, "missing")
+	require.NoError(t, err)
+	assert.Equal(t, int64(-1), rank)
+}
 
-	_, err = lm.GetPlayerRank(ctx, "p3")
-	assert.NoError(t, err) // Returns -1, nil if not exists (based on implementation)
-	// Wait, let's verify GetPlayerRank implementation returns -1 or error for nil
-	// Implementation: if err == redis.Nil return -1, nil.
+func TestLeaderboardRequiresSettlementIdentity(t *testing.T) {
+	t.Parallel()
+	lm, _, _ := newTestLeaderboardManager(t)
+	err := lm.RecordGameResult(context.Background(), "", "p1", "Player1", false, true)
+	assert.True(t, errors.Is(err, ErrInvalidGameResult))
 }

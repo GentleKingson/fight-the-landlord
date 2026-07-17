@@ -16,6 +16,7 @@ type pendingDelivery struct {
 }
 
 type pendingGameResult struct {
+	gameID     string
 	playerID   string
 	playerName string
 	isLandlord bool
@@ -76,6 +77,7 @@ func (gs *GameSession) dispatchPendingWork(work pendingWork) {
 	for _, result := range work.results {
 		if err := leaderboard.RecordGameResult(
 			context.Background(),
+			result.gameID,
 			result.playerID,
 			result.playerName,
 			result.isLandlord,

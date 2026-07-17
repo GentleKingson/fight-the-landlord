@@ -30,6 +30,8 @@ beforeEach(() => {
     players: [],
     roomCodeInput: '',
     lobbyPanel: 'home',
+    leaderboard: [],
+    leaderboardType: 'total',
     onlineCount: 3,
     matchDeadlineMs: 0,
     matchPractice: false,
@@ -98,6 +100,39 @@ describe('observable command dispatch', () => {
       stats: { requestId: expect.any(String) },
       'room-list': { requestId: expect.any(String) }
     });
+  });
+
+  it('requests each leaderboard period and renders the server-returned type', () => {
+    render(<Lobby socket={socket} />);
+    fireEvent.click(screen.getByRole('button', { name: '战绩榜' }));
+    act(() => useAppStore.getState().clearPendingCommands());
+
+    fireEvent.click(screen.getByRole('tab', { name: '日榜' }));
+    expect(send).toHaveBeenLastCalledWith(
+      MsgType.GetLeaderboard,
+      { type: 'daily', offset: 0, limit: 30 },
+      expect.objectContaining({ request_id: expect.any(String) })
+    );
+
+    act(() => useAppStore.getState().handleMessage({
+      type: MsgType.LeaderboardResult,
+      payload: {
+        type: 'weekly',
+        entries: [{
+          rank: 1,
+          player_id: 'p2',
+          player_name: '青松',
+          score: 45,
+          wins: 3,
+          win_rate: 75
+        }]
+      }
+    }));
+
+    expect(screen.getByRole('heading', { name: '周榜' })).toBeInTheDocument();
+    expect(screen.getByText('青松')).toBeInTheDocument();
+    expect(screen.getByText('45 分')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '周榜' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('does not enter pending on send failure and exposes a network error', () => {

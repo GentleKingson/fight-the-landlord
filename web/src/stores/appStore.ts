@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { MsgType, WireMessageType, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type PlayerInfo, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
+import { isLeaderboardType, MsgType, WireMessageType, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardResultPayload, type LobbyPanel, type PlayerInfo, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
 import { initialConnectionSlice, type ConnectionSlice, type ConnectionStatus } from './slices/connectionSlice';
 import { initialLobbySlice, type LobbySlice } from './slices/lobbySlice';
 import { initialRoomSlice, mergePlayer, normalizeRoomPlayer, normalizeRoomPlayers, type RoomSlice } from './slices/roomSlice';
@@ -382,7 +382,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ stats: message.payload as StatsResultPayload, lobbyPanel: 'stats' });
         break;
       case MsgType.LeaderboardResult: {
-        const payload = message.payload as { type: string; entries: LeaderboardEntry[] };
+        const payload = message.payload as LeaderboardResultPayload;
+        if (!isLeaderboardType(payload.type)) break;
         set({ leaderboardType: payload.type, leaderboard: payload.entries ?? [], lobbyPanel: 'leaderboard' });
         break;
       }
