@@ -3,6 +3,7 @@ package room
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -130,6 +131,7 @@ type RoomManager struct {
 	saveRoomFunc      func(context.Context, string, *storage.RoomData) error
 	deleteRoomFunc    func(context.Context, string) error
 	metrics           *observability.Metrics
+	logger            *slog.Logger
 }
 
 // NewRoomManager 创建房间管理器
@@ -159,6 +161,7 @@ func newRoomManager(parent context.Context, rs *storage.RedisStore, gameConfig c
 		ctx:               ctx,
 		cancel:            cancel,
 		cleanupPeriod:     cleanupPeriod,
+		logger:            slog.Default().With("component", "room"),
 	}
 
 	rm.cleanupWG.Add(1)
@@ -196,4 +199,11 @@ func (rm *RoomManager) reportRoomCount() {
 	if metrics != nil {
 		metrics.SetRoomsCurrent(count)
 	}
+}
+
+func (rm *RoomManager) structuredLogger() *slog.Logger {
+	if rm != nil && rm.logger != nil {
+		return rm.logger
+	}
+	return slog.Default().With("component", "room")
 }

@@ -365,7 +365,6 @@ func (rm *RoomManager) cleanup() {
 	for _, removed := range expired {
 		rm.dispatchRoomRemoval(removed.removal)
 		sendRemovalMessageIfUnbound(removed.removal.removal, codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))
-		log.Printf("🏠 房间 %s 超时已清理", removed.removal.removal.Code)
 	}
 }
 

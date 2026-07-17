@@ -43,6 +43,13 @@ func (rm *RoomManager) removePublishedRoomLocked(gameRoom *Room, reason RoomRemo
 }
 
 func (rm *RoomManager) dispatchRoomRemoval(dispatch roomRemovalDispatch) {
+	rm.structuredLogger().Info("room cleaned",
+		"event", "room_cleaned",
+		"room_id", dispatch.removal.Code,
+		"reason", string(dispatch.removal.Reason),
+		"player_count", len(dispatch.removal.Players),
+		"result", "removed",
+	)
 	rm.mu.RLock()
 	metrics := rm.metrics
 	rm.mu.RUnlock()
