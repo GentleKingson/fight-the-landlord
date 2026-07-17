@@ -84,7 +84,9 @@ func TestMatcherServerSideTimeoutExpiresFrozenClient(t *testing.T) {
 	require.NotEmpty(t, cancelPayload.Reason)
 	require.Zero(t, matcher.GetQueueLength())
 	require.False(t, matcher.RemoveFromQueue(client))
-	require.True(t, matcher.AddToQueue(client), "expired entries must not remain inflight")
+	require.Eventually(t, func() bool {
+		return matcher.AddToQueue(client)
+	}, time.Second, time.Millisecond, "expired entries must be released after cancellation delivery returns")
 	require.True(t, matcher.RemoveFromQueue(client))
 }
 
@@ -194,6 +196,97 @@ func TestMatcherRemoveFromQueueCancelsInflightTransaction(t *testing.T) {
 	}
 	require.True(t, matcher.AddToQueue(clients[0]), "cancel must clear the initiator's inflight state")
 	require.True(t, matcher.RemoveFromQueue(clients[0]))
+}
+
+func TestMatcherOperationalDrainCancelsInflightAssemblyAndReleasesLease(t *testing.T) {
+	clients := newMatcherClients("drain-inflight", 3)
+	registry := newActiveClientRegistry(clients...)
+	assemblyReady := make(chan *scriptedRoomAssembly, 1)
+	leaseAcquired := make(chan struct{})
+	leaseReleased := make(chan struct{})
+	var acquireOnce sync.Once
+	var releaseOnce sync.Once
+	var leases atomic.Int32
+	matcher := NewMatcher(MatcherDeps{
+		QueueTimeout:        time.Hour,
+		ResolveActiveClient: registry.Resolve,
+		AcquireStartLease: func() (func(), bool) {
+			leases.Add(1)
+			acquireOnce.Do(func() { close(leaseAcquired) })
+			return func() {
+				leases.Add(-1)
+				releaseOnce.Do(func() { close(leaseReleased) })
+			}, true
+		},
+		BeginRoom: func(_ context.Context, first types.ClientInterface) (RoomAssembly, error) {
+			assembly := newScriptedRoomAssembly(first)
+			assembly.blockJoinAt = 1
+			assemblyReady <- assembly
+			return assembly, nil
+		},
+		BotFillDelay: time.Hour,
+	})
+	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
+
+	addThreeToMatcher(t, matcher, clients)
+	waitSignal(t, leaseAcquired, "start lease acquisition")
+	assembly := waitValue(t, assemblyReady, "draining room assembly")
+	require.Equal(t, 1, waitValue(t, assembly.joinStarted, "blocked assembly Join"))
+
+	matcher.CancelPending("server_draining")
+	waitSignal(t, assembly.rollbackDone, "draining assembly rollback")
+	waitSignal(t, leaseReleased, "draining start lease release")
+	require.Zero(t, leases.Load())
+	for _, client := range clients {
+		canceled := client.waitForMessage(t, protocol.MsgMatchCancelled)
+		payload, err := codec.ParsePayload[protocol.MatchCancelledPayload](canceled)
+		require.NoError(t, err)
+		require.Equal(t, "server_draining", payload.Reason)
+		require.False(t, client.hasMessage(protocol.MsgRoomJoined))
+	}
+}
+
+func TestMatcherOperationalDrainWinsBotFillClaim(t *testing.T) {
+	human := newMatcherClient("drain-bot-fill-human", false)
+	botClients := []*matcherClient{
+		newMatcherClient("drain-bot-fill-bot-1", true),
+		newMatcherClient("drain-bot-fill-bot-2", true),
+	}
+	factoryStarted := make(chan struct{})
+	factoryRelease := make(chan struct{})
+	var factoryOnce sync.Once
+	var factoryCalls atomic.Int32
+	var beginCalls atomic.Int32
+	matcher := NewMatcher(MatcherDeps{
+		QueueTimeout: time.Hour,
+		BeginRoom: func(context.Context, types.ClientInterface) (RoomAssembly, error) {
+			beginCalls.Add(1)
+			return nil, errInjectedMatchAssembly
+		},
+		BotFactory: func(bot.DecisionEngine) types.ClientInterface {
+			factoryOnce.Do(func() { close(factoryStarted) })
+			<-factoryRelease
+			return botClients[int(factoryCalls.Add(1))-1]
+		},
+		BotFillDelay: 10 * time.Millisecond,
+		BotEngine:    bot.NewHeuristicEngine(),
+		BotConfig:    config.BotConfig{Enabled: true},
+	})
+	t.Cleanup(func() { require.NoError(t, matcher.Close()) })
+
+	require.True(t, matcher.AddToQueue(human))
+	waitSignal(t, factoryStarted, "bot-fill factory claim")
+	matcher.CancelPending("server_draining")
+	close(factoryRelease)
+	for _, botClient := range botClients {
+		waitSignal(t, botClient.closed, "discarded draining bot Close")
+	}
+	canceled := human.waitForMessage(t, protocol.MsgMatchCancelled)
+	payload, err := codec.ParsePayload[protocol.MatchCancelledPayload](canceled)
+	require.NoError(t, err)
+	require.Equal(t, "server_draining", payload.Reason)
+	require.Zero(t, beginCalls.Load(), "a bot-fill claim must not assemble a room after drain")
+	require.Zero(t, matcher.GetQueueLength())
 }
 
 func TestMatcherPlayerDisconnectedRemovesQueuedEntry(t *testing.T) {

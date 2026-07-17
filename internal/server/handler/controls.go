@@ -15,6 +15,10 @@ type operationalStateProvider interface {
 	OperationalState() string
 }
 
+type operationalAdmissionProvider interface {
+	AcquireOperationalAdmission(allowDraining bool) (func(), string, bool)
+}
+
 type playerModerationProvider interface {
 	IsPlayerMuted(playerID string) bool
 	IsPlayerBanned(playerID string) bool
@@ -53,6 +57,29 @@ func operationalAdmissionErrorCode(state string) int {
 		return protocol.ErrCodeServerDraining
 	}
 	return protocol.ErrCodeServerMaintenance
+}
+
+func acquireOperationalAdmission(server types.ServerInterface, allowDraining bool) (func(), string, bool) {
+	provider, ok := server.(operationalAdmissionProvider)
+	if ok {
+		return provider.AcquireOperationalAdmission(allowDraining)
+	}
+	state := currentOperationalState(server)
+	if state != operationalNormal && !(allowDraining && state == operationalDraining) {
+		return nil, state, false
+	}
+	return func() {}, state, true
+}
+
+func acquireReadyAdmission(server types.ServerInterface) (func(), string, bool) {
+	if provider, ok := server.(operationalAdmissionProvider); ok {
+		return provider.AcquireOperationalAdmission(false)
+	}
+	state, controlled := providedOperationalState(server)
+	if controlled && state != operationalNormal {
+		return nil, state, false
+	}
+	return func() {}, operationalNormal, true
 }
 
 func playerMuted(server types.ServerInterface, playerID string) bool {

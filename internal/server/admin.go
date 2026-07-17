@@ -91,10 +91,15 @@ func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeAdminStatus(w)
+	s.auditAdminSuccess("status")
 }
 
 func (s *Server) handleAdminDrain(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeAdminRequest(w, r, http.MethodPost) || !decodeEmptyAdminBody(w, r) {
+	if !s.authorizeAdminRequest(w, r, http.MethodPost) {
+		return
+	}
+	if !decodeEmptyAdminBody(w, r) {
+		s.auditAdminRejection("invalid_body")
 		return
 	}
 	changed := s.EnterDrainingMode()
@@ -103,7 +108,11 @@ func (s *Server) handleAdminDrain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeAdminRequest(w, r, http.MethodPost) || !decodeEmptyAdminBody(w, r) {
+	if !s.authorizeAdminRequest(w, r, http.MethodPost) {
+		return
+	}
+	if !decodeEmptyAdminBody(w, r) {
+		s.auditAdminRejection("invalid_body")
 		return
 	}
 	changed := s.setOperationalState(operationalMaintenance)
@@ -112,7 +121,11 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAdminResume(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeAdminRequest(w, r, http.MethodPost) || !decodeEmptyAdminBody(w, r) {
+	if !s.authorizeAdminRequest(w, r, http.MethodPost) {
+		return
+	}
+	if !decodeEmptyAdminBody(w, r) {
+		s.auditAdminRejection("invalid_body")
 		return
 	}
 	changed := s.ResumeNormalOperation()
@@ -125,7 +138,12 @@ func (s *Server) handleAdminDisconnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request adminPlayerRequest
-	if !decodeAdminJSON(w, r, &request) || !validateAdminPlayerID(w, request.PlayerID) {
+	if !decodeAdminJSON(w, r, &request) {
+		s.auditAdminRejection("invalid_body")
+		return
+	}
+	if !validateAdminPlayerID(w, request.PlayerID) {
+		s.auditAdminRejection("invalid_body")
 		return
 	}
 	s.sessionAuthorityMu.Lock()
@@ -155,10 +173,16 @@ func (s *Server) handleAdminModeration(w http.ResponseWriter, r *http.Request, a
 		return
 	}
 	var request adminModerationRequest
-	if !decodeAdminJSON(w, r, &request) || !validateAdminPlayerID(w, request.PlayerID) {
+	if !decodeAdminJSON(w, r, &request) {
+		s.auditAdminRejection("invalid_body")
+		return
+	}
+	if !validateAdminPlayerID(w, request.PlayerID) {
+		s.auditAdminRejection("invalid_body")
 		return
 	}
 	if request.DurationSecond <= 0 || request.DurationSecond > int64(maxModerationDuration/time.Second) {
+		s.auditAdminRejection("invalid_body")
 		http.Error(w, "duration_seconds must be between 1 and 604800", http.StatusBadRequest)
 		return
 	}
@@ -196,7 +220,12 @@ func (s *Server) handleAdminModerationRemoval(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var request adminPlayerRequest
-	if !decodeAdminJSON(w, r, &request) || !validateAdminPlayerID(w, request.PlayerID) {
+	if !decodeAdminJSON(w, r, &request) {
+		s.auditAdminRejection("invalid_body")
+		return
+	}
+	if !validateAdminPlayerID(w, request.PlayerID) {
+		s.auditAdminRejection("invalid_body")
 		return
 	}
 	store := s.activeModerationStore()
@@ -220,6 +249,7 @@ func (s *Server) authorizeAdminRequest(w http.ResponseWriter, r *http.Request, m
 		return false
 	}
 	if r.Method != method {
+		s.auditAdminRejection("wrong_method")
 		w.Header().Set("Allow", method)
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return false
@@ -342,16 +372,24 @@ func (s *Server) writeAdminStatus(w http.ResponseWriter) {
 	if store := s.activeModerationStore(); store != nil {
 		muted, banned = store.counts()
 	}
-	state := s.OperationalState()
+	state, startLeases, transitioning := s.operationalQuiescenceSnapshot()
 	writeAdminJSON(w, http.StatusOK, adminStatusResponse{
 		State:         state,
 		ActiveGames:   activeGames,
-		SafeToRestart: state != OperationalStateNormal && activeGames == 0,
+		SafeToRestart: state != OperationalStateNormal && activeGames == 0 && startLeases == 0 && !transitioning,
 		OnlinePlayers: s.GetOnlineCount(),
 		MutedPlayers:  muted,
 		BannedPlayers: banned,
 		ServerVersion: Version,
 	})
+}
+
+func (s *Server) auditAdminSuccess(action string) {
+	s.adminLogger().Info("admin request completed",
+		"event", "admin_action",
+		"action", action,
+		"result", "success",
+	)
 }
 
 func writeAdminJSON(w http.ResponseWriter, status int, payload any) {

@@ -146,6 +146,65 @@ func TestAdminStateTransitionsAreIdempotentAndRaceSafe(t *testing.T) {
 	}, server.OperationalState())
 }
 
+func TestAdminStatusWaitsForStartLeaseThroughDrain(t *testing.T) {
+	server := newAdminTestServer(nil)
+	release, admitted := server.AcquireGameStartLease()
+	require.True(t, admitted)
+	require.True(t, server.EnterDrainingMode())
+
+	during := performAdminRequest(t, server, http.MethodGet, "/admin/status", "", testAdminKey, "127.0.0.1:41000")
+	require.Equal(t, http.StatusOK, during.Code)
+	var duringStatus adminStatusResponse
+	require.NoError(t, json.NewDecoder(during.Body).Decode(&duringStatus))
+	require.False(t, duringStatus.SafeToRestart)
+
+	release()
+	release()
+	after := performAdminRequest(t, server, http.MethodGet, "/admin/status", "", testAdminKey, "127.0.0.1:41000")
+	require.Equal(t, http.StatusOK, after.Code)
+	var afterStatus adminStatusResponse
+	require.NoError(t, json.NewDecoder(after.Body).Decode(&afterStatus))
+	require.True(t, afterStatus.SafeToRestart)
+
+	_, admitted = server.AcquireGameStartLease()
+	require.False(t, admitted, "draining must reject every later authoritative start")
+}
+
+func TestDrainWaitsForShortAdmissionThenClosesBoundary(t *testing.T) {
+	server := newAdminTestServer(nil)
+	release, _, admitted := server.AcquireOperationalAdmission(false)
+	require.True(t, admitted)
+	drainStarted := make(chan struct{})
+	drainDone := make(chan struct{})
+	go func() {
+		close(drainStarted)
+		server.EnterDrainingMode()
+		close(drainDone)
+	}()
+	<-drainStarted
+	require.Eventually(t, func() bool {
+		if server.operationalTransitionMu.TryLock() {
+			server.operationalTransitionMu.Unlock()
+			return false
+		}
+		return true
+	}, time.Second, time.Millisecond, "drain never reached the short-admission boundary")
+	select {
+	case <-drainDone:
+		t.Fatal("drain crossed an admitted create or enqueue mutation")
+	default:
+	}
+	release()
+	select {
+	case <-drainDone:
+	case <-time.After(time.Second):
+		t.Fatal("drain did not finish after the admitted mutation released")
+	}
+	_, state, admitted := server.AcquireOperationalAdmission(false)
+	require.False(t, admitted, "a short admission landed after drain completed")
+	require.Equal(t, OperationalStateDraining, state)
+}
+
 func TestOperationalStateNoticesReachActiveGamesWithoutBlockingDrainActions(t *testing.T) {
 	t.Parallel()
 	server := newAdminTestServer(nil)
@@ -248,4 +307,21 @@ func TestAdminAuditLogExcludesManagementKeys(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	assert.NotContains(t, output.String(), testAdminKey)
 	assert.Contains(t, output.String(), `"event":"admin_action"`)
+
+	output.Reset()
+	status := performAdminRequest(t, server, http.MethodGet, "/admin/status", "", testAdminKey, "127.0.0.1:41000")
+	require.Equal(t, http.StatusOK, status.Code)
+	assert.Contains(t, output.String(), `"action":"status"`)
+	assert.Contains(t, output.String(), `"result":"success"`)
+
+	output.Reset()
+	wrongMethod := performAdminRequest(t, server, http.MethodGet, "/admin/drain", "", testAdminKey, "127.0.0.1:41000")
+	require.Equal(t, http.StatusMethodNotAllowed, wrongMethod.Code)
+	assert.Contains(t, output.String(), `"reason":"wrong_method"`)
+
+	output.Reset()
+	invalidBody := performAdminRequest(t, server, http.MethodPost, "/admin/mute", `{`, testAdminKey, "127.0.0.1:41000")
+	require.Equal(t, http.StatusBadRequest, invalidBody.Code)
+	assert.Contains(t, output.String(), `"reason":"invalid_body"`)
+	assert.NotContains(t, output.String(), testAdminKey)
 }

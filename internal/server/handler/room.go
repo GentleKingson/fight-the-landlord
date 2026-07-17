@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/types"
@@ -12,8 +13,8 @@ import (
 
 // handleCreateRoom 处理创建房间
 func (h *Handler) handleCreateRoom(client types.ClientInterface) {
-	state := currentOperationalState(h.server)
-	if state != operationalNormal {
+	releaseAdmission, state, admitted := acquireOperationalAdmission(h.server, false)
+	if !admitted {
 		text := "服务器维护中，暂停创建房间"
 		if state == operationalDraining {
 			text = "服务器正在排空，暂停创建房间"
@@ -22,6 +23,7 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 			operationalAdmissionErrorCode(state), text, protocol.MsgCreateRoom))
 		return
 	}
+	defer releaseAdmission()
 
 	if !h.leaveRoomBeforeCommand(client, protocol.MsgCreateRoom) {
 		return
@@ -41,11 +43,13 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 
 // handleJoinRoom 处理加入房间
 func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Message) {
-	if currentOperationalState(h.server) == operationalMaintenance {
+	releaseAdmission, state, admitted := acquireOperationalAdmission(h.server, true)
+	if !admitted {
 		sendMessage(client, codec.NewCommandErrorMessageWithText(
-			protocol.ErrCodeServerMaintenance, "服务器维护中，暂停加入房间", protocol.MsgJoinRoom))
+			operationalAdmissionErrorCode(state), "服务器维护中，暂停加入房间", protocol.MsgJoinRoom))
 		return
 	}
+	defer releaseAdmission()
 
 	payload, err := codec.ParsePayload[protocol.JoinRoomPayload](msg)
 	if err != nil {
@@ -114,8 +118,8 @@ func (h *Handler) leaveRoomBeforeCommand(client types.ClientInterface, command p
 
 // handleQuickMatch 处理快速匹配
 func (h *Handler) handleQuickMatch(client types.ClientInterface) {
-	state := currentOperationalState(h.server)
-	if state != operationalNormal {
+	releaseAdmission, state, admitted := acquireOperationalAdmission(h.server, false)
+	if !admitted {
 		text := "服务器维护中，暂停快速匹配"
 		if state == operationalDraining {
 			text = "服务器正在排空，暂停快速匹配"
@@ -124,6 +128,7 @@ func (h *Handler) handleQuickMatch(client types.ClientInterface) {
 			operationalAdmissionErrorCode(state), text, protocol.MsgQuickMatch))
 		return
 	}
+	defer releaseAdmission()
 
 	if !h.leaveRoomBeforeCommand(client, protocol.MsgQuickMatch) {
 		return
@@ -145,8 +150,8 @@ func (h *Handler) handleQuickMatch(client types.ClientInterface) {
 
 // handlePracticeMatch 处理人机练习
 func (h *Handler) handlePracticeMatch(client types.ClientInterface) {
-	state := currentOperationalState(h.server)
-	if state != operationalNormal {
+	releaseAdmission, state, admitted := acquireOperationalAdmission(h.server, false)
+	if !admitted {
 		text := "服务器维护中，暂停人机练习"
 		if state == operationalDraining {
 			text = "服务器正在排空，暂停人机练习"
@@ -155,6 +160,7 @@ func (h *Handler) handlePracticeMatch(client types.ClientInterface) {
 			operationalAdmissionErrorCode(state), text, protocol.MsgPracticeMatch))
 		return
 	}
+	defer releaseAdmission()
 
 	if !h.leaveRoomBeforeCommand(client, protocol.MsgPracticeMatch) {
 		return
@@ -197,8 +203,8 @@ func (h *Handler) handleReady(client types.ClientInterface, ready bool) {
 		command = protocol.MsgCancelReady
 	}
 	if ready {
-		state, controlled := providedOperationalState(h.server)
-		if controlled && state != operationalNormal {
+		releaseAdmission, state, admitted := acquireReadyAdmission(h.server)
+		if !admitted {
 			text := "服务器维护中，暂停开始新牌局"
 			if state == operationalDraining {
 				text = "服务器正在排空，暂停开始新牌局"
@@ -207,6 +213,7 @@ func (h *Handler) handleReady(client types.ClientInterface, ready bool) {
 				operationalAdmissionErrorCode(state), text, protocol.MsgReady))
 			return
 		}
+		defer releaseAdmission()
 	}
 	if h.roomManager == nil {
 		sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeNotInRoom, command))
@@ -215,6 +222,11 @@ func (h *Handler) handleReady(client types.ClientInterface, ready bool) {
 
 	err := h.roomManager.SetPlayerReady(client, ready)
 	if err != nil {
+		if errors.Is(err, room.ErrGameStartAdmissionRejected) {
+			sendMessage(client, codec.NewCommandErrorMessageWithText(
+				protocol.ErrCodeServerMaintenance, "服务器已停止开始新牌局", command))
+			return
+		}
 		var gameErr *apperrors.GameError
 		if errors.As(err, &gameErr) {
 			sendMessage(client, codec.NewCommandErrorMessage(gameErr.Code, command))

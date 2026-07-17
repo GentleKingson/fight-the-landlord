@@ -285,13 +285,30 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 		return apperrors.ErrGameStarted
 	}
 
+	previousReady := player.Ready
 	player.Ready = ready
 	playerID := player.ID
 	recipients := room.snapshotDeliveryRecipientsLocked("")
 	shouldStart := room.checkAllReadyLocked()
 	var startPlayers []PlayerSnapshot
+	var releaseStartLease func()
 	if shouldStart {
+		if rm.startAdmission != nil {
+			var admitted bool
+			releaseStartLease, admitted = rm.startAdmission()
+			if !admitted {
+				player.Ready = previousReady
+				room.mu.Unlock()
+				room.publishMu.Unlock()
+				rm.mu.RUnlock()
+				return ErrGameStartAdmissionRejected
+			}
+		}
 		if err := room.startGameLocked(); err != nil {
+			if releaseStartLease != nil {
+				releaseStartLease()
+			}
+			player.Ready = previousReady
 			room.mu.Unlock()
 			room.publishMu.Unlock()
 			rm.mu.RUnlock()
@@ -313,7 +330,9 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 		// The callback may acquire GameSession.mu and therefore must never run
 		// while Room.mu is held. This removes the room -> game-session lock edge.
 		if callback != nil {
-			callback(room, startPlayers)
+			callback(room, startPlayers, releaseStartLease)
+		} else if releaseStartLease != nil {
+			releaseStartLease()
 		}
 
 		// 保存房间状态
@@ -323,10 +342,19 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	return nil
 }
 
-func (rm *RoomManager) SetOnGameStart(callback func(*Room, []PlayerSnapshot)) {
+func (rm *RoomManager) SetOnGameStart(callback func(*Room, []PlayerSnapshot, func())) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 	rm.onGameStart = callback
+}
+
+// SetStartAdmission installs the authoritative lease gate used when the last
+// player readies a room. The callback is invoked while the ready transition is
+// still protected by the room lock.
+func (rm *RoomManager) SetStartAdmission(callback func() (func(), bool)) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	rm.startAdmission = callback
 }
 
 // GetRoom 获取房间

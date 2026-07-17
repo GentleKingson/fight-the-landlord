@@ -330,7 +330,7 @@ func TestGameStartCallbackRunsWithoutRoomLock(t *testing.T) {
 	require.Len(t, players, 3)
 
 	callbackDone := make(chan struct{})
-	rm.SetOnGameStart(func(startingRoom *Room, _ []PlayerSnapshot) {
+	rm.SetOnGameStart(func(startingRoom *Room, _ []PlayerSnapshot, _ func()) {
 		_ = startingRoom.State()
 		close(callbackDone)
 	})
@@ -357,7 +357,7 @@ func TestGameStartCallbackReceivesCommittedMembershipSnapshot(t *testing.T) {
 	callbackEntered := make(chan struct{})
 	callbackRelease := make(chan struct{})
 	callbackDone := make(chan []PlayerSnapshot, 1)
-	rm.SetOnGameStart(func(_ *Room, startingPlayers []PlayerSnapshot) {
+	rm.SetOnGameStart(func(_ *Room, startingPlayers []PlayerSnapshot, _ func()) {
 		close(callbackEntered)
 		<-callbackRelease
 		callbackDone <- startingPlayers

@@ -2,6 +2,7 @@ package session
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,26 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
+
+func TestRetireReleasesQuiescenceLeaseExactlyOnce(t *testing.T) {
+	game := &GameSession{}
+	var releases atomic.Int32
+	game.SetQuiescenceRelease(func() { releases.Add(1) })
+
+	var wait sync.WaitGroup
+	for range 32 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			game.Retire()
+		}()
+	}
+	wait.Wait()
+	require.EqualValues(t, 1, releases.Load())
+
+	game.SetQuiescenceRelease(func() { releases.Add(1) })
+	require.EqualValues(t, 2, releases.Load(), "a lease attached after retirement must release immediately")
+}
 
 func TestStartGame_DealCards(t *testing.T) {
 	t.Parallel()
@@ -358,7 +379,7 @@ func TestEndedRoomCanReadyUpIntoFreshSession(t *testing.T) {
 	manager := room.NewRoomManager(nil, gameConfig)
 	manager.AddRoomForTest(r)
 	var replacement *GameSession
-	manager.SetOnGameStart(func(gameRoom *room.Room, players []room.PlayerSnapshot) {
+	manager.SetOnGameStart(func(gameRoom *room.Room, players []room.PlayerSnapshot, _ func()) {
 		replacement = NewGameSessionWithPlayers(gameRoom, players, storage.NewLeaderboardManager(nil), gameConfig)
 		replacement.Start()
 	})

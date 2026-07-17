@@ -2,6 +2,7 @@ package server
 
 import (
 	"log/slog"
+	"sync"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
@@ -39,11 +40,28 @@ func (s *Server) setOperationalState(next uint32) bool {
 	if s == nil || next > operationalMaintenance {
 		return false
 	}
+	s.operationalTransitionMu.Lock()
+	defer s.operationalTransitionMu.Unlock()
+
+	// The writer boundary waits for create/enqueue/practice calls that already
+	// won admission, then prevents any later call from entering before the new
+	// state is visible.
+	s.operationalAdmissionMu.Lock()
 	s.operationalMu.Lock()
-	defer s.operationalMu.Unlock()
 	previous := s.operationalState.Swap(next)
+	s.operationalTransitioning = previous != next
+	s.operationalMu.Unlock()
+	s.operationalAdmissionMu.Unlock()
 	if previous == next {
 		return false
+	}
+	defer func() {
+		s.operationalMu.Lock()
+		s.operationalTransitioning = false
+		s.operationalMu.Unlock()
+	}()
+	if next != operationalNormal && s.matcher != nil {
+		s.matcher.CancelPending("server_draining")
 	}
 
 	state := operationalStateName(next)
@@ -79,6 +97,58 @@ func (s *Server) setOperationalState(next uint32) bool {
 		"state", state,
 	)
 	return true
+}
+
+// AcquireOperationalAdmission linearizes short new-entry mutations with an
+// operational transition. Callers must release the guard after the room or
+// matcher mutation has committed.
+func (s *Server) AcquireOperationalAdmission(allowDraining bool) (func(), string, bool) {
+	if s == nil {
+		return nil, OperationalStateNormal, false
+	}
+	s.operationalAdmissionMu.RLock()
+	state := operationalStateName(s.operationalState.Load())
+	if state != OperationalStateNormal && !(allowDraining && state == OperationalStateDraining) {
+		s.operationalAdmissionMu.RUnlock()
+		return nil, state, false
+	}
+	return s.operationalAdmissionMu.RUnlock, state, true
+}
+
+// AcquireGameStartLease atomically admits one new game only while the server
+// is normal. The returned release function is idempotent and remains owned by
+// the game through terminal delivery and settlement.
+func (s *Server) AcquireGameStartLease() (func(), bool) {
+	if s == nil {
+		return nil, false
+	}
+	s.operationalMu.Lock()
+	if s.operationalState.Load() != operationalNormal {
+		s.operationalMu.Unlock()
+		return nil, false
+	}
+	s.gameStartLeases++
+	s.operationalMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.operationalMu.Lock()
+			if s.gameStartLeases > 0 {
+				s.gameStartLeases--
+			}
+			s.operationalMu.Unlock()
+		})
+	}, true
+}
+
+func (s *Server) operationalQuiescenceSnapshot() (string, int, bool) {
+	if s == nil {
+		return OperationalStateNormal, 0, false
+	}
+	s.operationalMu.Lock()
+	defer s.operationalMu.Unlock()
+	return operationalStateName(s.operationalState.Load()), s.gameStartLeases, s.operationalTransitioning
 }
 
 func operationalStateName(state uint32) string {

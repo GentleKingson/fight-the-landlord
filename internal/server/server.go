@@ -93,12 +93,16 @@ type Server struct {
 	clientPumpsWG         sync.WaitGroup
 
 	// 运营控制
-	operationalMu    sync.Mutex
-	operationalState atomic.Uint32
-	moderationOnce   sync.Once
-	moderation       *moderationStore
-	adminLimiterOnce sync.Once
-	adminLimiter     *adminRateLimiter
+	operationalTransitionMu  sync.Mutex
+	operationalAdmissionMu   sync.RWMutex
+	operationalMu            sync.Mutex
+	operationalState         atomic.Uint32
+	gameStartLeases          int
+	operationalTransitioning bool
+	moderationOnce           sync.Once
+	moderation               *moderationStore
+	adminLimiterOnce         sync.Once
+	adminLimiter             *adminRateLimiter
 }
 
 type browserRevokeDrain struct {
@@ -216,6 +220,7 @@ func (s *Server) initializeGameRuntime(cfg *config.Config) {
 		BotEngine:           botEngine,
 		BotConfig:           cfg.BOT,
 		ResolveActiveClient: s.GetClientByID,
+		AcquireStartLease:   s.AcquireGameStartLease,
 		RegisterSession: func(roomCode string, gs *session.GameSession) bool {
 			return s.handler.SetGameSession(roomCode, gs)
 		},
@@ -229,10 +234,13 @@ func (s *Server) initializeGameRuntime(cfg *config.Config) {
 		SessionManager: s.sessionManager,
 		Metrics:        s.metrics,
 	})
-	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot) {
+	s.roomManager.SetStartAdmission(s.AcquireGameStartLease)
+	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot, releaseStartLease func()) {
 		gs := session.NewGameSessionWithPlayers(r, players, s.leaderboard, s.config.Game)
+		gs.SetQuiescenceRelease(releaseStartLease)
 		gs.SetMetrics(s.metrics)
 		if !s.handler.SetGameSession(r.Code, gs) {
+			gs.Retire()
 			return
 		}
 		for _, player := range players {

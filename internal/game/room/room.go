@@ -20,6 +20,10 @@ const (
 
 var ErrRoomManagerClosed = errors.New("room manager is closed")
 
+// ErrGameStartAdmissionRejected means the room became ready after the server
+// stopped admitting new games.
+var ErrGameStartAdmissionRejected = errors.New("new game admission is closed")
+
 // RoomPlayer 房间中的玩家
 type RoomPlayer struct {
 	ID         string
@@ -106,23 +110,24 @@ func newRoomPlayer(client types.ClientInterface, seat int) *RoomPlayer {
 
 // RoomManager 房间管理器
 type RoomManager struct {
-	redisStore    *storage.RedisStore
-	roomTimeout   time.Duration
-	gameConfig    config.GameConfig
-	onGameStart   func(*Room, []PlayerSnapshot)
-	onRoomRemoved func(RoomRemoval)
-	onPresence    func(*Room, string, bool)
-	rooms         map[string]*Room
-	pendingRooms  map[string]*MatchRoomTransaction
-	retiringRooms map[string]*Room
-	roomCodeFunc  func() string
-	closed        bool
-	mu            sync.RWMutex
-	ctx           context.Context
-	cancel        context.CancelFunc
-	cleanupPeriod time.Duration
-	cleanupWG     sync.WaitGroup
-	closeOnce     sync.Once
+	redisStore     *storage.RedisStore
+	roomTimeout    time.Duration
+	gameConfig     config.GameConfig
+	onGameStart    func(*Room, []PlayerSnapshot, func())
+	startAdmission func() (func(), bool)
+	onRoomRemoved  func(RoomRemoval)
+	onPresence     func(*Room, string, bool)
+	rooms          map[string]*Room
+	pendingRooms   map[string]*MatchRoomTransaction
+	retiringRooms  map[string]*Room
+	roomCodeFunc   func() string
+	closed         bool
+	mu             sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	cleanupPeriod  time.Duration
+	cleanupWG      sync.WaitGroup
+	closeOnce      sync.Once
 
 	persistenceMu     sync.Mutex
 	persistenceQueues map[string]*roomPersistenceQueue

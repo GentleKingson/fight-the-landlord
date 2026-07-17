@@ -88,6 +88,9 @@ type GameSession struct {
 	metricStartedAt   time.Time
 	metricStarted     bool
 	metricFinished    bool
+	quiescenceMu      sync.Mutex
+	quiescenceRelease func()
+	quiescenceDone    bool
 
 	// 出牌相关
 	currentPlayer     int             // 当前出牌玩家索引
@@ -106,6 +109,45 @@ type GameSession struct {
 	// delivery. Reentrant state reads remain possible while messages are sent.
 	actionMu sync.Mutex
 	mu       sync.RWMutex
+}
+
+// SetQuiescenceRelease transfers one server start lease to the session. A
+// lease attached after an early retirement is released immediately.
+func (gs *GameSession) SetQuiescenceRelease(release func()) {
+	if gs == nil || release == nil {
+		return
+	}
+	gs.quiescenceMu.Lock()
+	if gs.quiescenceDone {
+		gs.quiescenceMu.Unlock()
+		release()
+		return
+	}
+	if gs.quiescenceRelease != nil {
+		gs.quiescenceMu.Unlock()
+		release()
+		return
+	}
+	gs.quiescenceRelease = release
+	gs.quiescenceMu.Unlock()
+}
+
+func (gs *GameSession) releaseQuiescence() {
+	if gs == nil {
+		return
+	}
+	gs.quiescenceMu.Lock()
+	if gs.quiescenceDone {
+		gs.quiescenceMu.Unlock()
+		return
+	}
+	gs.quiescenceDone = true
+	release := gs.quiescenceRelease
+	gs.quiescenceRelease = nil
+	gs.quiescenceMu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // SetMetrics installs the process-local recorder before Start.

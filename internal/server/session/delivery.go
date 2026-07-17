@@ -67,24 +67,30 @@ func (gs *GameSession) dispatchPendingWork(work pendingWork) {
 		gs.dispatchPendingDelivery(delivery)
 	}
 	if work.resetRoom {
+		// Reopen rematch admission immediately after terminal delivery. The
+		// quiescence lease remains held through leaderboard settlement below.
 		gs.room.ResetAfterGame()
 	}
 
 	leaderboard := gs.leaderboard
-	if leaderboard == nil || !leaderboard.IsReady() {
-		return
-	}
-	for _, result := range work.results {
-		if err := leaderboard.RecordGameResult(
-			context.Background(),
-			result.gameID,
-			result.playerID,
-			result.playerName,
-			result.isLandlord,
-			result.isWinner,
-		); err != nil {
-			log.Printf("记录游戏结果失败: %v", err)
+	if leaderboard != nil && leaderboard.IsReady() {
+		for _, result := range work.results {
+			if err := leaderboard.RecordGameResult(
+				context.Background(),
+				result.gameID,
+				result.playerID,
+				result.playerName,
+				result.isLandlord,
+				result.isWinner,
+			); err != nil {
+				log.Printf("记录游戏结果失败: %v", err)
+			}
 		}
+	}
+	if work.resetRoom {
+		// Restart safety waits for both terminal delivery and synchronous
+		// leaderboard settlement without adding Redis latency to rematch Ready.
+		gs.releaseQuiescence()
 	}
 }
 

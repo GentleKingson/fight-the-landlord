@@ -3,6 +3,7 @@ package handler
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -39,6 +40,47 @@ func (server *operationalTestServer) OperationalState() string {
 	server.mu.RLock()
 	defer server.mu.RUnlock()
 	return server.state
+}
+
+func (server *operationalTestServer) AcquireOperationalAdmission(allowDraining bool) (func(), string, bool) {
+	server.mu.RLock()
+	state := server.state
+	if state != operationalNormal && state != "future-state" && !(allowDraining && state == operationalDraining) {
+		server.mu.RUnlock()
+		return nil, state, false
+	}
+	return server.mu.RUnlock, state, true
+}
+
+func (server *operationalTestServer) setOperationalState(state string) {
+	server.mu.Lock()
+	server.state = state
+	server.mu.Unlock()
+}
+
+type joinBarrierClient struct {
+	*synchronizedClient
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (client *joinBarrierClient) SendMessage(message *protocol.Message) error {
+	err := client.synchronizedClient.SendMessage(message)
+	if message.Type == protocol.MsgRoomJoined {
+		client.once.Do(func() { close(client.entered) })
+		<-client.release
+	}
+	return err
+}
+
+type resumedRejectionServer struct {
+	*operationalTestServer
+}
+
+func (server *resumedRejectionServer) AcquireOperationalAdmission(bool) (func(), string, bool) {
+	server.setOperationalState(operationalNormal)
+	return nil, operationalDraining, false
 }
 
 func (server *operationalTestServer) IsPlayerMuted(playerID string) bool {
@@ -148,6 +190,136 @@ func TestOperationalPauseRejectsReadyAndRematchAdmission(t *testing.T) {
 			assert.False(t, cancelled.Ready)
 		})
 	}
+}
+
+func TestReadyAdmissionLinearizesWithDrainTransition(t *testing.T) {
+	server := newOperationalTestServer(operationalNormal)
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	t.Cleanup(func() { require.NoError(t, roomManager.Close()) })
+	players := []*testutil.SimpleClient{
+		testutil.NewSimpleClient("ready-linear-1", "Player1"),
+		testutil.NewSimpleClient("ready-linear-2", "Player2"),
+		testutil.NewSimpleClient("ready-linear-3", "Player3"),
+	}
+	gameRoom, err := roomManager.CreateRoom(players[0])
+	require.NoError(t, err)
+	_, err = roomManager.JoinRoom(players[1], gameRoom.Code)
+	require.NoError(t, err)
+	_, err = roomManager.JoinRoom(players[2], gameRoom.Code)
+	require.NoError(t, err)
+	require.NoError(t, roomManager.SetPlayerReady(players[0], true))
+	require.NoError(t, roomManager.SetPlayerReady(players[1], true))
+
+	startEntered := make(chan struct{})
+	startRelease := make(chan struct{})
+	roomManager.SetOnGameStart(func(*room.Room, []room.PlayerSnapshot, func()) {
+		close(startEntered)
+		<-startRelease
+	})
+	handler := NewHandler(HandlerDeps{Server: server, RoomManager: roomManager})
+	readyDone := make(chan struct{})
+	go func() {
+		handler.handleReady(players[2], true)
+		close(readyDone)
+	}()
+	<-startEntered
+
+	transitionStarted := make(chan struct{})
+	transitionDone := make(chan struct{})
+	go func() {
+		close(transitionStarted)
+		server.setOperationalState(operationalDraining)
+		close(transitionDone)
+	}()
+	<-transitionStarted
+	select {
+	case <-transitionDone:
+		t.Fatal("drain completed before an admitted Ready committed")
+	default:
+	}
+	close(startRelease)
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("Ready did not finish after the start callback released")
+	}
+	select {
+	case <-transitionDone:
+	case <-time.After(time.Second):
+		t.Fatal("drain did not finish after Ready committed")
+	}
+
+	postDrain := testutil.NewSimpleClient("ready-post-drain", "Post Drain")
+	_, err = roomManager.CreateRoom(postDrain)
+	require.NoError(t, err)
+	postDrain.Messages = nil
+	handler.handleReady(postDrain, true)
+	requireOperationalError(t, postDrain, protocol.MsgReady, protocol.ErrCodeServerDraining, "排空")
+}
+
+func TestJoinAdmissionAllowsDrainAndLinearizesWithMaintenance(t *testing.T) {
+	server := newOperationalTestServer(operationalDraining)
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	t.Cleanup(func() { require.NoError(t, roomManager.Close()) })
+	host := testutil.NewSimpleClient("join-linear-host", "Host")
+	gameRoom, err := roomManager.CreateRoom(host)
+	require.NoError(t, err)
+	joining := &joinBarrierClient{
+		synchronizedClient: &synchronizedClient{id: "join-linear-player", name: "Player"},
+		entered:            make(chan struct{}),
+		release:            make(chan struct{}),
+	}
+	handler := NewHandler(HandlerDeps{Server: server, RoomManager: roomManager})
+	joinDone := make(chan struct{})
+	go func() {
+		handler.handleJoinRoom(joining, codec.MustNewMessage(protocol.MsgJoinRoom, protocol.JoinRoomPayload{RoomCode: gameRoom.Code}))
+		close(joinDone)
+	}()
+	<-joining.entered
+
+	transitionStarted := make(chan struct{})
+	transitionDone := make(chan struct{})
+	go func() {
+		close(transitionStarted)
+		server.setOperationalState(operationalMaintenance)
+		close(transitionDone)
+	}()
+	<-transitionStarted
+	select {
+	case <-transitionDone:
+		t.Fatal("maintenance completed before the draining join committed")
+	default:
+	}
+	close(joining.release)
+	select {
+	case <-joinDone:
+	case <-time.After(time.Second):
+		t.Fatal("draining join did not finish")
+	}
+	select {
+	case <-transitionDone:
+	case <-time.After(time.Second):
+		t.Fatal("maintenance did not finish after the join committed")
+	}
+	require.Equal(t, gameRoom.Code, joining.GetRoom())
+
+	postMaintenance := testutil.NewSimpleClient("join-post-maintenance", "Post Maintenance")
+	handler.handleJoinRoom(postMaintenance, codec.MustNewMessage(protocol.MsgJoinRoom, protocol.JoinRoomPayload{RoomCode: gameRoom.Code}))
+	requireOperationalError(t, postMaintenance, protocol.MsgJoinRoom, protocol.ErrCodeServerMaintenance, "维护")
+}
+
+func TestOperationalRejectionUsesCapturedStateAfterResume(t *testing.T) {
+	base := newOperationalTestServer(operationalDraining)
+	server := &resumedRejectionServer{operationalTestServer: base}
+	client := testutil.NewSimpleClient("captured-rejection", "Player")
+	roomManager := room.NewRoomManager(nil, config.GameConfig{RoomTimeout: 60})
+	t.Cleanup(func() { require.NoError(t, roomManager.Close()) })
+	handler := NewHandler(HandlerDeps{Server: server, RoomManager: roomManager})
+
+	handler.handleCreateRoom(client)
+
+	require.Equal(t, operationalNormal, server.OperationalState())
+	requireOperationalError(t, client, protocol.MsgCreateRoom, protocol.ErrCodeServerDraining, "排空")
 }
 
 func TestOperationalPauseDoesNotAffectExistingGameActions(t *testing.T) {
