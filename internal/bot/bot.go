@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/client"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
@@ -38,11 +40,21 @@ type BotClient struct {
 	closedMu sync.RWMutex
 	closed   bool
 
+	playMu         sync.Mutex
+	attemptedTurns map[playTurnKey]struct{}
+	playDelay      func() time.Duration
+
 	state botState
+}
+
+type playTurnKey struct {
+	gameID string
+	turnID int64
 }
 
 type botState struct {
 	mu            sync.RWMutex
+	gameID        string
 	seat          int       // 本机器人的座位号（0-2）
 	seatPlayerIDs [3]string // seatPlayerIDs[i] = 座位 i 的 playerID
 	hand          []card.Card
@@ -66,9 +78,11 @@ type botState struct {
 func NewBotClient(engine DecisionEngine) *BotClient {
 	name := fmt.Sprintf("🤖%s", botNames[rand.IntN(len(botNames))])
 	return &BotClient{
-		id:     uuid.New().String(),
-		name:   name,
-		engine: engine,
+		id:             uuid.New().String(),
+		name:           name,
+		engine:         engine,
+		attemptedTurns: make(map[playTurnKey]struct{}),
+		playDelay:      thinkDelay,
 		state: botState{
 			cardCounts:  make(map[string]int),
 			cardCounter: client.NewCardCounter(),
@@ -145,11 +159,16 @@ func (b *BotClient) handleGameStart(msg *protocol.Message) {
 		log.Printf("🤖 handleGameStart decode error: %v", err)
 		return
 	}
+	b.resetPlayAttempts()
 
 	b.state.mu.Lock()
 	defer b.state.mu.Unlock()
 
 	b.state.cardCounts = make(map[string]int)
+	b.state.gameID = ""
+	if msg.Event != nil {
+		b.state.gameID = msg.Event.GameID
+	}
 
 	for _, p := range payload.Players {
 		b.state.cardCounts[p.ID] = 17
@@ -393,34 +412,179 @@ func (b *BotClient) handlePlayTurn(msg *protocol.Message) {
 	if payload.PlayerID != b.id {
 		return
 	}
+	if msg.Event == nil || msg.Event.GameID == "" || msg.Event.TurnID <= 0 {
+		recordInvalidAction(b.engine, invalidActionStaleTurn)
+		log.Printf("🤖 %s: stale play turn metadata", b.name)
+		return
+	}
+	gameID, turnID := msg.Event.GameID, msg.Event.TurnID
+	if !b.claimPlayTurn(gameID, turnID) {
+		return
+	}
+	if !b.isCurrentPlayTurn(gameID, turnID) {
+		recordInvalidAction(b.engine, invalidActionStaleTurn)
+		log.Printf("🤖 %s: play turn became stale before decision", b.name)
+		return
+	}
 
-	time.Sleep(thinkDelay())
+	delay := time.Duration(0)
+	if b.playDelay != nil {
+		delay = b.playDelay()
+	}
+	time.Sleep(delay)
+	if !b.isCurrentPlayTurn(gameID, turnID) {
+		recordInvalidAction(b.engine, invalidActionStaleTurn)
+		log.Printf("🤖 %s: play turn became stale before decision", b.name)
+		return
+	}
 
 	b.state.mu.RLock()
+	if b.state.gameID != "" && b.state.gameID != gameID {
+		b.state.mu.RUnlock()
+		recordInvalidAction(b.engine, invalidActionStaleTurn)
+		log.Printf("🤖 %s: play turn belongs to a stale game", b.name)
+		return
+	}
 	gctx := b.buildGameContext(payload.MustPlay, payload.CanBeat)
 	b.state.mu.RUnlock()
 
-	b.sessionMu.RLock()
-	sess := b.session
-	b.sessionMu.RUnlock()
+	decision := decidePlayWithProvenance(b.engine, context.Background(), b.name, gctx)
+	cards := decision.cards
+	usedFallback := decision.usedRuleFallback
+	if reason := validatePlayDecision(cards, gctx); reason != "" {
+		recordInvalidAction(b.engine, reason)
+		cards = ruleFallback(gctx)
+		usedFallback = true
+		if validatePlayDecision(cards, gctx) != "" {
+			log.Printf("🤖 %s: rule fallback unavailable", b.name)
+			return
+		}
+	}
 
+	b.sessionMu.RLock()
+	defer b.sessionMu.RUnlock()
+	sess := b.session
 	if sess == nil {
 		log.Printf("🤖 %s: session 未就绪，跳过出牌", b.name)
 		return
 	}
-
-	cards := b.engine.DecidePlay(context.Background(), b.name, gctx)
-
-	var playErr error
-	if cards == nil {
-		playErr = sess.HandlePass(b.id)
-	} else {
-		playErr = sess.HandlePlayCards(b.id, convert.CardsToInfos(cards))
+	if !sess.IsCurrentPlayTurn(b.id, gameID, turnID) {
+		recordInvalidAction(b.engine, invalidActionStaleTurn)
+		log.Printf("🤖 %s: play turn became stale after decision", b.name)
+		return
+	}
+	playErr := submitPlay(sess, b.id, gameID, turnID, cards)
+	if playErr == nil {
+		return
+	}
+	if isStalePlayError(playErr) {
+		recordInvalidAction(b.engine, invalidActionStaleTurn)
+		log.Printf("🤖 %s: play submission failed (%s)", b.name, invalidActionStaleTurn)
+		return
+	}
+	recordInvalidAction(b.engine, invalidActionSubmitRejected)
+	log.Printf("🤖 %s: play submission failed (%s)", b.name, invalidActionSubmitRejected)
+	if usedFallback {
+		return
 	}
 
-	if playErr != nil {
-		log.Printf("🤖 %s 出牌失败: %v", b.name, playErr)
+	// A rejected DouZero action gets one rule-engine retry, but only while the
+	// exact authoritative turn is still current. The versioned session method
+	// repeats this check atomically at commit time.
+	if !sess.IsCurrentPlayTurn(b.id, gameID, turnID) {
+		recordInvalidAction(b.engine, invalidActionStaleTurn)
+		return
 	}
+	fallback := ruleFallback(gctx)
+	if validatePlayDecision(fallback, gctx) != "" {
+		log.Printf("🤖 %s: rule fallback unavailable", b.name)
+		return
+	}
+	if fallbackErr := submitPlay(sess, b.id, gameID, turnID, fallback); fallbackErr != nil {
+		if isStalePlayError(fallbackErr) {
+			recordInvalidAction(b.engine, invalidActionStaleTurn)
+			log.Printf("🤖 %s: fallback submission failed (%s)", b.name, invalidActionStaleTurn)
+			return
+		}
+		log.Printf("🤖 %s: fallback submission failed (%s)", b.name, invalidActionSubmitRejected)
+	}
+}
+
+func submitPlay(sess SessionInterface, playerID, gameID string, turnID int64, cards []card.Card) error {
+	if len(cards) == 0 {
+		return sess.HandlePassAt(playerID, gameID, turnID)
+	}
+	return sess.HandlePlayCardsAt(playerID, convert.CardsToInfos(cards), gameID, turnID)
+}
+
+func (b *BotClient) claimPlayTurn(gameID string, turnID int64) bool {
+	b.playMu.Lock()
+	defer b.playMu.Unlock()
+	key := playTurnKey{gameID: gameID, turnID: turnID}
+	if _, exists := b.attemptedTurns[key]; exists {
+		return false
+	}
+	b.attemptedTurns[key] = struct{}{}
+	return true
+}
+
+func (b *BotClient) resetPlayAttempts() {
+	b.playMu.Lock()
+	b.attemptedTurns = make(map[playTurnKey]struct{})
+	b.playMu.Unlock()
+}
+
+func (b *BotClient) isCurrentPlayTurn(gameID string, turnID int64) bool {
+	b.sessionMu.RLock()
+	defer b.sessionMu.RUnlock()
+	return b.session != nil && b.session.IsCurrentPlayTurn(b.id, gameID, turnID)
+}
+
+func validatePlayDecision(cards []card.Card, gctx GameContext) invalidActionReason {
+	if len(cards) == 0 {
+		if gctx.MustPlay {
+			return invalidActionMustPlayPass
+		}
+		return ""
+	}
+	if !cardsOwnedByHand(gctx.Hand, cards) {
+		return invalidActionNotOwned
+	}
+	parsed, err := rule.ParseHand(cards)
+	if err != nil || parsed.Type == rule.Invalid {
+		return invalidActionInvalidHand
+	}
+	if !gctx.MustPlay && !gctx.RecentPlays[0].Played.IsEmpty() &&
+		!rule.CanBeat(parsed, gctx.RecentPlays[0].Played) {
+		return invalidActionCannotBeat
+	}
+	return ""
+}
+
+func cardsOwnedByHand(hand, played []card.Card) bool {
+	remaining := append([]card.Card(nil), hand...)
+	for _, playedCard := range played {
+		found := false
+		for index, heldCard := range remaining {
+			if heldCard.Suit != playedCard.Suit || heldCard.Rank != playedCard.Rank {
+				continue
+			}
+			remaining = append(remaining[:index], remaining[index+1:]...)
+			found = true
+			break
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func isStalePlayError(err error) bool {
+	return errors.Is(err, apperrors.ErrStaleGame) ||
+		errors.Is(err, apperrors.ErrStaleTurn) ||
+		errors.Is(err, apperrors.ErrNotYourTurn) ||
+		errors.Is(err, apperrors.ErrGameNotStart)
 }
 
 // buildGameContext 构建决策引擎上下文（调用时需持有 state.mu.RLock）

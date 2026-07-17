@@ -25,13 +25,24 @@ func (e *HeuristicEngine) DecidePlay(_ context.Context, botName string, gctx Gam
 		return nil
 	}
 
-	cards := rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+	cards := ruleFallback(gctx)
 	if cards == nil {
 		log.Printf("🤖 %s 选择 pass", botName)
 	} else {
 		log.Printf("🤖 %s 出牌: %s", botName, cardsToStr(cards))
 	}
 	return cards
+}
+
+// ruleFallback produces one deterministic legal action for the authoritative
+// turn context. A must-play turn starts a new trick, even if the bot still
+// retains the previous non-pass play in its local history.
+func ruleFallback(gctx GameContext) []card.Card {
+	previous := gctx.RecentPlays[0].Played
+	if gctx.MustPlay {
+		previous = rule.ParsedHand{}
+	}
+	return rule.FindSmallestBeatingCards(gctx.Hand, previous)
 }
 
 // DecideBid 决定是否叫地主 / 抢地主

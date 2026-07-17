@@ -26,6 +26,8 @@ func TestMetricsHandlerExposesChangingValuesAndBoundedLabels(t *testing.T) {
 	metrics.ReconnectFailure("ticket")
 	metrics.ReconnectFailure("superseded")
 	metrics.ReconnectFailure("authority_race")
+	metrics.BotInvalidAction("timeout")
+	metrics.BotInvalidAction("player-controlled-reason")
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
@@ -41,6 +43,11 @@ func TestMetricsHandlerExposesChangingValuesAndBoundedLabels(t *testing.T) {
 	assert.Contains(t, body, `fight_landlord_reconnect_failure_total{reason="ticket"} 1`)
 	assert.Contains(t, body, `fight_landlord_reconnect_failure_total{reason="superseded"} 1`)
 	assert.Contains(t, body, `fight_landlord_reconnect_failure_total{reason="authority_race"} 1`)
+	assert.Contains(t, body, `fight_landlord_bot_invalid_action_total{reason="timeout"} 1`)
+	for _, reason := range botInvalidActionReasonValues {
+		assert.Contains(t, body, `fight_landlord_bot_invalid_action_total{reason="`+reason+`"}`)
+	}
+	assert.NotContains(t, body, `fight_landlord_bot_invalid_action_total{reason="other"}`)
 	assert.NotContains(t, body, "player-controlled")
 	for _, metricName := range []string{
 		"fight_landlord_websocket_connections_current",
@@ -71,6 +78,7 @@ func TestMetricsHandlerExposesChangingValuesAndBoundedLabels(t *testing.T) {
 		"fight_landlord_bot_decision_seconds",
 		"fight_landlord_bot_timeouts_total",
 		"fight_landlord_bot_fallback_total",
+		"fight_landlord_bot_invalid_action_total",
 	} {
 		assert.Contains(t, body, metricName)
 	}

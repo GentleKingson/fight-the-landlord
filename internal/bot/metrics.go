@@ -33,9 +33,29 @@ func (e *instrumentedEngine) DecideBid(ctx context.Context, botName string, hand
 }
 
 func (e *instrumentedEngine) DecidePlay(ctx context.Context, botName string, gameContext GameContext) []card.Card {
+	return e.decidePlayWithProvenance(ctx, botName, gameContext).cards
+}
+
+func (e *instrumentedEngine) decidePlayWithProvenance(ctx context.Context, botName string, gameContext GameContext) playDecisionResult {
 	started := time.Now()
-	result := e.next.DecidePlay(ctx, botName, gameContext)
+	result := decidePlayWithProvenance(e.next, ctx, botName, gameContext)
 	timedOut := e.name != "douzero" && errors.Is(ctx.Err(), context.DeadlineExceeded)
 	e.metrics.ObserveBot(e.name, time.Since(started), timedOut)
 	return result
+}
+
+func (e *instrumentedEngine) RecordInvalidAction(reason invalidActionReason) {
+	if recorder, ok := e.next.(interface {
+		RecordInvalidAction(invalidActionReason)
+	}); ok {
+		recorder.RecordInvalidAction(reason)
+	}
+}
+
+func recordInvalidAction(engine DecisionEngine, reason invalidActionReason) {
+	if recorder, ok := engine.(interface {
+		RecordInvalidAction(invalidActionReason)
+	}); ok {
+		recorder.RecordInvalidAction(reason)
+	}
 }

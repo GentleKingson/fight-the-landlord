@@ -17,6 +17,22 @@ type validatedPlay struct {
 	hand   rule.ParsedHand
 }
 
+// IsCurrentPlayTurn is a side-effect-free freshness check for asynchronous bot
+// decisions. HandlePlayCardsAt and HandlePassAt still repeat these checks under
+// the mutation lock so a turn cannot advance between this check and commit.
+func (gs *GameSession) IsCurrentPlayTurn(playerID, expectedGameID string, expectedTurnID int64) bool {
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
+
+	if gs.retired || gs.state != GameStatePlaying || expectedGameID == "" || expectedTurnID <= 0 ||
+		gs.gameID != expectedGameID || gs.turnID != expectedTurnID ||
+		gs.currentPlayer < 0 || gs.currentPlayer >= len(gs.players) {
+		return false
+	}
+	current := gs.players[gs.currentPlayer]
+	return current != nil && current.ID == playerID
+}
+
 // HandlePlayCards 处理出牌
 func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.CardInfo) error {
 	return gs.handlePlayCards(playerID, cardInfos, 0)
