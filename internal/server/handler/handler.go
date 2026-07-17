@@ -2,11 +2,14 @@ package handler
 
 import (
 	"log"
+	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
@@ -22,6 +25,8 @@ type HandlerDeps struct {
 	ChatLimiter    types.ChatLimiter
 	Leaderboard    *storage.LeaderboardManager
 	SessionManager *session.SessionManager
+	Metrics        *observability.Metrics
+	Logger         *slog.Logger
 }
 
 // Handler 消息处理器
@@ -32,6 +37,8 @@ type Handler struct {
 	chatLimiter    types.ChatLimiter
 	leaderboard    *storage.LeaderboardManager
 	sessionManager *session.SessionManager
+	metrics        *observability.Metrics
+	logger         *slog.Logger
 	handlers       map[protocol.MessageType]handlerFunc
 	games          map[string]gameRegistration
 	gamesMu        sync.RWMutex
@@ -59,6 +66,10 @@ type handlerFunc func(client types.ClientInterface, msg *protocol.Message)
 
 // NewHandler 创建处理器
 func NewHandler(deps HandlerDeps) *Handler {
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	h := &Handler{
 		server:         deps.Server,
 		roomManager:    deps.RoomManager,
@@ -66,6 +77,8 @@ func NewHandler(deps HandlerDeps) *Handler {
 		chatLimiter:    deps.ChatLimiter,
 		leaderboard:    deps.Leaderboard,
 		sessionManager: deps.SessionManager,
+		metrics:        deps.Metrics,
+		logger:         logger.With("component", "command"),
 		games:          make(map[string]gameRegistration),
 	}
 	h.initHandlers()
@@ -208,14 +221,60 @@ func (h *Handler) initHandlers() {
 
 // Handle 处理消息
 func (h *Handler) Handle(client types.ClientInterface, msg *protocol.Message) {
+	started := time.Now()
+	requestID := ""
+	if msg.Command != nil {
+		requestID = msg.Command.RequestID
+	}
 	if handler, ok := h.handlers[msg.Type]; ok {
 		handler(client, msg)
+		h.logCommandDispatch(client, msg.Type, requestID, "completed", 0, time.Since(started))
 		return
 	}
 
 	log.Printf("⚠️  未知消息类型: '%s' (来自玩家: %s, ID: %s)", msg.Type, client.GetName(), client.GetID())
 	log.Printf("    消息详情: Payload长度=%d bytes", len(msg.Payload))
 	sendMessage(client, codec.NewCommandErrorMessage(protocol.ErrCodeInvalidMsg, msg.Type))
+	h.logCommandDispatch(client, msg.Type, requestID, "rejected", protocol.ErrCodeInvalidMsg, time.Since(started))
+}
+
+func (h *Handler) logCommandDispatch(
+	client types.ClientInterface,
+	messageType protocol.MessageType,
+	requestID, result string,
+	errorCode int,
+	duration time.Duration,
+) {
+	logger := h.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logEvent := logger.Info
+	message := "command dispatch completed"
+	if errorCode != 0 {
+		logEvent = logger.Warn
+		message = "command dispatch rejected"
+	}
+	logEvent(message,
+		"event", "command_dispatch",
+		"request_id", requestID,
+		"player_id", client.GetID(),
+		"client_kind", commandClientKind(client),
+		"type", string(messageType),
+		"result", result,
+		"duration_ms", duration.Milliseconds(),
+		"error_code", errorCode,
+	)
+}
+
+func commandClientKind(client types.ClientInterface) string {
+	if client.IsBot() {
+		return protocol.ClientKindBot
+	}
+	if browser, ok := client.(types.WebSessionClient); ok && browser.IsBrowserTransport() {
+		return protocol.ClientKindWeb
+	}
+	return protocol.ClientKindTUI
 }
 
 func sendMessage(client types.ClientInterface, message *protocol.Message) {

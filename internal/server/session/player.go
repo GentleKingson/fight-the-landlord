@@ -12,10 +12,21 @@ import (
 )
 
 const (
-	// 重连等待时间
+	// reconnectTimeout is the recovery window that starts on the first physical
+	// disconnect. Online credentials do not expire by wall-clock age.
 	reconnectTimeout = 2 * time.Minute
-	// 会话过期时间
-	sessionExpireTime = 10 * time.Minute
+	// deadSessionRetention only bounds how long expired offline metadata remains
+	// in memory. It is not a reconnect credential TTL.
+	deadSessionRetention = 10 * time.Minute
+	// Retain the losing side of an ambiguous browser rotation only long enough
+	// to linearize concurrent refresh/revoke requests. Browser tabs share the
+	// cookie jar, so this is not a long-lived recovery credential.
+	webRevocationAliasTTL = 2 * time.Minute
+	// Revocation tombstones need only cover delayed response/request races. An
+	// older dead cookie may create a new anonymous identity but can never recover
+	// the revoked player.
+	webRevokedTokenTTL  = 2 * time.Minute
+	maxRevokedWebTokens = 65536
 )
 
 var (
@@ -52,15 +63,34 @@ type RestoredSession struct {
 	previousTokenExpiresAt time.Time
 	wasOnline              bool
 	disconnectedAt         time.Time
+	browserPending         bool
+}
+
+// browserSessionRotation keeps both outcomes recoverable while a browser may
+// or may not have received the Set-Cookie response. The predecessor is an
+// index alias, not a second active consumer: another restore is rejected until
+// the owning connection closes and marks the rotation orphaned.
+type browserSessionRotation struct {
+	restored *RestoredSession
+	orphaned bool
+}
+
+type webRevocationAlias struct {
+	playerID  string
+	expiresAt time.Time
 }
 
 // SessionManager 会话管理器
 type SessionManager struct {
-	sessions    map[string]*PlayerSession // playerID -> session
-	tokens      map[string]string         // token -> playerID
-	tokenReader io.Reader
-	now         func() time.Time
-	mu          sync.RWMutex
+	sessions                map[string]*PlayerSession // playerID -> session
+	tokens                  map[string]string         // token -> playerID
+	browserSessionRotations map[string]*browserSessionRotation
+	webRevocationAliases    map[string]webRevocationAlias
+	webAliasesByPlayer      map[string]map[string]struct{}
+	revokedWebTokens        map[string]time.Time
+	tokenReader             io.Reader
+	now                     func() time.Time
+	mu                      sync.RWMutex
 
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -86,13 +116,17 @@ func newSessionManager(parent context.Context, cleanupInterval time.Duration) *S
 	}
 	ctx, cancel := context.WithCancel(parent) //nolint:gosec // Close owns cancellation and waits for the cleanup worker.
 	sm := &SessionManager{
-		sessions:        make(map[string]*PlayerSession),
-		tokens:          make(map[string]string),
-		tokenReader:     rand.Reader,
-		now:             time.Now,
-		ctx:             ctx,
-		cancel:          cancel,
-		cleanupInterval: cleanupInterval,
+		sessions:                make(map[string]*PlayerSession),
+		tokens:                  make(map[string]string),
+		browserSessionRotations: make(map[string]*browserSessionRotation),
+		webRevocationAliases:    make(map[string]webRevocationAlias),
+		webAliasesByPlayer:      make(map[string]map[string]struct{}),
+		revokedWebTokens:        make(map[string]time.Time),
+		tokenReader:             rand.Reader,
+		now:                     time.Now,
+		ctx:                     ctx,
+		cancel:                  cancel,
+		cleanupInterval:         cleanupInterval,
 	}
 
 	sm.workers.Add(1)
@@ -231,7 +265,7 @@ func (sm *SessionManager) DeleteSession(playerID string) {
 	defer sm.mu.Unlock()
 
 	if session, ok := sm.sessions[playerID]; ok {
-		delete(sm.tokens, session.ReconnectToken)
+		sm.deleteSessionTokensLocked(playerID, session)
 		delete(sm.sessions, playerID)
 	}
 }
@@ -247,6 +281,94 @@ func (sm *SessionManager) RevokeSession(token, playerID string) bool {
 	if sm.tokens[token] != playerID {
 		return false
 	}
+	return sm.revokeSessionLocked(token, playerID)
+}
+
+// RevokeSessionByToken is the cookie-backed counterpart to RevokeSession. The
+// player identity is resolved exclusively from the server-side token index.
+func (sm *SessionManager) RevokeSessionByToken(token string) bool {
+	_, revoked := sm.RevokeSessionByTokenWithPlayer(token)
+	return revoked
+}
+
+// RevokeSessionByTokenWithPlayer atomically resolves current, pending, or
+// recently finalized browser lineage and revokes the whole live session.
+func (sm *SessionManager) RevokeSessionByTokenWithPlayer(token string) (string, bool) {
+	playerID, _, revoked := sm.RevokeSessionByTokenWithLineage(token)
+	return playerID, revoked
+}
+
+// RevokeSessionByTokenWithLineage also returns every credential deleted from
+// the live lineage. Callers use this uncapped set for in-flight response
+// barriers; unlike revokedWebTokens it must not be truncated by tombstone
+// capacity.
+func (sm *SessionManager) RevokeSessionByTokenWithLineage(token string) (
+	playerID string,
+	lineage []string,
+	revoked bool,
+) {
+	if token == "" {
+		return "", nil, false
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	playerID, direct := sm.tokens[token]
+	if !direct {
+		alias, aliasOK := sm.webRevocationAliases[token]
+		if !aliasOK || !sm.now().Before(alias.expiresAt) {
+			if aliasOK {
+				sm.deleteWebRevocationAliasLocked(token, alias.playerID)
+			}
+			return "", nil, false
+		}
+		playerID = alias.playerID
+	}
+	if sm.sessions[playerID] == nil {
+		if direct {
+			delete(sm.tokens, token)
+		} else {
+			sm.deleteWebRevocationAliasLocked(token, playerID)
+		}
+		return "", nil, false
+	}
+	lineage = sm.revokeBrowserLineageLocked(playerID)
+	return playerID, lineage, true
+}
+
+func (sm *SessionManager) revokeBrowserLineageLocked(playerID string) []string {
+	session := sm.sessions[playerID]
+	if session == nil {
+		return nil
+	}
+	tokens := make(map[string]struct{})
+	session.mu.RLock()
+	tokens[session.ReconnectToken] = struct{}{}
+	session.mu.RUnlock()
+	if rotation := sm.browserSessionRotations[playerID]; rotation != nil {
+		tokens[rotation.restored.previousToken] = struct{}{}
+		tokens[rotation.restored.ReconnectToken] = struct{}{}
+	}
+	for token := range sm.webAliasesByPlayer[playerID] {
+		tokens[token] = struct{}{}
+	}
+	sm.deleteSessionTokensLocked(playerID, session)
+	delete(sm.sessions, playerID)
+	expiresAt := sm.now().Add(webRevokedTokenTTL)
+	for token := range tokens {
+		if token != "" && len(sm.revokedWebTokens) < maxRevokedWebTokens {
+			sm.revokedWebTokens[token] = expiresAt
+		}
+	}
+	lineage := make([]string, 0, len(tokens))
+	for token := range tokens {
+		if token != "" {
+			lineage = append(lineage, token)
+		}
+	}
+	return lineage
+}
+
+func (sm *SessionManager) revokeSessionLocked(token, playerID string) bool {
 	session := sm.sessions[playerID]
 	if session == nil {
 		delete(sm.tokens, token)
@@ -258,7 +380,7 @@ func (sm *SessionManager) RevokeSession(token, playerID string) bool {
 	if currentToken != token {
 		return false
 	}
-	delete(sm.tokens, token)
+	sm.deleteSessionTokensLocked(playerID, session)
 	delete(sm.sessions, playerID)
 	return true
 }
@@ -269,7 +391,34 @@ func (sm *SessionManager) RevokeSession(token, playerID string) bool {
 func (sm *SessionManager) RestoreSession(token, playerID, temporaryPlayerID string) (*RestoredSession, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	if sm.browserSessionRotations[playerID] != nil {
+		return nil, ErrInvalidReconnect
+	}
+	return sm.restoreSessionLocked(token, playerID, temporaryPlayerID, false)
+}
 
+// RestoreSessionByToken restores a browser session without trusting a
+// JavaScript-supplied player identifier. The token index lookup and token
+// consumption occur under the same manager lock.
+func (sm *SessionManager) RestoreSessionByToken(token, temporaryPlayerID string) (*RestoredSession, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	playerID, ok := sm.tokens[token]
+	if !ok {
+		return nil, ErrInvalidReconnect
+	}
+	if rotation := sm.browserSessionRotations[playerID]; rotation != nil {
+		if !rotation.orphaned || !sm.resolveBrowserRotationLocked(rotation, token) {
+			return nil, ErrInvalidReconnect
+		}
+	}
+	return sm.restoreSessionLocked(token, playerID, temporaryPlayerID, true)
+}
+
+func (sm *SessionManager) restoreSessionLocked(
+	token, playerID, temporaryPlayerID string,
+	browserPending bool,
+) (*RestoredSession, error) {
 	storedPlayerID, ok := sm.tokens[token]
 	if !ok || storedPlayerID != playerID {
 		return nil, ErrInvalidReconnect
@@ -298,7 +447,9 @@ func (sm *SessionManager) RestoreSession(token, playerID, temporaryPlayerID stri
 	if err != nil {
 		return nil, err
 	}
-	delete(sm.tokens, token)
+	if !browserPending {
+		delete(sm.tokens, token)
+	}
 	playerSession.ReconnectToken = newToken
 	playerSession.ReconnectTokenExpiresAt = time.Time{}
 	playerSession.IsOnline = true
@@ -307,15 +458,12 @@ func (sm *SessionManager) RestoreSession(token, playerID, temporaryPlayerID stri
 
 	if temporaryPlayerID != "" && temporaryPlayerID != playerID {
 		if temporarySession, exists := sm.sessions[temporaryPlayerID]; exists {
-			temporarySession.mu.RLock()
-			temporaryToken := temporarySession.ReconnectToken
-			temporarySession.mu.RUnlock()
-			delete(sm.tokens, temporaryToken)
+			sm.deleteSessionTokensLocked(temporaryPlayerID, temporarySession)
 			delete(sm.sessions, temporaryPlayerID)
 		}
 	}
 
-	return &RestoredSession{
+	restored := &RestoredSession{
 		PlayerID:               playerSession.PlayerID,
 		PlayerName:             playerSession.PlayerName,
 		ReconnectToken:         playerSession.ReconnectToken,
@@ -324,7 +472,127 @@ func (sm *SessionManager) RestoreSession(token, playerID, temporaryPlayerID stri
 		previousTokenExpiresAt: previousTokenExpiresAt,
 		wasOnline:              wasOnline,
 		disconnectedAt:         disconnectedAt,
-	}, nil
+		browserPending:         browserPending,
+	}
+	if browserPending {
+		sm.browserSessionRotations[playerID] = &browserSessionRotation{restored: restored}
+	}
+	return restored, nil
+}
+
+// CanReconnectToken validates an opaque browser credential without accepting
+// a player identifier from the caller.
+func (sm *SessionManager) CanReconnectToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	playerID, ok := sm.tokens[token]
+	if !ok {
+		return false
+	}
+	session := sm.sessions[playerID]
+	if session == nil {
+		return false
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	if session.ReconnectToken != token {
+		rotation := sm.browserSessionRotations[playerID]
+		if rotation == nil || !rotation.orphaned || rotation.restored.previousToken != token {
+			return false
+		}
+	}
+	return reconnectCredentialValidLocked(session, sm.now())
+}
+
+// IsKnownWebSessionToken distinguishes an active or ambiguous lineage from a
+// dead cookie. Revoked tombstones are intentionally excluded: they cannot
+// restore their player and may bootstrap a new anonymous identity.
+func (sm *SessionManager) IsKnownWebSessionToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if _, ok := sm.tokens[token]; ok {
+		return true
+	}
+	alias, ok := sm.webRevocationAliases[token]
+	if ok && sm.now().Before(alias.expiresAt) {
+		return true
+	}
+	return false
+}
+
+// IsCurrentBrowserRestore revalidates the exact pending generation before a
+// rebound browser identity is published or authorized.
+func (sm *SessionManager) IsCurrentBrowserRestore(restored *RestoredSession) bool {
+	if restored == nil || !restored.browserPending {
+		return false
+	}
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	rotation := sm.browserSessionRotations[restored.PlayerID]
+	if rotation == nil || rotation.restored != restored {
+		return false
+	}
+	session := sm.sessions[restored.PlayerID]
+	if session == nil || sm.tokens[restored.ReconnectToken] != restored.PlayerID {
+		return false
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return session.ReconnectToken == restored.ReconnectToken && reconnectCredentialValidLocked(session, sm.now())
+}
+
+// ObserveWebSessionToken resolves a browser rotation after the server receives
+// a follow-up request carrying whichever Cookie the browser actually stored.
+// Observing the successor retires the predecessor. An orphaned predecessor
+// instead becomes current while preserving the physical connection's latest
+// online/offline deadline.
+func (sm *SessionManager) ObserveWebSessionToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	playerID, ok := sm.tokens[token]
+	if !ok {
+		return false
+	}
+	if rotation := sm.browserSessionRotations[playerID]; rotation != nil {
+		if token == rotation.restored.ReconnectToken {
+			sm.finalizeBrowserRotationLocked(rotation)
+		} else if !rotation.orphaned || !sm.resolveBrowserRotationLocked(rotation, token) {
+			return false
+		}
+	}
+	session := sm.sessions[playerID]
+	if session == nil {
+		return false
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return session.ReconnectToken == token && reconnectCredentialValidLocked(session, sm.now())
+}
+
+// OrphanBrowserRestore releases the active-owner guard after an ambiguous
+// commit's WebSocket closes. Both credentials remain aliases until one is
+// observed, but the next restore still has exactly one serialized consumer.
+func (sm *SessionManager) OrphanBrowserRestore(restored *RestoredSession) bool {
+	if restored == nil || !restored.browserPending {
+		return false
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	rotation := sm.browserSessionRotations[restored.PlayerID]
+	if rotation == nil || rotation.restored != restored {
+		return false
+	}
+	rotation.orphaned = true
+	return true
 }
 
 // RollbackRestore restores the consumed credential when the server cannot
@@ -341,6 +609,12 @@ func (sm *SessionManager) RollbackRestore(restored *RestoredSession) bool {
 	if !ok || sm.tokens[restored.ReconnectToken] != restored.PlayerID {
 		return false
 	}
+	if restored.browserPending {
+		rotation := sm.browserSessionRotations[restored.PlayerID]
+		if rotation == nil || rotation.restored != restored || rotation.orphaned {
+			return false
+		}
+	}
 
 	playerSession.mu.Lock()
 	defer playerSession.mu.Unlock()
@@ -355,7 +629,86 @@ func (sm *SessionManager) RollbackRestore(restored *RestoredSession) bool {
 	playerSession.IsOnline = restored.wasOnline
 	playerSession.DisconnectedAt = restored.disconnectedAt
 	sm.tokens[restored.previousToken] = restored.PlayerID
+	if restored.browserPending {
+		delete(sm.browserSessionRotations, restored.PlayerID)
+	}
 	return true
+}
+
+func (sm *SessionManager) finalizeBrowserRotationLocked(rotation *browserSessionRotation) {
+	delete(sm.tokens, rotation.restored.previousToken)
+	sm.addWebRevocationAliasLocked(rotation.restored.previousToken, rotation.restored.PlayerID)
+	delete(sm.browserSessionRotations, rotation.restored.PlayerID)
+}
+
+func (sm *SessionManager) resolveBrowserRotationLocked(rotation *browserSessionRotation, token string) bool {
+	restored := rotation.restored
+	session := sm.sessions[restored.PlayerID]
+	if session == nil {
+		return false
+	}
+	switch token {
+	case restored.ReconnectToken:
+		sm.finalizeBrowserRotationLocked(rotation)
+		return true
+	case restored.previousToken:
+		if !rotation.orphaned {
+			return false
+		}
+		session.mu.Lock()
+		if session.ReconnectToken != restored.ReconnectToken {
+			session.mu.Unlock()
+			return false
+		}
+		session.ReconnectToken = restored.previousToken
+		session.mu.Unlock()
+		delete(sm.tokens, restored.ReconnectToken)
+		sm.addWebRevocationAliasLocked(restored.ReconnectToken, restored.PlayerID)
+		delete(sm.browserSessionRotations, restored.PlayerID)
+		return true
+	default:
+		return false
+	}
+}
+
+func (sm *SessionManager) deleteSessionTokensLocked(playerID string, session *PlayerSession) {
+	if session != nil {
+		session.mu.RLock()
+		delete(sm.tokens, session.ReconnectToken)
+		session.mu.RUnlock()
+	}
+	if rotation := sm.browserSessionRotations[playerID]; rotation != nil {
+		delete(sm.tokens, rotation.restored.previousToken)
+		delete(sm.tokens, rotation.restored.ReconnectToken)
+		delete(sm.browserSessionRotations, playerID)
+	}
+	for token := range sm.webAliasesByPlayer[playerID] {
+		delete(sm.webRevocationAliases, token)
+	}
+	delete(sm.webAliasesByPlayer, playerID)
+}
+
+func (sm *SessionManager) addWebRevocationAliasLocked(token, playerID string) {
+	if token == "" || playerID == "" {
+		return
+	}
+	sm.webRevocationAliases[token] = webRevocationAlias{
+		playerID:  playerID,
+		expiresAt: sm.now().Add(webRevocationAliasTTL),
+	}
+	if sm.webAliasesByPlayer[playerID] == nil {
+		sm.webAliasesByPlayer[playerID] = make(map[string]struct{})
+	}
+	sm.webAliasesByPlayer[playerID][token] = struct{}{}
+}
+
+func (sm *SessionManager) deleteWebRevocationAliasLocked(token, playerID string) {
+	delete(sm.webRevocationAliases, token)
+	aliases := sm.webAliasesByPlayer[playerID]
+	delete(aliases, token)
+	if len(aliases) == 0 {
+		delete(sm.webAliasesByPlayer, playerID)
+	}
 }
 
 // CanReconnect 检查玩家是否可以重连
@@ -390,7 +743,10 @@ func (sm *SessionManager) generateUniqueTokenLocked() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("%w: %w", ErrTokenGeneration, err)
 		}
-		if _, exists := sm.tokens[token]; !exists {
+		_, active := sm.tokens[token]
+		_, alias := sm.webRevocationAliases[token]
+		_, revoked := sm.revokedWebTokens[token]
+		if !active && !alias && !revoked {
 			return token, nil
 		}
 	}
@@ -433,17 +789,34 @@ func (sm *SessionManager) cleanup() {
 	defer sm.mu.Unlock()
 
 	now := sm.now()
+	for token, expiresAt := range sm.revokedWebTokens {
+		if !now.Before(expiresAt) {
+			delete(sm.revokedWebTokens, token)
+		}
+	}
+	for token, alias := range sm.webRevocationAliases {
+		if !now.Before(alias.expiresAt) {
+			sm.deleteWebRevocationAliasLocked(token, alias.playerID)
+		}
+	}
 	for playerID, session := range sm.sessions {
 		session.mu.RLock()
-		if !session.IsOnline && !reconnectCredentialValidLocked(session, now) {
-			delete(sm.tokens, session.ReconnectToken)
+		expired := !session.IsOnline && !reconnectCredentialValidLocked(session, now)
+		dead := !session.IsOnline && now.Sub(session.DisconnectedAt) > deadSessionRetention
+		currentToken := session.ReconnectToken
+		session.mu.RUnlock()
+		if expired {
+			delete(sm.tokens, currentToken)
+			if rotation := sm.browserSessionRotations[playerID]; rotation != nil {
+				delete(sm.tokens, rotation.restored.previousToken)
+			}
 		}
-		// 清理离线超过会话过期时间的会话
-		if !session.IsOnline && now.Sub(session.DisconnectedAt) > sessionExpireTime {
-			delete(sm.tokens, session.ReconnectToken)
+		// Retain dead metadata briefly for cleanup bookkeeping after the reconnect
+		// credential has already become unusable.
+		if dead {
+			sm.deleteSessionTokensLocked(playerID, session)
 			delete(sm.sessions, playerID)
 		}
-		session.mu.RUnlock()
 	}
 }
 

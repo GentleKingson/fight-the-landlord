@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 )
 
 func TestServer_RegisterUnregister_Concurrency(t *testing.T) {
@@ -177,6 +178,27 @@ func TestHTTPHandlerAppliesBrowserSecurityHeaders(t *testing.T) {
 	assert.Contains(t, recorder.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'")
 	assert.Contains(t, recorder.Header().Get("Content-Security-Policy"), "object-src 'none'")
 	assert.Equal(t, "DENY", recorder.Header().Get("X-Frame-Options"))
+}
+
+func TestMetricsEndpointUsesConfiguredPathAndCanBeDisabled(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.Observability.MetricsPath = "/internal/metrics"
+	metrics := observability.NewMetrics(true)
+	metrics.ConnectionAccepted()
+	s := &Server{config: cfg, metrics: metrics}
+
+	recorder := httptest.NewRecorder()
+	s.httpHandler(nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, cfg.Observability.MetricsPath, http.NoBody))
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Header().Get("Content-Type"), "text/plain")
+	assert.Contains(t, recorder.Body.String(), "fight_landlord_websocket_connections_total 1")
+
+	cfg.Observability.MetricsEnabled = false
+	disabled := httptest.NewRecorder()
+	s.httpHandler(nil).ServeHTTP(disabled, httptest.NewRequest(http.MethodGet, cfg.Observability.MetricsPath, http.NoBody))
+	assert.Equal(t, http.StatusNotFound, disabled.Code)
 }
 
 func TestServer_HandleVersion(t *testing.T) {

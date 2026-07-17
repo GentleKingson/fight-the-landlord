@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,7 +140,8 @@ func TestCommandHandlerPanicIsNotConvertedIntoACachedSuccess(t *testing.T) {
 
 func TestClientDifferentRequestIDsExecuteIndependently(t *testing.T) {
 	client := newCommandExecutionTestClient(nil)
-	for index, requestID := range []string{"request-a", "request-b"} {
+	requestIDs := []string{"request-a", "request-b"}
+	for index, requestID := range requestIDs {
 		frame := encodeCommandTestFrame(t, commandTestMessage(requestID, int64(index)))
 		require.True(t, client.handleIncomingFrame(websocket.BinaryMessage, frame))
 	}
@@ -149,6 +151,21 @@ func TestClientDifferentRequestIDsExecuteIndependently(t *testing.T) {
 		protocol.MsgPong, protocol.MsgCommandAck,
 		protocol.MsgPong, protocol.MsgCommandAck,
 	}, messageTypes(messages))
+	for index, requestID := range requestIDs {
+		pong := messages[index*2]
+		pongPayload, err := codec.ParsePayload[protocol.PongPayload](pong)
+		require.NoError(t, err)
+		assert.Equal(t, int64(index), pongPayload.ClientTimestamp)
+		require.NotNil(t, pong.Command)
+		assert.Equal(t, requestID, pong.Command.RequestID)
+
+		ack := messages[index*2+1]
+		ackPayload, err := codec.ParsePayload[protocol.CommandAckPayload](ack)
+		require.NoError(t, err)
+		assert.Equal(t, requestID, ackPayload.RequestID)
+		require.NotNil(t, ack.Command)
+		assert.Equal(t, requestID, ack.Command.RequestID)
+	}
 }
 
 func TestConcurrentReplacementConnectionsExecuteSameRequestOnce(t *testing.T) {
@@ -186,6 +203,88 @@ func TestConcurrentReplacementConnectionsExecuteSameRequestOnce(t *testing.T) {
 	}
 	assert.Equal(t, 2, pongs, "the duplicate receives the first Pong result from the cache")
 	assert.Equal(t, 2, acks)
+}
+
+type countingMutationServer struct {
+	*testutil.MockServer
+	commits atomic.Int64
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (server *countingMutationServer) BroadcastToLobby(*protocol.Message) {
+	server.commits.Add(1)
+	server.once.Do(func() { close(server.entered) })
+	<-server.release
+}
+
+func TestConcurrentDuplicateMutationFramesCommitOnceAndReplay(t *testing.T) {
+	mutationServer := &countingMutationServer{
+		MockServer: new(testutil.MockServer),
+		entered:    make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	releaseMutation := func() {
+		releaseOnce.Do(func() { close(mutationServer.release) })
+	}
+	t.Cleanup(releaseMutation)
+	server := &Server{commandCache: newCommandCache(32, time.Minute)}
+	server.handler = serverhandler.NewHandler(serverhandler.HandlerDeps{Server: mutationServer})
+	first := NewClient(server, nil)
+	second := NewClient(server, nil)
+	first.rebindIdentity("mutation-player", "Player", "")
+	second.rebindIdentity("mutation-player", "Player", "")
+
+	command := codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{
+		Content:   "commit once",
+		Scope:     "lobby",
+		MessageID: "mutation-message",
+	})
+	t.Cleanup(func() { codec.PutMessage(command) })
+	command.Command = &protocol.CommandMeta{RequestID: "mutation-request"}
+	frame := encodeCommandTestFrame(t, command)
+
+	firstDone := make(chan bool, 1)
+	go func() {
+		firstDone <- first.handleIncomingFrame(websocket.BinaryMessage, frame)
+	}()
+	select {
+	case <-mutationServer.entered:
+	case <-time.After(time.Second):
+		t.Fatal("first mutation did not reach the commit boundary")
+	}
+
+	secondStarted := make(chan struct{})
+	secondDone := make(chan bool, 1)
+	go func() {
+		close(secondStarted)
+		secondDone <- second.handleIncomingFrame(websocket.BinaryMessage, frame)
+	}()
+	<-secondStarted
+	releaseMutation()
+
+	for name, done := range map[string]<-chan bool{"first": firstDone, "second": secondDone} {
+		select {
+		case keepConnection := <-done:
+			assert.True(t, keepConnection, "%s command closed the connection", name)
+		case <-time.After(time.Second):
+			t.Fatalf("%s duplicate command did not complete", name)
+		}
+	}
+	assert.Equal(t, int64(1), mutationServer.commits.Load(), "duplicate frame committed the mutation more than once")
+
+	firstMessages := drainClientMessages(t, first)
+	secondMessages := drainClientMessages(t, second)
+	require.Equal(t, []protocol.MessageType{protocol.MsgCommandAck}, messageTypes(firstMessages))
+	require.Equal(t, messageTypes(firstMessages), messageTypes(secondMessages))
+	firstAck, err := codec.ParsePayload[protocol.CommandAckPayload](firstMessages[0])
+	require.NoError(t, err)
+	secondAck, err := codec.ParsePayload[protocol.CommandAckPayload](secondMessages[0])
+	require.NoError(t, err)
+	assert.Equal(t, firstAck, secondAck)
+	assert.Equal(t, firstMessages[0].Command, secondMessages[0].Command)
 }
 
 func TestClientErrorCarriesTheUniqueRequestID(t *testing.T) {

@@ -439,13 +439,14 @@ func FuzzRankFromChar(f *testing.F) {
 func FuzzFindCardsInHand(f *testing.F) {
 	// 添加一些种子语料库
 	// 格式：用一个特殊的分隔符（比如 |）来分隔手牌和输入字符串
-	f.Add("34567|345") // 正常情况
-	f.Add("AKQJ10|BR") // 王炸检查
-	f.Add("B|BR")      // 手牌不全，无法出王炸
-	f.Add("333|3333")  // 手牌不够
-	f.Add("|345")      // 空手牌
-	f.Add("345|")      // 空输入
-	f.Add("345|345X")  // 无效输入
+	f.Add("34567|345")                                               // 正常情况
+	f.Add("AKQJ10|BR")                                               // 王炸检查
+	f.Add("B|BR")                                                    // 手牌不全，无法出王炸
+	f.Add("333|3333")                                                // 手牌不够
+	f.Add("|345")                                                    // 空手牌
+	f.Add("345|")                                                    // 空输入
+	f.Add("345|345X")                                                // 无效输入
+	f.Add(strings.Repeat("3", 128) + "|" + strings.Repeat("4", 128)) // 有界长输入
 
 	f.Fuzz(func(t *testing.T, data string) {
 		// 将模糊测试生成的字符串拆分为手牌部分和出牌部分
@@ -453,7 +454,11 @@ func FuzzFindCardsInHand(f *testing.F) {
 		if len(parts) != 2 {
 			return // 如果格式不对，就跳过
 		}
-		handStr, inputStr := parts[0], parts[1]
+		// A real hand has at most 54 cards. A legal play has at most 20 cards;
+		// leave extra textual room for the two-character "10" spelling and
+		// malformed runes while keeping each fuzz case allocation-bounded.
+		handStr := truncateFuzzRunes(parts[0], 54)
+		inputStr := truncateFuzzRunes(parts[1], 32)
 
 		var hand []Card
 		fullDeck := NewDeck()
@@ -480,4 +485,18 @@ func FuzzFindCardsInHand(f *testing.F) {
 		// 只关心它是否会 panic，所以不需要对返回值做过多断言
 		_, _ = FindCardsInHand(hand, inputStr)
 	})
+}
+
+func truncateFuzzRunes(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	count := 0
+	for index := range value {
+		if count == limit {
+			return value[:index]
+		}
+		count++
+	}
+	return value
 }

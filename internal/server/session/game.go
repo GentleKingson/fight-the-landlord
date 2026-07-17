@@ -10,6 +10,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 )
@@ -83,6 +84,10 @@ type GameSession struct {
 	pendingResults    []pendingGameResult
 	pendingRoomReset  bool
 	retired           bool // guarded by mu; retirement is serialized by actionMu
+	metrics           *observability.Metrics
+	metricStartedAt   time.Time
+	metricStarted     bool
+	metricFinished    bool
 
 	// 出牌相关
 	currentPlayer     int             // 当前出牌玩家索引
@@ -101,6 +106,16 @@ type GameSession struct {
 	// delivery. Reentrant state reads remain possible while messages are sent.
 	actionMu sync.Mutex
 	mu       sync.RWMutex
+}
+
+// SetMetrics installs the process-local recorder before Start.
+func (gs *GameSession) SetMetrics(metrics *observability.Metrics) {
+	if gs == nil {
+		return
+	}
+	gs.mu.Lock()
+	gs.metrics = metrics
+	gs.mu.Unlock()
 }
 
 // NewGameSession 创建游戏会话

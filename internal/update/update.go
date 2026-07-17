@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	Repo         = "palemoky/fight-the-landlord"
+	Repo         = "GentleKingson/fight-the-landlord"
 	checkTimeout = 2 * time.Second // 更新检测的最大耗时，避免拖慢客户端启动
 )
 

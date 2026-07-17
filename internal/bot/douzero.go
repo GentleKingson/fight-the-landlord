@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"slices"
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 )
 
 const douzeroTimeout = 5 * time.Second
@@ -20,6 +23,13 @@ const douzeroTimeout = 5 * time.Second
 type DouZeroEngine struct {
 	serviceURL string
 	httpClient *http.Client
+	metrics    *observability.Metrics
+}
+
+func (e *DouZeroEngine) SetMetrics(metrics *observability.Metrics) {
+	if e != nil {
+		e.metrics = metrics
+	}
 }
 
 // NewDouZeroEngine 创建 DouZero 引擎
@@ -112,6 +122,7 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 
 	if gctx.DouZeroPos == "" {
 		log.Printf("🎮 [DouZero] %s: 位置未知，回退规则出牌", botName)
+		e.recordFallback()
 		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
 	}
 
@@ -119,12 +130,17 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 	action, err := e.callService(ctx, req)
 	if err != nil {
 		log.Printf("🎮 [DouZero] %s: 服务错误: %v，回退规则出牌", botName, err)
+		if e.metrics != nil && isTimeoutError(err) {
+			e.metrics.BotTimeout("douzero")
+		}
+		e.recordFallback()
 		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
 	}
 
 	if len(action) == 0 {
 		if gctx.MustPlay {
 			log.Printf("🎮 [DouZero] %s: 返回 pass 但必须出牌，回退规则出牌", botName)
+			e.recordFallback()
 			return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
 		}
 		log.Printf("🎮 [DouZero] %s: pass", botName)
@@ -134,11 +150,26 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 	cards := e.douzeroToCards(action, gctx.Hand)
 	if cards == nil {
 		log.Printf("🎮 [DouZero] %s: 牌面转换失败，回退规则出牌", botName)
+		e.recordFallback()
 		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
 	}
 
 	log.Printf("🎮 [DouZero] %s 出牌: %s", botName, cardsToStr(cards))
 	return cards
+}
+
+func (e *DouZeroEngine) recordFallback() {
+	if e != nil && e.metrics != nil {
+		e.metrics.BotFallback("douzero", "heuristic")
+	}
+}
+
+func isTimeoutError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var networkError net.Error
+	return errors.As(err, &networkError) && networkError.Timeout()
 }
 
 func (e *DouZeroEngine) buildRequest(gctx GameContext) douzeroRequest {

@@ -44,7 +44,55 @@ type reconnectedSendBarrierClient struct {
 
 type reconnectSnapshotFailureClient struct {
 	*synchronizedClient
-	closed bool
+	closed                 bool
+	browser                bool
+	cookieToken            string
+	issuedTicket           string
+	invalidatedTicket      string
+	provisionalInvalidated bool
+	rollbackTicket         func() bool
+}
+
+func (client *reconnectSnapshotFailureClient) IsBrowserTransport() bool { return client.browser }
+
+func (client *reconnectSnapshotFailureClient) BrowserReconnectToken() string {
+	return client.cookieToken
+}
+
+func (client *reconnectSnapshotFailureClient) IssueWebSessionTicket(
+	_, _ string,
+	rollback, _ func() bool,
+) (string, error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	client.issuedTicket = "snapshot-ticket"
+	client.rollbackTicket = rollback
+	return client.issuedTicket, nil
+}
+
+func (client *reconnectSnapshotFailureClient) TrackWebSessionTicket(string) bool { return true }
+
+func (client *reconnectSnapshotFailureClient) InvalidateWebSessionTicket(ticket string) {
+	client.mu.Lock()
+	client.invalidatedTicket = ticket
+	rollback := client.rollbackTicket
+	client.rollbackTicket = nil
+	client.mu.Unlock()
+	if rollback != nil {
+		rollback()
+	}
+}
+
+func (client *reconnectSnapshotFailureClient) InvalidateProvisionalWebSessionTicket() {
+	client.mu.Lock()
+	client.provisionalInvalidated = true
+	client.mu.Unlock()
+}
+
+func (client *reconnectSnapshotFailureClient) DiscardProvisionalWebSessionTicket() {
+	client.mu.Lock()
+	client.provisionalInvalidated = true
+	client.mu.Unlock()
 }
 
 func (client *reconnectSnapshotFailureClient) SendMessageIfIdentity(expectedPlayerID, expectedRoom string, message *protocol.Message) (bool, error) {
@@ -259,7 +307,7 @@ func TestHandleReconnectSnapshotFailureRollsBackAndOriginalTokenRetries(t *testi
 		id:       "temporary-snapshot-failure",
 		name:     "Temporary",
 		messages: make([]*protocol.Message, 0),
-	}}
+	}, browser: true, cookieToken: originalToken}
 	sessionManager.MustCreateSession(replacement.GetID(), replacement.GetName())
 	server := new(testutil.MockServer)
 	server.On(
@@ -300,15 +348,14 @@ func TestHandleReconnectSnapshotFailureRollsBackAndOriginalTokenRetries(t *testi
 		SessionManager: sessionManager,
 	})
 
-	h.handleReconnect(replacement, codec.MustNewMessage(protocol.MsgReconnect, protocol.ReconnectPayload{
-		Token:    originalToken,
-		PlayerID: playerSession.PlayerID,
-	}))
+	h.handleReconnect(replacement, codec.MustNewMessage(protocol.MsgReconnect, protocol.ReconnectPayload{}))
 
 	require.True(t, replacement.isClosed())
 	require.False(t, previous.isClosed())
 	require.Equal(t, 1, matcher.GetQueueLength())
 	require.Empty(t, replacement.sentMessages())
+	require.Equal(t, "snapshot-ticket", replacement.issuedTicket)
+	require.Equal(t, replacement.issuedTicket, replacement.invalidatedTicket)
 	require.Equal(t, "temporary-snapshot-failure", replacement.GetID())
 	require.Same(t, sessionManager.GetSession(original.GetID()), sessionManager.GetSessionByToken(originalToken))
 	_, online := gameRoom.PrivateRecipient(original.GetID())
@@ -355,6 +402,36 @@ func TestHandleReconnectSnapshotFailureRollsBackAndOriginalTokenRetries(t *testi
 	require.Same(t, retry, recipient)
 	require.True(t, previous.isClosed())
 	server.AssertExpectations(t)
+}
+
+func TestBrowserReconnectRejectsJavaScriptSuppliedCredentials(t *testing.T) {
+	t.Parallel()
+	sessionManager := session.NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sessionManager.Close()) })
+	original := sessionManager.MustCreateSession("browser-player", "Browser Player")
+	originalToken := original.ReconnectToken
+	sessionManager.SetOffline(original.PlayerID)
+	replacement := &reconnectSnapshotFailureClient{
+		synchronizedClient: &synchronizedClient{
+			id:       "temporary-browser",
+			name:     "Temporary",
+			messages: make([]*protocol.Message, 0),
+		},
+		browser:     true,
+		cookieToken: originalToken,
+	}
+	sessionManager.MustCreateSession(replacement.GetID(), replacement.GetName())
+	h := NewHandler(HandlerDeps{SessionManager: sessionManager})
+
+	restored, ticket, ok := h.restoreReconnectSession(replacement, &protocol.ReconnectPayload{
+		Token:    originalToken,
+		PlayerID: original.PlayerID,
+	}, replacement.GetID())
+
+	require.False(t, ok)
+	require.Nil(t, restored)
+	require.Empty(t, ticket)
+	require.True(t, sessionManager.CanReconnectToken(originalToken))
 }
 
 func TestHandleReconnectRejectsRoomBoundProvisionalClientBeforeConsumingToken(t *testing.T) {

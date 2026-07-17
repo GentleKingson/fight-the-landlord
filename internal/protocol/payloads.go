@@ -70,18 +70,21 @@ type WarningPayload struct {
 
 // ConnectedPayload 连接成功响应
 type ConnectedPayload struct {
-	PlayerID       string `json:"player_id"`
-	PlayerName     string `json:"player_name"`
-	ReconnectToken string `json:"reconnect_token"` // 重连令牌
+	PlayerID           string `json:"player_id"`
+	PlayerName         string `json:"player_name"`
+	ReconnectToken     string `json:"reconnect_token"` // CLI/TUI 重连令牌
+	WebSessionTicket   string `json:"web_session_ticket,omitempty"`
+	ReconnectAvailable bool   `json:"reconnect_available,omitempty"`
 }
 
 // ReconnectedPayload 重连成功响应
 type ReconnectedPayload struct {
-	PlayerID       string        `json:"player_id"`
-	PlayerName     string        `json:"player_name"`
-	RoomCode       string        `json:"room_code,omitempty"`       // 如果在房间中
-	GameState      *GameStateDTO `json:"game_state,omitempty"`      // 如果在游戏中
-	ReconnectToken string        `json:"reconnect_token,omitempty"` // 服务端确认并旋转后的令牌
+	PlayerID         string        `json:"player_id"`
+	PlayerName       string        `json:"player_name"`
+	RoomCode         string        `json:"room_code,omitempty"`       // 如果在房间中
+	GameState        *GameStateDTO `json:"game_state,omitempty"`      // 如果在游戏中
+	ReconnectToken   string        `json:"reconnect_token,omitempty"` // CLI/TUI 服务端确认并旋转后的令牌
+	WebSessionTicket string        `json:"web_session_ticket,omitempty"`
 }
 
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）

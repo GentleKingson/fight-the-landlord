@@ -25,12 +25,15 @@ const (
 var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
 
 type negotiatedClient struct {
-	version      string
-	capabilities []string
-	kind         string
+	version                 string
+	capabilities            []string
+	kind                    string
+	browserTransport        bool
+	browserReconnectToken   string
+	browserTicketOwnerToken string
 }
 
-func (s *Server) negotiateWebSocket(conn *websocket.Conn) (negotiatedClient, error) {
+func (s *Server) negotiateWebSocket(conn *websocket.Conn, browserTransport bool) (negotiatedClient, error) {
 	if conn == nil {
 		return negotiatedClient{}, fmt.Errorf("nil websocket connection")
 	}
@@ -75,10 +78,22 @@ func (s *Server) negotiateWebSocket(conn *websocket.Conn) (negotiatedClient, err
 		s.rejectProtocol(conn, reason, requestID)
 		return negotiatedClient{}, fmt.Errorf("protocol rejected: %s", reason)
 	}
+	if reason := validateClientTransport(browserTransport, hello.ClientKind); reason != "" {
+		s.rejectProtocol(conn, reason, requestID)
+		return negotiatedClient{}, fmt.Errorf("protocol transport rejected: %s", reason)
+	}
+	if reason := validateClientCapabilities(browserTransport, hello.ClientKind, hello.Capabilities); reason != "" {
+		s.rejectProtocol(conn, reason, requestID)
+		return negotiatedClient{}, fmt.Errorf("protocol capability rejected: %s", reason)
+	}
 
+	negotiatedCapabilities := append([]string(nil), protocol.RequiredCapabilities...)
+	if browserTransport {
+		negotiatedCapabilities = append(negotiatedCapabilities, protocol.CapabilityHTTPOnlySessionTicket)
+	}
 	negotiated := negotiatedClient{
 		version:      strings.TrimSpace(hello.ClientVersion),
-		capabilities: append([]string(nil), protocol.RequiredCapabilities...),
+		capabilities: negotiatedCapabilities,
 		kind:         hello.ClientKind,
 	}
 	response := codec.MustNewMessage(protocol.MsgNegotiated, protocol.NegotiatedPayload{
@@ -93,6 +108,24 @@ func (s *Server) negotiateWebSocket(conn *websocket.Conn) (negotiatedClient, err
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 	return negotiated, nil
+}
+
+func validateClientTransport(browserTransport bool, clientKind string) string {
+	if browserTransport && clientKind != protocol.ClientKindWeb {
+		return "带 Origin 的浏览器连接必须声明 client_kind=web"
+	}
+	if !browserTransport && clientKind == protocol.ClientKindWeb {
+		return "web 客户端必须通过带有效 Origin 的浏览器连接"
+	}
+	return ""
+}
+
+func validateClientCapabilities(browserTransport bool, clientKind string, capabilities []string) string {
+	if browserTransport && clientKind == protocol.ClientKindWeb &&
+		!slices.Contains(capabilities, protocol.CapabilityHTTPOnlySessionTicket) {
+		return fmt.Sprintf("web 客户端缺少必需 capability：%s", protocol.CapabilityHTTPOnlySessionTicket)
+	}
+	return ""
 }
 
 func (s *Server) validateHello(hello protocol.HelloPayload) string {
@@ -155,6 +188,9 @@ func compatibleClientVersion(clientVersion, minimumVersion, serverVersion string
 }
 
 func (s *Server) rejectProtocol(conn *websocket.Conn, reason, requestID string) {
+	if s != nil && s.metrics != nil {
+		s.metrics.ProtocolError("handshake")
+	}
 	minimum := ""
 	if s != nil && s.config != nil {
 		minimum = s.config.Server.MinClientVersion

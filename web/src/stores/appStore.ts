@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { MsgType, WireMessageType, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type PlayerInfo, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
-import { initialConnectionSlice, type ConnectionSlice, type ConnectionStatus, type StoredIdentity } from './slices/connectionSlice';
+import { initialConnectionSlice, type ConnectionSlice, type ConnectionStatus } from './slices/connectionSlice';
 import { initialLobbySlice, type LobbySlice } from './slices/lobbySlice';
 import { initialRoomSlice, mergePlayer, normalizeRoomPlayer, normalizeRoomPlayers, type RoomSlice } from './slices/roomSlice';
 import { GameSnapshotSyncError, initialGameSlice, isGameMessage, mapSnapshotPhase, reduceGameMessage, restoreGameSnapshot, shouldRestoreSnapshot, type GameSlice } from './slices/gameSlice';
@@ -15,7 +15,7 @@ export { gameChatContext, roomChatContext, selectChatMessages, useChatStore } fr
 
 interface AppActions {
   setConnected: (connected: boolean) => void;
-  prepareConnection: (identity: StoredIdentity | null) => void;
+  prepareConnection: () => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   clearIdentity: () => void;
   setError: (error: string) => void;
@@ -60,12 +60,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ connected });
   },
-  prepareConnection: (reconnectCandidate) => {
+  prepareConnection: () => {
     cancelAllCommandTimers();
     set({
       connected: false,
       connectionStatus: 'connecting',
-      reconnectCandidate,
       provisionalIdentity: null,
       reconnectNotice: '',
       error: '',
@@ -84,8 +83,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearIdentity: () => set({
     playerId: '',
     playerName: '',
-    reconnectToken: '',
-    reconnectCandidate: null,
     provisionalIdentity: null,
     reconnectNotice: ''
   }),
@@ -179,52 +176,45 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     switch (message.type) {
       case MsgType.Connected: {
-        const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
+        const payload = message.payload as {
+          player_id: string;
+          player_name: string;
+          reconnect_available?: boolean;
+        };
         const provisionalIdentity = {
           id: payload.player_id,
-          name: payload.player_name,
-          token: payload.reconnect_token
+          name: payload.player_name
         };
-        if (state.reconnectCandidate) {
+        if (payload.reconnect_available) {
           set({
-            connected: true,
-            connectionStatus: 'fresh-connected',
+            connected: false,
+            connectionStatus: 'reconnecting',
             provisionalIdentity,
             error: '',
             businessError: null
           });
           break;
         }
-        persistReconnect(payload.player_id, payload.reconnect_token);
         set({
-          connected: true,
+          connected: false,
           error: '',
           businessError: null,
           connectionStatus: 'fresh-connected',
           phase: 'lobby',
           playerId: payload.player_id,
           playerName: payload.player_name,
-          reconnectToken: payload.reconnect_token,
-          reconnectCandidate: null,
           provisionalIdentity: null
         });
         break;
       }
       case MsgType.Reconnected: {
-        const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO; reconnect_token?: string };
-        if (!payload.reconnect_token) {
-          acceptProvisionalAfterReconnectFailure(set, state, '服务器未确认新的重连凭证');
-          break;
-        }
-        persistReconnect(payload.player_id, payload.reconnect_token);
+        const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO };
         const connectionState = {
-          connected: true,
+          connected: false,
           connectionStatus: 'reconnected' as const,
           error: '',
           businessError: null,
           reconnectNotice: '',
-          reconnectToken: payload.reconnect_token,
-          reconnectCandidate: null,
           provisionalIdentity: null
         };
         if (payload.game_state) {
@@ -238,8 +228,6 @@ export const useAppStore = create<AppState>((set, get) => ({
               connectionStatus: 'reconnecting',
               playerId: payload.player_id,
               playerName: payload.player_name,
-              reconnectToken: payload.reconnect_token,
-              reconnectCandidate: null,
               provisionalIdentity: null,
               error: reason,
               businessError: createBusinessError('network', reason)
@@ -281,10 +269,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.Error: {
         const payload = message.payload as { code?: number; message?: string; request_id?: string; command_type?: WireMessageType };
-        if (state.connectionStatus === 'reconnecting' && isReconnectFailure(payload.code, payload.message)) {
-          acceptProvisionalAfterReconnectFailure(set, state, payload.message || '旧会话已失效');
-          break;
-        }
         const requestId = payload.request_id || commandRequestID(message);
         const correlated = findPendingCommand(state.pendingCommands, requestId, payload.command_type);
         if (requestId && !correlated) break;
@@ -430,90 +414,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }));
 
-const RECONNECT_STORAGE_KEY = 'ddz_next_reconnect';
+const LEGACY_RECONNECT_STORAGE_KEY = 'ddz_next_reconnect';
 
-export function loadReconnect(): { id: string; token: string } | null {
+// Migration cleanup only. Browser credentials are never read from or written
+// to Web Storage after the HttpOnly cookie transition.
+export function clearLegacyReconnectCredential(): void {
   try {
-    const raw = localStorage.getItem(RECONNECT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || !('id' in parsed) || !('token' in parsed)) {
-      localStorage.removeItem(RECONNECT_STORAGE_KEY);
-      return null;
-    }
-    const { id, token } = parsed as { id?: unknown; token?: unknown };
-    const valid = typeof id === 'string' && id
-      && typeof token === 'string' && token;
-    if (!valid) {
-      localStorage.removeItem(RECONNECT_STORAGE_KEY);
-      return null;
-    }
-    return { id, token };
-  } catch {
-    localStorage.removeItem(RECONNECT_STORAGE_KEY);
-    return null;
+    localStorage.removeItem(LEGACY_RECONNECT_STORAGE_KEY);
+  } catch (error) {
+    // Never include the storage value in diagnostics.
+    console.warn(
+      'Unable to remove the legacy browser session credential',
+      error instanceof Error || (typeof DOMException !== 'undefined' && error instanceof DOMException)
+        ? error.name
+        : typeof error
+    );
   }
-}
-
-function persistReconnect(id: string, token: string): void {
-  if (!id || !token) return;
-  localStorage.setItem(RECONNECT_STORAGE_KEY, JSON.stringify({
-    id,
-    token
-  }));
-}
-
-export function forgetReconnect(): void {
-  localStorage.removeItem(RECONNECT_STORAGE_KEY);
-}
-
-function isReconnectFailure(code?: number, message?: string): boolean {
-  return code === 1003 || code === 1004 || Boolean(message?.includes('重连令牌'));
-}
-
-function acceptProvisionalAfterReconnectFailure(
-  set: (partial: Partial<AppState>) => void,
-  state: AppState,
-  reason: string
-): void {
-  const provisional = state.provisionalIdentity;
-  if (!provisional) {
-    set({
-      connected: false,
-      connectionStatus: 'offline',
-      reconnectCandidate: null,
-      error: reason
-    });
-    return;
-  }
-
-  const stored = loadReconnect();
-  const attempted = state.reconnectCandidate;
-  const ownsStoredAttempt = attempted !== null
-    && stored?.id === attempted.id
-    && stored.token === attempted.token;
-  if (!stored || ownsStoredAttempt) {
-    forgetReconnect();
-    persistReconnect(provisional.id, provisional.token);
-  }
-  set({
-    ...initialGameSlice,
-    connected: true,
-    connectionStatus: 'connected',
-    playerId: provisional.id,
-    playerName: provisional.name,
-    reconnectToken: provisional.token,
-    reconnectCandidate: null,
-    provisionalIdentity: null,
-    reconnectNotice: `无法恢复旧牌局，已作为新玩家连接：${reason}`,
-    error: `无法恢复旧牌局，已作为新玩家连接：${reason}`,
-    businessError: createBusinessError('validation', `无法恢复旧牌局，已作为新玩家连接：${reason}`),
-    pendingCommands: {},
-    phase: 'lobby',
-    roomCode: '',
-    players: [],
-    selectedCards: new Set()
-  });
 }
 
 function cancelCommandTimer(kind: CommandKind): void {

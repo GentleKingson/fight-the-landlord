@@ -1,0 +1,5 @@
+/.github/CODEOWNERS @GentleKingson
+/.github/workflows/ @GentleKingson
+/.github/dependabot.yml @GentleKingson
+/scripts/check-actions-pinning.sh @GentleKingson
+/scripts/check-release-identity.sh @GentleKingson

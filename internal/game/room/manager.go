@@ -40,6 +40,7 @@ func (rm *RoomManager) createRoom(client types.ClientInterface, publishResponse 
 	room.playerOrder = append(room.playerOrder, creator.ID)
 	rm.rooms[code] = room
 	rm.mu.Unlock()
+	rm.reportRoomCount()
 	if publishResponse {
 		message := codec.MustNewMessage(protocol.MsgRoomCreated, protocol.RoomCreatedPayload{
 			RoomCode: room.Code,
@@ -60,7 +61,12 @@ func (rm *RoomManager) createRoom(client types.ClientInterface, publishResponse 
 	// 保存到 Redis
 	rm.saveRoomAsync(room)
 
-	log.Printf("🏠 房间 %s 已创建，玩家 %s", code, creator.Name)
+	rm.structuredLogger().Info("room created",
+		"event", "room_created",
+		"room_id", code,
+		"player_id", creator.ID,
+		"result", "created",
+	)
 
 	return room, nil
 }
@@ -129,7 +135,13 @@ func (rm *RoomManager) joinRoom(client types.ClientInterface, code string, publi
 	room.mu.Unlock()
 	rm.mu.RUnlock()
 
-	log.Printf("👤 玩家 %s 加入房间 %s", joining.Name, code)
+	rm.structuredLogger().Info("room joined",
+		"event", "room_joined",
+		"room_id", code,
+		"player_id", joining.ID,
+		"seat", joining.Seat,
+		"result", "joined",
+	)
 	if joinedMessage != nil {
 		if _, err := rm.sendCommandResultIfCurrentMemberPublished(room, joining.ID, client, joinedMessage); err != nil {
 			log.Printf("发送房间 %s 加入结果给玩家 %s 失败: %v", room.Code, joining.ID, err)
@@ -225,12 +237,17 @@ func (rm *RoomManager) LeaveRoom(client types.ClientInterface) bool {
 		PlayerName: removed.Name,
 	}))
 	room.publishMu.Unlock()
-	log.Printf("👋 玩家 %s 离开房间 %s (座位 %d)", removed.Name, roomCode, removed.Seat)
+	rm.structuredLogger().Info("room left",
+		"event", "room_left",
+		"room_id", roomCode,
+		"player_id", removed.ID,
+		"seat", removed.Seat,
+		"result", "left",
+	)
 
 	// 如果房间空了，删除房间
 	if empty {
 		rm.dispatchRoomRemoval(removal)
-		log.Printf("🏠 房间 %s 已解散", roomCode)
 	} else {
 		rm.saveRoomAsync(room)
 	}

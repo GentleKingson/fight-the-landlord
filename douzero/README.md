@@ -26,7 +26,7 @@ uv run python server.py
 
 ```bash
 # 构建镜像（会自动从 HuggingFace 下载 ONNX 模型）
-docker build -t palemoky/fight-the-landlord-douzero:latest ./douzero
+docker build -t gentlekingson/fight-the-landlord-douzero:latest ./douzero
 
 # 也可以通过 docker compose 一起构建
 docker compose build douzero

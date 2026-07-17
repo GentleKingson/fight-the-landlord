@@ -37,10 +37,11 @@ const (
 )
 
 const (
-	CapabilityCommandCorrelation = "command_correlation"
-	CapabilityIdempotency        = "idempotency"
-	CapabilityGameContext        = "game_context"
-	CapabilityProtobufChat       = "protobuf_chat"
+	CapabilityCommandCorrelation    = "command_correlation"
+	CapabilityIdempotency           = "idempotency"
+	CapabilityGameContext           = "game_context"
+	CapabilityProtobufChat          = "protobuf_chat"
+	CapabilityHTTPOnlySessionTicket = "http_only_session_ticket"
 )
 
 var RequiredCapabilities = []string{

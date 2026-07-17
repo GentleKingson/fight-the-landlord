@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 	"github.com/palemoky/fight-the-landlord/internal/server/handler"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
@@ -51,6 +53,8 @@ type Server struct {
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
 	handler        *handler.Handler
+	metrics        *observability.Metrics
+	logger         *slog.Logger
 
 	// 安全组件
 	rateLimiter    *RateLimiter
@@ -67,6 +71,13 @@ type Server struct {
 	slowClientDisconnects atomic.Int64
 	commandCacheOnce      sync.Once
 	commandCache          *commandCache
+	webSessionTicketsOnce sync.Once
+	webSessionTickets     *webSessionTicketManager
+	sessionAuthorityMu    sync.RWMutex
+	// retiredBrowserClients is guarded by sessionAuthorityMu. A generation is
+	// retained only until its last pre-replacement command crosses webCommandMu.
+	retiredBrowserClients map[string]map[*Client]string
+	browserRevokeDrains   map[string]*browserRevokeDrain
 	readinessCheck        func(context.Context) error
 	shuttingDown          atomic.Bool
 	runtimeCtx            context.Context
@@ -86,6 +97,14 @@ type Server struct {
 	maintenanceMu   sync.RWMutex
 }
 
+type browserRevokeDrain struct {
+	clients      map[*Client]struct{}
+	credentials  map[string]struct{}
+	dependencies map[*browserRevokeDrain]struct{}
+	done         chan struct{}
+	completeOnce sync.Once
+}
+
 // NewServer 创建服务器实例
 func NewServer(cfg *config.Config) (*Server, error) {
 	if cfg == nil {
@@ -98,12 +117,13 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	rdb, err := connectRedis(cfg)
+	metrics := observability.NewMetrics(cfg.Observability.MetricsEnabled)
+	rdb, err := connectRedis(cfg, metrics)
 	if err != nil {
 		return nil, err
 	}
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background()) //nolint:gosec // Server.Shutdown owns runtimeCancel.
-	s := newServerRuntime(cfg, rdb, ipResolver, runtimeCtx, runtimeCancel)
+	s := newServerRuntime(cfg, rdb, ipResolver, runtimeCtx, runtimeCancel, metrics)
 	s.initializeGameRuntime(cfg)
 
 	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 聊天限制=%d/s, 最大连接数=%d",
@@ -112,16 +132,20 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	return s, nil
 }
 
-func connectRedis(cfg *config.Config) (*redis.Client, error) {
+func connectRedis(cfg *config.Config, metrics *observability.Metrics) (*redis.Client, error) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB,
 	})
+	if metrics != nil && metrics.Enabled() {
+		rdb.AddHook(observability.NewRedisHook(metrics))
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		_ = rdb.Close()
 		return nil, fmt.Errorf("redis 连接失败: %w", err)
 	}
+	metrics.SetReady(true)
 	return rdb, nil
 }
 
@@ -131,6 +155,7 @@ func newServerRuntime(
 	ipResolver *ClientIPResolver,
 	runtimeCtx context.Context,
 	runtimeCancel context.CancelFunc,
+	metrics *observability.Metrics,
 ) *Server {
 	s := &Server{
 		config:         cfg,
@@ -156,11 +181,18 @@ func newServerRuntime(
 		ipFilter:   NewIPFilter(),
 		ipResolver: ipResolver,
 		// 初始化连接控制
-		maxConnections:    cfg.Server.MaxConnections,
-		connectionLimiter: newConnectionLimiter(cfg.Server.MaxConnections),
+		maxConnections: cfg.Server.MaxConnections,
+		connectionLimiter: newConnectionLimiter(cfg.Server.MaxConnections, func(active int) {
+			if metrics != nil {
+				metrics.SetConnectionsCurrent(active)
+			}
+		}),
 		commandCache:      newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL),
+		webSessionTickets: newWebSessionTicketManager(),
 		runtimeCtx:        runtimeCtx,
 		runtimeCancel:     runtimeCancel,
+		metrics:           metrics,
+		logger:            slog.Default().With("component", "server"),
 	}
 	s.readinessCheck = func(ctx context.Context) error { return rdb.Ping(ctx).Err() }
 	return s
@@ -168,9 +200,11 @@ func newServerRuntime(
 
 func (s *Server) initializeGameRuntime(cfg *config.Config) {
 	s.roomManager = room.NewRoomManagerWithContext(s.runtimeCtx, s.redisStore, cfg.Game)
-	botEngine := configuredBotEngine(cfg)
+	s.roomManager.SetMetrics(s.metrics)
+	botEngine := configuredBotEngine(cfg, s.metrics)
 	s.matcher = match.NewMatcher(match.MatcherDeps{
 		Context:             s.runtimeCtx,
+		Metrics:             s.metrics,
 		RoomManager:         s.roomManager,
 		RedisStore:          s.redisStore,
 		Leaderboard:         s.leaderboard,
@@ -189,9 +223,11 @@ func (s *Server) initializeGameRuntime(cfg *config.Config) {
 		ChatLimiter:    s.chatLimiter,
 		Leaderboard:    s.leaderboard,
 		SessionManager: s.sessionManager,
+		Metrics:        s.metrics,
 	})
 	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot) {
 		gs := session.NewGameSessionWithPlayers(r, players, s.leaderboard, s.config.Game)
+		gs.SetMetrics(s.metrics)
 		if !s.handler.SetGameSession(r.Code, gs) {
 			return
 		}
@@ -207,16 +243,18 @@ func (s *Server) initializeGameRuntime(cfg *config.Config) {
 	})
 }
 
-func configuredBotEngine(cfg *config.Config) bot.DecisionEngine {
+func configuredBotEngine(cfg *config.Config, metrics *observability.Metrics) bot.DecisionEngine {
 	if !cfg.BOT.Enabled {
 		return nil
 	}
 	if cfg.BOT.DouZeroEnabled {
 		log.Printf("🎮 DouZero 引擎已启用（服务地址: %s，等待超时: %ds）", cfg.BOT.DouZeroURL, cfg.BOT.BotFillTimeout)
-		return bot.NewDouZeroEngine(cfg.BOT.DouZeroURL)
+		engine := bot.NewDouZeroEngine(cfg.BOT.DouZeroURL)
+		engine.SetMetrics(metrics)
+		return bot.InstrumentEngine(engine, "douzero", metrics)
 	}
 	log.Printf("🤖 规则启发式机器人已启用（等待超时: %ds）", cfg.BOT.BotFillTimeout)
-	return bot.NewHeuristicEngine()
+	return bot.InstrumentEngine(bot.NewHeuristicEngine(), "heuristic", metrics)
 }
 
 func (s *Server) activeCommandCache() *commandCache {

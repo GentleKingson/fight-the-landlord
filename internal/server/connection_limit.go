@@ -13,12 +13,16 @@ type connectionLimiter struct {
 	limit    int64
 	reserved atomic.Int64
 	active   atomic.Int64
+	onActive func(int)
 }
 
-func newConnectionLimiter(maxConnections int) *connectionLimiter {
+func newConnectionLimiter(maxConnections int, callbacks ...func(int)) *connectionLimiter {
 	limiter := &connectionLimiter{}
 	if maxConnections > 0 {
 		limiter.limit = int64(maxConnections)
+	}
+	if len(callbacks) > 0 {
+		limiter.onActive = callbacks[0]
 	}
 	return limiter
 }
@@ -26,7 +30,11 @@ func newConnectionLimiter(maxConnections int) *connectionLimiter {
 func (s *Server) activeConnectionLimiter() *connectionLimiter {
 	s.connectionLimiterOnce.Do(func() {
 		if s.connectionLimiter == nil {
-			s.connectionLimiter = newConnectionLimiter(s.maxConnections)
+			s.connectionLimiter = newConnectionLimiter(s.maxConnections, func(active int) {
+				if s.metrics != nil {
+					s.metrics.SetConnectionsCurrent(active)
+				}
+			})
 		}
 	})
 	return s.connectionLimiter
@@ -79,7 +87,10 @@ func (l *connectionLease) activate() {
 		return
 	}
 	l.activated = true
-	l.limiter.active.Add(1)
+	active := l.limiter.active.Add(1)
+	if l.limiter.onActive != nil {
+		l.limiter.onActive(int(active))
+	}
 }
 
 func (l *connectionLease) release() {
@@ -97,7 +108,10 @@ func (l *connectionLease) release() {
 	l.mu.Unlock()
 
 	if activated {
-		l.limiter.active.Add(-1)
+		active := l.limiter.active.Add(-1)
+		if l.limiter.onActive != nil {
+			l.limiter.onActive(int(active))
+		}
 	}
 	if reserved {
 		l.limiter.reserved.Add(-1)

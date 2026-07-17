@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/logo.png" alt="Logo" height="100px" />
+    <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/logo.png" alt="Logo" height="100px" />
 
 # 🎮 斗地主
 
@@ -7,13 +7,17 @@
 
 基于 Go 语言实现的斗地主游戏，支持联网对战、断线重连、智能机器人等功能。
 
-[![Docker Image Size](https://img.shields.io/docker/image-size/palemoky/fight-the-landlord/latest)](https://hub.docker.com/r/palemoky/fight-the-landlord)
-[![Test](https://github.com/palemoky/fight-the-landlord/actions/workflows/test.yml/badge.svg)](https://github.com/palemoky/fight-the-landlord/actions/workflows/test.yml)
-[![Release](https://github.com/palemoky/fight-the-landlord/actions/workflows/release.yml/badge.svg)](https://github.com/palemoky/fight-the-landlord/actions/workflows/release.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/palemoky/fight-the-landlord)](https://goreportcard.com/report/github.com/palemoky/fight-the-landlord)
+[![Docker Image Size](https://img.shields.io/docker/image-size/gentlekingson/fight-the-landlord/latest)](https://hub.docker.com/r/gentlekingson/fight-the-landlord)
+[![Test](https://github.com/GentleKingson/fight-the-landlord/actions/workflows/test.yml/badge.svg)](https://github.com/GentleKingson/fight-the-landlord/actions/workflows/test.yml)
+[![Release](https://github.com/GentleKingson/fight-the-landlord/actions/workflows/release.yml/badge.svg)](https://github.com/GentleKingson/fight-the-landlord/actions/workflows/release.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 </div>
+
+> 本仓库是由 [GentleKingson](https://github.com/GentleKingson/fight-the-landlord)
+> 维护的独立 fork，默认安装脚本、发行版本和容器镜像均来自该 fork。
+> 原始上游项目为 [palemoky/fight-the-landlord](https://github.com/palemoky/fight-the-landlord)，
+> Go 模块路径为保持协议和导入兼容而继续使用上游路径。
 
 ## 项目初衷
 
@@ -29,8 +33,8 @@
 ## 游戏截图
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/lobby.png" alt="Lobby" width="45%" />
-  <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/in-game.png" alt="In Game" width="45%" />
+  <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/lobby.png" alt="Lobby" width="45%" />
+  <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/in-game.png" alt="In Game" width="45%" />
 </div>
 
 ## DouZero 机器人出牌演示
@@ -38,24 +42,30 @@
 [DouZero](https://github.com/kwai/DouZero) 是快手开源的基于深度强化学习的斗地主 AI。相比于经常出非法牌型的 LLM 而言，DouZero 能展现出更丰富的高级策略：自由出牌时主动组合复杂牌型、农民间默契配合、精准顶牌与拆牌等，对局体验更接近真人对手。
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/douzero-game.png" alt="Game" width="45%" />
-  <img src="https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docs/douzero-log.png" alt="Log" width="45%" />
+  <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/douzero-game.png" alt="Game" width="45%" />
+  <img src="https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docs/douzero-log.png" alt="Log" width="45%" />
 </div>
 
 ## 快速开始
+
+> **发布状态**：首次 fork tag workflow 成功前，GitHub Releases 和 Docker Hub
+> 可能还没有本 fork 的二进制或镜像，下面的发行版安装/Compose 命令会因此失败。
+> 先检查 [Releases](https://github.com/GentleKingson/fight-the-landlord/releases)
+> 和镜像 digest；尚未发布时请使用本页“本地开发”中的源码构建流程。生产环境不要
+> 把可变 `main` 安装脚本或 `latest` 当作已验证 artifact。
 
 ### 客户端安装
 
 **macOS / Linux**：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.sh | bash
 ```
 
 **Windows (PowerShell)**：
 
 ```powershell
-irm https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.ps1 | iex
 ```
 
 **运行客户端**：
@@ -77,8 +87,8 @@ ddz
 mkdir fight-the-landlord && cd fight-the-landlord
 
 # 2. 下载配置文件
-curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/docker-compose.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/.env.example -o .env
+curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/.env.example -o .env
 
 # 3. 修改公开来源等配置，并从 secret manager 注入 Redis 密码（必填）
 vim .env
@@ -91,17 +101,45 @@ docker compose up -d
 docker compose down
 ```
 
-启动后可在浏览器打开 `http://localhost:1780/`。互联网部署前必须把 `.env`
-中的 `SECURITY_ALLOWED_ORIGINS` 改为实际 HTTPS 来源，并在反向代理中保留
-`/ws` 的 WebSocket Upgrade 头。
+启动后可在浏览器打开 `http://localhost:1780/`。Compose 默认只把未加密的后端
+绑定到 `127.0.0.1`。互联网部署必须由同机或私有网络中的 TLS 代理访问该端口，
+把 `.env` 中的 `SECURITY_ALLOWED_ORIGINS` 改为实际 HTTPS 来源，并保留 `/ws`
+的 WebSocket Upgrade 头；不要公开后端端口绕过 TLS 和 `/metrics` 访问控制。
+
+浏览器重连凭证保存在 `HttpOnly`、`SameSite=Strict` Cookie 中，页面 JavaScript
+不会读取或写入 token；CLI/TUI 仍使用兼容的显式 token 协议。连接在线期间，
+服务端凭证不会因墙钟时间过期，活动页面每 24 小时通过同源接口续期 7 天 Cookie；
+物理连接断开后有完整 2 分钟恢复窗口，成功恢复会单次消费并轮换凭证。浏览器若被
+暂停超过 7 天而无法运行续期请求，Cookie 仍可能过期。
+`GAME_OFFLINE_WAIT_TIMEOUT` 只控制牌局中离线玩家的行动等待时间，
+不是会话重连期限。显式退出会立即撤销凭证
+并清除 Cookie。
+
+升级后的页面会删除旧 `ddz_next_reconnect` localStorage token，但不会把它转换成
+Cookie；没有新 Cookie 的浏览器可能获得新身份并需要重新加入房间。服务端与 Web
+资源在同一镜像中，应原子升级；回滚到旧版也无法把 HttpOnly Cookie 转回 JavaScript
+token。CLI/TUI 的显式 token 协议字段保持兼容，但单进程重启不保留内存会话。
 
 ```bash
 curl --fail http://localhost:1780/health
+curl --fail http://localhost:1780/livez
+curl --fail http://localhost:1780/readyz
 curl --fail http://localhost:1780/version
+curl --fail http://localhost:1780/metrics
 ```
 
-完整的 TLS、缓存、版本门禁、镜像构建和回滚说明见
-[Web 生产部署](docs/deployment.md)。
+完整生产资料：
+
+- [Web 生产部署](docs/deployment.md)
+- [安全边界](docs/security.md)
+- [可观测性](docs/observability.md)
+- [容量与 Soak 测试](docs/performance-testing.md)
+- [镜像签名、SBOM 与 provenance 验证](docs/release-verification.md)
+
+生产部署应固定镜像 digest，并在拉取前验证本仓库 tag workflow 的 keyless
+cosign 身份。首次 fork tag 发布成功前，不应假设 Docker Hub 上已存在可验证镜像。
+当前 Room/Matcher 所有权仍为单实例，Redis Sentinel/Cluster、跨实例恢复和跨区域
+高可用尚未实现。
 
 💡 推荐使用 [lazydocker](https://github.com/jesseduffield/lazydocker) 管理服务
 
@@ -170,6 +208,7 @@ npm run dev
 
 **让斗地主回归纯粹 - 无控牌，真公平**
 
-Made with ❤️ by [palemoky](https://github.com/palemoky)
+Upstream created by [palemoky](https://github.com/palemoky). This fork is maintained by
+[GentleKingson](https://github.com/GentleKingson/fight-the-landlord).
 
 </div>

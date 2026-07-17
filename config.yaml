@@ -12,6 +12,12 @@ server:
   # 低于此版本的客户端启动时会被强制自动升级，用于发布不兼容变更时保证版本一致。
   min_client_version: "v0.5.3"
 
+observability:
+  metrics_enabled: true
+  metrics_path: "/metrics"
+  # JSON is the shipped default; local development may opt into text explicitly.
+  log_format: "json"
+
 redis:
   addr: "localhost:6379"
   password: ""
@@ -30,6 +36,9 @@ game:
   shutdown_check_interval: 15 # 检查频率根据房间延迟清理调整
   # 游戏结束后关闭服务器延迟（秒），让玩家能返回游戏大厅看到维护通知
   room_cleanup_delay: 30
+  # 牌局中轮到离线玩家行动时的等待秒数；不是会话重连窗口。
+  # 重连凭证在线时不按墙钟过期，物理断线后固定保留 2 分钟。
+  offline_wait_timeout: 30
 
 security:
   # 允许的来源（设置为 ["*"] 允许所有）

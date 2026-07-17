@@ -147,9 +147,11 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 	case protocol.MsgConnected:
 		p := payload.(protocol.ConnectedPayload)
 		return &pb.ConnectedPayload{
-			PlayerId:       p.PlayerID,
-			PlayerName:     p.PlayerName,
-			ReconnectToken: p.ReconnectToken,
+			PlayerId:           p.PlayerID,
+			PlayerName:         p.PlayerName,
+			ReconnectToken:     p.ReconnectToken,
+			WebSessionTicket:   p.WebSessionTicket,
+			ReconnectAvailable: p.ReconnectAvailable,
 		}, true
 	case protocol.MsgReconnected:
 		p := payload.(protocol.ReconnectedPayload)
@@ -158,11 +160,12 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 			gameState = convert.GameStateDTOToProto(p.GameState)
 		}
 		return &pb.ReconnectedPayload{
-			PlayerId:       p.PlayerID,
-			PlayerName:     p.PlayerName,
-			RoomCode:       p.RoomCode,
-			GameState:      gameState,
-			ReconnectToken: p.ReconnectToken,
+			PlayerId:         p.PlayerID,
+			PlayerName:       p.PlayerName,
+			RoomCode:         p.RoomCode,
+			GameState:        gameState,
+			ReconnectToken:   p.ReconnectToken,
+			WebSessionTicket: p.WebSessionTicket,
 		}, true
 	case protocol.MsgPong:
 		p := payload.(protocol.PongPayload)

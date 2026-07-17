@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeMessage, encodeMessage } from '../src/protocol/codec';
 import { MsgType } from '../src/protocol/types';
-import { loadReconnect, useAppStore } from '../src/stores/appStore';
+import { useAppStore } from '../src/stores/appStore';
 import { GameSocket } from '../src/transport/wsClient';
 
 class FakeWebSocket {
@@ -76,14 +76,13 @@ describe('GameSocket reconnect identity state machine', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
     FakeWebSocket.instances = [];
     localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 }));
     vi.advanceTimersByTime(0);
     useAppStore.setState({
       connected: false,
       connectionStatus: 'idle',
       playerId: '',
       playerName: '',
-      reconnectToken: '',
-      reconnectCandidate: null,
       provisionalIdentity: null,
       reconnectNotice: '',
       error: '',
@@ -111,7 +110,7 @@ describe('GameSocket reconnect identity state machine', () => {
       payload: {
         protocol_version: '1',
         client_version: 'dev',
-        capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+        capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat', 'http_only_session_ticket'],
         client_kind: 'web'
       },
       command: { request_id: expect.any(String) }
@@ -127,7 +126,7 @@ describe('GameSocket reconnect identity state machine', () => {
     socket.receive(encodeMessage(MsgType.Negotiated, {
       protocol_version: '1',
       server_version: 'test',
-      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat', 'http_only_session_ticket'],
       client_kind: 'web'
     }, { request_id: helloRequestId }));
     expect(vi.getTimerCount()).toBe(1);
@@ -181,6 +180,11 @@ describe('GameSocket reconnect identity state machine', () => {
       name: 'missing required capability',
       overrides: { capabilities: ['command_correlation', 'idempotency', 'game_context'] },
       error: 'protobuf_chat'
+    },
+    {
+      name: 'missing Web session capability',
+      overrides: { capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'] },
+      error: 'http_only_session_ticket'
     }
   ])('rejects Negotiated with $name without reconnecting', ({ requestId, overrides, error }) => {
     const gameSocket = new GameSocket('ws://example.test/ws', {
@@ -196,7 +200,7 @@ describe('GameSocket reconnect identity state machine', () => {
     socket.receive(encodeMessage(MsgType.Negotiated, {
       protocol_version: '1',
       server_version: 'test',
-      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat', 'http_only_session_ticket'],
       client_kind: 'web',
       ...overrides
     }, { request_id: requestId ?? helloRequestId }));
@@ -212,23 +216,36 @@ describe('GameSocket reconnect identity state machine', () => {
     gameSocket.shutdown();
   });
 
-  it('accepts and persists a fresh connection only after Connected', async () => {
+  it('commits a fresh browser session ticket without exposing a reconnect token', async () => {
+    const fetchMock = vi.mocked(fetch);
     const gameSocket = new GameSocket('ws://example.test/ws');
     gameSocket.connect();
     const socket = latestSocket();
     expect(useAppStore.getState().connectionStatus).toBe('connecting');
 
     openAndNegotiate(socket);
-    expect(loadReconnect()).toBeNull();
     socket.receive(encodeMessage(MsgType.Connected, {
       player_id: 'fresh-player',
       player_name: '新玩家',
-      reconnect_token: 'fresh-token'
+      web_session_ticket: 'fresh-ticket',
+      reconnect_available: false
     }));
-    await Promise.resolve();
+    await flushPromises();
 
     expect(useAppStore.getState().connectionStatus).toBe('connected');
-    expect(loadReconnect()).toEqual({ id: 'fresh-player', token: 'fresh-token' });
+    expect(useAppStore.getState().playerId).toBe('fresh-player');
+    expect(fetchMock).toHaveBeenCalledWith('/session/commit', expect.objectContaining({
+      method: 'POST',
+      credentials: 'same-origin',
+      body: JSON.stringify({ ticket: 'fresh-ticket' })
+    }));
+    expect(fetchMock).toHaveBeenCalledWith('/session/refresh', expect.objectContaining({
+      method: 'POST',
+      credentials: 'same-origin',
+      body: JSON.stringify({})
+    }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem('ddz_next_reconnect')).toBeNull();
     expect(socket.sent.map((frame) => decodeMessage(frame).type)).toEqual([
       MsgType.GetOnlineCount,
       MsgType.GetMaintenanceStatus
@@ -236,9 +253,143 @@ describe('GameSocket reconnect identity state machine', () => {
     gameSocket.shutdown();
   });
 
-  it('retries a server-authoritative credential after its former browser TTL', async () => {
-    storeReconnect('old-player', 'old-token', Date.now() - 60_000);
-    useAppStore.setState({ playerId: 'old-player', reconnectToken: 'old-token' });
+  it('waits for authenticated successor-cookie observation before declaring the socket connected', async () => {
+    let resolveRefresh: ((value: { ok: boolean; status: number }) => void) | undefined;
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/session/refresh') {
+        return new Promise<{ ok: boolean; status: number }>((resolve) => {
+          resolveRefresh = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, status: 204 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws');
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'observed-player',
+      player_name: '玩家',
+      web_session_ticket: 'observed-ticket',
+      reconnect_available: false
+    }));
+    await flushPromises();
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      '/session/commit',
+      '/session/refresh'
+    ]);
+    expect(useAppStore.getState().connected).toBe(false);
+    expect(useAppStore.getState().connectionStatus).not.toBe('connected');
+    expect(socket.sent).toHaveLength(0);
+
+    resolveRefresh?.({ ok: true, status: 204 });
+    await flushPromises();
+    expect(useAppStore.getState().connectionStatus).toBe('connected');
+    expect(socket.sent.map((frame) => decodeMessage(frame).type)).toEqual([
+      MsgType.GetOnlineCount,
+      MsgType.GetMaintenanceStatus
+    ]);
+    gameSocket.shutdown();
+  });
+
+  it('renegotiates instead of publishing identity when successor-cookie observation fails', async () => {
+    const fetchMock = vi.fn((input: string | URL | Request) => Promise.resolve(
+      String(input) === '/session/refresh'
+        ? { ok: false, status: 401 }
+        : { ok: true, status: 204 }
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws');
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'unobserved-player',
+      player_name: '玩家',
+      web_session_ticket: 'unobserved-ticket',
+      reconnect_available: false
+    }));
+    await flushPromises();
+
+    expect(useAppStore.getState().connected).toBe(false);
+    expect(useAppStore.getState().error).toContain('Web 会话确认失败：HTTP 401');
+    expect(socket.closeCalls).toContainEqual({ code: 4003, reason: 'web session commit failed' });
+    gameSocket.shutdown();
+  });
+
+  it('refreshes an active HttpOnly session beyond the seven-day cookie lifetime', async () => {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const fetchMock = vi.mocked(fetch);
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      heartbeatIntervalMs: 10 * dayMs,
+      sessionRefreshIntervalMs: dayMs
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'long-lived-player',
+      player_name: '常驻玩家',
+      web_session_ticket: 'long-lived-ticket',
+      reconnect_available: false
+    }));
+    await flushPromises();
+    fetchMock.mockClear();
+
+    for (let day = 0; day < 8; day += 1) {
+      await vi.advanceTimersByTimeAsync(dayMs);
+    }
+
+    const refreshCalls = fetchMock.mock.calls.filter(([input]) => String(input) === '/session/refresh');
+    expect(refreshCalls).toHaveLength(8);
+    for (const [, init] of refreshCalls) {
+      expect(init).toEqual(expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({})
+      }));
+    }
+
+    gameSocket.shutdown();
+    await vi.advanceTimersByTimeAsync(dayMs);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/session/refresh')).toHaveLength(8);
+  });
+
+  it('refreshes an overdue session once when a suspended page becomes visible', async () => {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const fetchMock = vi.mocked(fetch);
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      heartbeatIntervalMs: 10 * dayMs,
+      sessionRefreshIntervalMs: dayMs
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'resumed-player',
+      player_name: '恢复玩家',
+      web_session_ticket: 'resumed-ticket',
+      reconnect_available: false
+    }));
+    await flushPromises();
+    fetchMock.mockClear();
+
+    vi.setSystemTime(Date.now() + 2 * dayMs);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await flushPromises();
+    document.dispatchEvent(new Event('visibilitychange'));
+    await Promise.resolve();
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/session/refresh')).toHaveLength(1);
+    gameSocket.shutdown();
+  });
+
+  it('uses the cookie signal to send an empty reconnect payload and commits the rotated ticket', async () => {
+    const fetchMock = vi.mocked(fetch);
+    useAppStore.setState({ playerId: 'old-player', playerName: '旧玩家' });
     const gameSocket = new GameSocket('ws://example.test/ws');
     gameSocket.connect();
     const socket = latestSocket();
@@ -246,15 +397,15 @@ describe('GameSocket reconnect identity state machine', () => {
     socket.receive(encodeMessage(MsgType.Connected, {
       player_id: 'temp-player',
       player_name: '临时玩家',
-      reconnect_token: 'temp-token'
+      web_session_ticket: 'temporary-ticket',
+      reconnect_available: true
     }));
 
     expect(useAppStore.getState().connectionStatus).toBe('reconnecting');
     expect(useAppStore.getState().playerId).toBe('old-player');
-    expect(loadReconnect()).toEqual({ id: 'old-player', token: 'old-token' });
     expect(decodeMessage(socket.sent[0])).toMatchObject({
       type: MsgType.Reconnect,
-      payload: { token: 'old-token', player_id: 'old-player' },
+      payload: {},
       command: { request_id: expect.any(String) }
     });
 
@@ -262,61 +413,131 @@ describe('GameSocket reconnect identity state machine', () => {
       player_id: 'old-player',
       player_name: '青竹',
       room_code: '',
-      reconnect_token: 'rotated-token'
+      web_session_ticket: 'rotated-ticket'
     }));
-    await Promise.resolve();
+    await flushPromises();
     expect(useAppStore.getState().connectionStatus).toBe('connected');
-    expect(loadReconnect()).toEqual({ id: 'old-player', token: 'rotated-token' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith('/session/commit', expect.objectContaining({
+      body: JSON.stringify({ ticket: 'rotated-ticket' })
+    }));
     gameSocket.shutdown();
   });
 
-  it('can reconnect the same identity twice with successively rotated tokens', async () => {
-    storeReconnect('player', 'token-1');
+  it('retries a losing concurrent handshake without committing its provisional ticket', async () => {
+    const fetchMock = vi.mocked(fetch);
+    const options = {
+      heartbeatIntervalMs: 60_000,
+      reconnectBaseDelayMs: 25,
+      reconnectJitterRatio: 0
+    };
+    const winner = new GameSocket('ws://example.test/ws', options);
+    const loser = new GameSocket('ws://example.test/ws', options);
+
+    winner.connect();
+    const winnerSocket = latestSocket();
+    loser.connect();
+    const loserSocket = latestSocket();
+    openAndNegotiate(winnerSocket);
+    openAndNegotiate(loserSocket);
+
+    winnerSocket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'winner-temp',
+      player_name: '临时一',
+      web_session_ticket: 'winner-provisional',
+      reconnect_available: true
+    }));
+    loserSocket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'loser-temp',
+      player_name: '临时二',
+      web_session_ticket: 'must-not-commit',
+      reconnect_available: true
+    }));
+    const loserReconnectRequestId = decodeMessage(loserSocket.sent[0]).command?.request_id;
+    if (!loserReconnectRequestId) throw new Error('expected losing reconnect request id');
+
+    winnerSocket.receive(encodeMessage(MsgType.Reconnected, {
+      player_id: 'restored-player',
+      player_name: '青竹',
+      room_code: '',
+      web_session_ticket: 'winner-rotated'
+    }));
+    await flushPromises();
+    loserSocket.receive(encodeMessage(MsgType.Error, {
+      code: 1003,
+      message: '重连令牌无效',
+      request_id: loserReconnectRequestId
+    }, { request_id: loserReconnectRequestId }));
+
+    expect(loserSocket.closeCalls).toContainEqual({
+      code: 4003,
+      reason: 'web session reconnect failed'
+    });
+    expect(useAppStore.getState().provisionalIdentity).toBeNull();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      '/session/commit',
+      '/session/refresh'
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith('/session/commit', expect.objectContaining({
+      body: JSON.stringify({ ticket: 'winner-rotated' })
+    }));
+
+    vi.advanceTimersByTime(24);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+
+    winner.shutdown();
+    loser.shutdown();
+  });
+
+  it('can restore the same cookie-backed identity twice', async () => {
+    const fetchMock = vi.mocked(fetch);
     const gameSocket = new GameSocket('ws://example.test/ws');
 
     gameSocket.connect();
     let socket = latestSocket();
     openAndNegotiate(socket);
     socket.receive(encodeMessage(MsgType.Connected, {
-      player_id: 'temp-1', player_name: '临时一', reconnect_token: 'temp-token-1'
+      player_id: 'temp-1', player_name: '临时一', web_session_ticket: 'temp-ticket-1', reconnect_available: true
     }));
+    expect(decodeMessage(socket.sent[0]).payload).toEqual({ token: '', player_id: '' });
     socket.receive(encodeMessage(MsgType.Reconnected, {
-      player_id: 'player', player_name: '青竹', room_code: '', reconnect_token: 'token-2'
+      player_id: 'player', player_name: '青竹', room_code: '', web_session_ticket: 'rotated-ticket-1'
     }));
-    await Promise.resolve();
+    await flushPromises();
     gameSocket.shutdown();
 
     gameSocket.connect();
     socket = latestSocket();
     openAndNegotiate(socket);
     socket.receive(encodeMessage(MsgType.Connected, {
-      player_id: 'temp-2', player_name: '临时二', reconnect_token: 'temp-token-2'
+      player_id: 'temp-2', player_name: '临时二', web_session_ticket: 'temp-ticket-2', reconnect_available: true
     }));
-    expect(decodeMessage(socket.sent[0]).payload).toEqual({ token: 'token-2', player_id: 'player' });
+    expect(decodeMessage(socket.sent[0]).payload).toEqual({ token: '', player_id: '' });
     socket.receive(encodeMessage(MsgType.Reconnected, {
-      player_id: 'player', player_name: '青竹', room_code: '', reconnect_token: 'token-3'
+      player_id: 'player', player_name: '青竹', room_code: '', web_session_ticket: 'rotated-ticket-2'
     }));
-    await Promise.resolve();
+    await flushPromises();
 
-    expect(loadReconnect()).toEqual({ id: 'player', token: 'token-3' });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     gameSocket.shutdown();
   });
 
-  it('StrictMode-style shutdown and reconnect preserves identity', () => {
-    storeReconnect('player', 'token');
+  it('StrictMode-style shutdown and reconnect creates one active socket and clears legacy storage', () => {
+    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'player', token: 'legacy-token' }));
     const gameSocket = new GameSocket('ws://example.test/ws');
     gameSocket.connect();
     gameSocket.shutdown();
     gameSocket.connect();
 
     expect(FakeWebSocket.instances).toHaveLength(2);
-    expect(loadReconnect()).toEqual({ id: 'player', token: 'token' });
+    expect(localStorage.getItem('ddz_next_reconnect')).toBeNull();
     expect(useAppStore.getState().connectionStatus).toBe('connecting');
     gameSocket.shutdown();
   });
 
-  it('revokes the exact persisted credential before clearing a logout', async () => {
-    storeReconnect('logout-player', 'logout-token');
+  it('revokes the HttpOnly cookie with an empty bounded JSON request', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchMock);
     const gameSocket = new GameSocket('ws://example.test/ws');
@@ -327,14 +548,197 @@ describe('GameSocket reconnect identity state machine', () => {
       method: 'POST',
       credentials: 'same-origin',
       keepalive: true,
-      body: JSON.stringify({ player_id: 'logout-player', token: 'logout-token' })
+      body: JSON.stringify({})
     }));
-    expect(loadReconnect()).toBeNull();
     expect(useAppStore.getState().connectionStatus).toBe('idle');
   });
 
-  it('quiesces reconnect handlers before revoking so a late rotation cannot orphan a live token', async () => {
-    storeReconnect('logout-player', 'logout-token');
+  it('waits for an in-flight cookie commit before sending the final revoke', async () => {
+    let resolveCommit: ((value: { ok: boolean; status: number }) => void) | undefined;
+    const callOrder: string[] = [];
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      callOrder.push(url);
+      if (url === '/session/commit') {
+        return new Promise<{ ok: boolean; status: number }>((resolve) => {
+          resolveCommit = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, status: 204 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws');
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'commit-player',
+      player_name: '玩家',
+      web_session_ticket: 'pending-ticket',
+      reconnect_available: false
+    }));
+    expect(callOrder).toEqual(['/session/commit']);
+
+    const logoutResult = gameSocket.logout();
+    await Promise.resolve();
+    expect(callOrder).toEqual(['/session/commit']);
+
+    resolveCommit?.({ ok: true, status: 204 });
+    await expect(logoutResult).resolves.toBe(true);
+    expect(callOrder).toEqual(['/session/commit', '/session/revoke']);
+    expect(useAppStore.getState().connectionStatus).toBe('idle');
+  });
+
+  it('bounds a stalled cookie commit before sending the final revoke', async () => {
+    const callOrder: string[] = [];
+    let commitSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      callOrder.push(url);
+      if (url === '/session/commit') {
+        commitSignal = init?.signal;
+        return new Promise<{ ok: boolean; status: number }>(() => undefined);
+      }
+      return Promise.resolve({ ok: true, status: 204 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws', { sessionRequestTimeoutMs: 100 });
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'stalled-commit-player',
+      player_name: '玩家',
+      web_session_ticket: 'stalled-ticket',
+      reconnect_available: false
+    }));
+
+    const logoutResult = gameSocket.logout();
+    await Promise.resolve();
+    expect(callOrder).toEqual(['/session/commit']);
+    expect(commitSignal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(callOrder).toEqual(['/session/commit']);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(logoutResult).resolves.toBe(true);
+    expect(commitSignal?.aborted).toBe(true);
+    expect(callOrder).toEqual(['/session/commit', '/session/revoke']);
+  });
+
+  it('waits for an in-flight periodic cookie refresh before sending the final revoke', async () => {
+    let resolveRefresh: ((value: { ok: boolean; status: number }) => void) | undefined;
+    const callOrder: string[] = [];
+    let refreshCalls = 0;
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      callOrder.push(url);
+      if (url === '/session/refresh') {
+        refreshCalls += 1;
+        if (refreshCalls === 1) return Promise.resolve({ ok: true, status: 204 });
+        return new Promise<{ ok: boolean; status: number }>((resolve) => {
+          resolveRefresh = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, status: 204 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      heartbeatIntervalMs: 60_000,
+      sessionRefreshIntervalMs: 100
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'refresh-player',
+      player_name: '玩家',
+      web_session_ticket: 'refresh-ticket',
+      reconnect_available: false
+    }));
+    await flushPromises();
+    expect(callOrder).toEqual(['/session/commit', '/session/refresh']);
+
+    vi.advanceTimersByTime(100);
+    expect(callOrder).toEqual(['/session/commit', '/session/refresh', '/session/refresh']);
+    const logoutResult = gameSocket.logout();
+    await Promise.resolve();
+    expect(callOrder).toEqual(['/session/commit', '/session/refresh', '/session/refresh']);
+
+    resolveRefresh?.({ ok: true, status: 204 });
+    await expect(logoutResult).resolves.toBe(true);
+    expect(callOrder).toEqual(['/session/commit', '/session/refresh', '/session/refresh', '/session/revoke']);
+  });
+
+  it('bounds a stalled periodic refresh before sending the final revoke', async () => {
+    const callOrder: string[] = [];
+    let periodicRefreshSignal: AbortSignal | null | undefined;
+    let refreshCalls = 0;
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      callOrder.push(url);
+      if (url === '/session/refresh') {
+        refreshCalls += 1;
+        if (refreshCalls > 1) {
+          periodicRefreshSignal = init?.signal;
+          return new Promise<{ ok: boolean; status: number }>(() => undefined);
+        }
+      }
+      return Promise.resolve({ ok: true, status: 204 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws', {
+      heartbeatIntervalMs: 60_000,
+      sessionRefreshIntervalMs: 100,
+      sessionRequestTimeoutMs: 50
+    });
+    gameSocket.connect();
+    const socket = latestSocket();
+    openAndNegotiate(socket);
+    socket.receive(encodeMessage(MsgType.Connected, {
+      player_id: 'stalled-refresh-player',
+      player_name: '玩家',
+      web_session_ticket: 'refresh-ticket',
+      reconnect_available: false
+    }));
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(callOrder).toEqual(['/session/commit', '/session/refresh', '/session/refresh']);
+    const logoutResult = gameSocket.logout();
+    await Promise.resolve();
+    expect(periodicRefreshSignal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(49);
+    expect(callOrder).not.toContain('/session/revoke');
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(logoutResult).resolves.toBe(true);
+    expect(periodicRefreshSignal?.aborted).toBe(true);
+    expect(callOrder).toEqual(['/session/commit', '/session/refresh', '/session/refresh', '/session/revoke']);
+  });
+
+  it('aborts and reports a stalled revoke within the request bound', async () => {
+    let revokeSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      revokeSignal = init?.signal;
+      return new Promise<{ ok: boolean; status: number }>(() => undefined);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const gameSocket = new GameSocket('ws://example.test/ws', { sessionRequestTimeoutMs: 75 });
+
+    const logoutResult = gameSocket.logout();
+    await Promise.resolve();
+    expect(revokeSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(75);
+
+    await expect(logoutResult).resolves.toBe(false);
+    expect(revokeSignal?.aborted).toBe(true);
+    expect(useAppStore.getState().error).toContain('服务器会话撤销失败');
+  });
+
+  it('quiesces reconnect handlers before revoking so a late ticket cannot restore identity state', async () => {
     let resolveFetch: ((value: { ok: boolean }) => void) | undefined;
     const fetchMock = vi.fn(() => new Promise<{ ok: boolean }>((resolve) => {
       resolveFetch = resolve;
@@ -345,22 +749,20 @@ describe('GameSocket reconnect identity state machine', () => {
     const socket = latestSocket();
     openAndNegotiate(socket);
     socket.receive(encodeMessage(MsgType.Connected, {
-      player_id: 'temporary', player_name: '临时玩家', reconnect_token: 'temporary-token'
+      player_id: 'temporary', player_name: '临时玩家', web_session_ticket: 'temporary-ticket', reconnect_available: true
     }));
 
     const logoutResult = gameSocket.logout();
-    expect(loadReconnect()).toBeNull();
     socket.receive(encodeMessage(MsgType.Reconnected, {
-      player_id: 'logout-player', player_name: '玩家', room_code: '', reconnect_token: 'late-rotated-token'
+      player_id: 'logout-player', player_name: '玩家', room_code: '', web_session_ticket: 'late-ticket'
     }));
-    expect(loadReconnect()).toBeNull();
+    expect(useAppStore.getState().playerId).toBe('');
 
     resolveFetch?.({ ok: true });
     await expect(logoutResult).resolves.toBe(true);
     expect(fetchMock).toHaveBeenCalledWith('/session/revoke', expect.objectContaining({
-      body: JSON.stringify({ player_id: 'logout-player', token: 'logout-token' })
+      body: JSON.stringify({})
     }));
-    expect(useAppStore.getState().reconnectToken).toBe('');
   });
 
   it('returns an explicit failure instead of silently dropping a command', () => {
@@ -374,7 +776,7 @@ describe('GameSocket reconnect identity state machine', () => {
     const socket = latestSocket();
     openAndNegotiate(socket);
 
-    const result = gameSocket.send(MsgType.Reconnect);
+    const result = gameSocket.send(MsgType.JoinRoom);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('encode-failed');
     expect(useAppStore.getState().error).toContain('消息编码失败');
@@ -432,8 +834,9 @@ describe('GameSocket reconnect identity state machine', () => {
     gameSocket.shutdown();
   });
 
-  it('renegotiates and reuses the rotated credential after an unknown snapshot phase', async () => {
-    storeReconnect('player', 'token-1');
+  it('does not commit a rotated cookie ticket after an unknown snapshot phase', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockClear();
     const gameSocket = new GameSocket('ws://example.test/ws', {
       heartbeatIntervalMs: 60_000,
       reconnectBaseDelayMs: 25,
@@ -447,7 +850,7 @@ describe('GameSocket reconnect identity state machine', () => {
       player_id: 'player',
       player_name: '青竹',
       room_code: '123456',
-      reconnect_token: 'token-2',
+      web_session_ticket: 'must-not-commit',
       game_state: { phase: 'paused' }
     }));
     vi.runAllTicks();
@@ -455,7 +858,7 @@ describe('GameSocket reconnect identity state machine', () => {
 
     expect(socket.closeCalls).toContainEqual({ code: 4003, reason: 'authoritative resync' });
     expect(useAppStore.getState().error).toContain('paused');
-    expect(loadReconnect()).toEqual({ id: 'player', token: 'token-2' });
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(1);
 
     gameSocket.shutdown();
@@ -468,11 +871,12 @@ describe('GameSocket reconnect identity state machine', () => {
     retry.receive(encodeMessage(MsgType.Connected, {
       player_id: 'temporary',
       player_name: '临时玩家',
-      reconnect_token: 'temporary-token'
+      web_session_ticket: 'temporary-ticket',
+      reconnect_available: true
     }));
     expect(decodeMessage(retry.sent[0])).toMatchObject({
       type: MsgType.Reconnect,
-      payload: { player_id: 'player', token: 'token-2' }
+      payload: {}
     });
     await Promise.resolve();
     vi.runAllTicks();
@@ -540,7 +944,8 @@ describe('GameSocket reconnect identity state machine', () => {
     recovered.receive(encodeMessage(MsgType.Connected, {
       player_id: 'fresh-player',
       player_name: '新玩家',
-      reconnect_token: 'fresh-token'
+      web_session_ticket: 'fresh-ticket',
+      reconnect_available: false
     }));
     await Promise.resolve();
     recovered.close();
@@ -720,6 +1125,10 @@ function latestSocket(): FakeWebSocket {
   return socket;
 }
 
+async function flushPromises(): Promise<void> {
+  for (let pass = 0; pass < 20; pass += 1) await Promise.resolve();
+}
+
 function openAndNegotiate(socket: FakeWebSocket): void {
   socket.open();
   const hello = decodeMessage(socket.sent.at(-1) ?? new Uint8Array());
@@ -727,7 +1136,7 @@ function openAndNegotiate(socket: FakeWebSocket): void {
     type: MsgType.Hello,
     payload: {
       protocol_version: '1',
-      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+      capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat', 'http_only_session_ticket'],
       client_kind: 'web'
     },
     command: { request_id: expect.any(String) }
@@ -735,12 +1144,8 @@ function openAndNegotiate(socket: FakeWebSocket): void {
   socket.receive(encodeMessage(MsgType.Negotiated, {
     protocol_version: '1',
     server_version: 'test',
-    capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat'],
+    capabilities: ['command_correlation', 'idempotency', 'game_context', 'protobuf_chat', 'http_only_session_ticket'],
     client_kind: 'web'
   }, { request_id: hello.command?.request_id }));
   socket.sent = [];
-}
-
-function storeReconnect(id: string, token: string, expiresAt?: number): void {
-  localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token, expires_at: expiresAt }));
 }

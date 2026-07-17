@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MsgType } from '../src/protocol/types';
-import { loadReconnect, useAppStore } from '../src/stores/appStore';
+import { clearLegacyReconnectCredential, useAppStore } from '../src/stores/appStore';
 
 describe('app store message flow', () => {
   beforeEach(() => {
@@ -10,8 +10,6 @@ describe('app store message flow', () => {
       connectionStatus: 'idle',
       playerId: '',
       playerName: '',
-      reconnectToken: '',
-      reconnectCandidate: null,
       provisionalIdentity: null,
       reconnectNotice: '',
       phase: 'connecting',
@@ -31,7 +29,7 @@ describe('app store message flow', () => {
   it('enters lobby after connected', () => {
     useAppStore.getState().handleMessage({
       type: MsgType.Connected,
-      payload: { player_id: 'p1', player_name: '青竹', reconnect_token: 'tok' }
+      payload: { player_id: 'p1', player_name: '青竹', web_session_ticket: 'ticket' }
     });
     expect(useAppStore.getState().phase).toBe('lobby');
     expect(useAppStore.getState().playerId).toBe('p1');
@@ -152,7 +150,6 @@ describe('app store message flow', () => {
         player_id: 'p1',
         player_name: '青竹',
         room_code: '888888',
-        reconnect_token: 'token-bidding',
         game_state: {
           phase: 'bidding',
           players: [{ id: 'p1', name: '青竹', seat: 0, ready: true, is_landlord: false, cards_count: 17, online: true }],
@@ -175,7 +172,6 @@ describe('app store message flow', () => {
         player_id: 'p1',
         player_name: '青竹',
         room_code: '888888',
-        reconnect_token: 'token-playing',
         game_state: {
           phase: 'playing',
           players: [{ id: 'p1', name: '青竹', seat: 0, ready: true, is_landlord: true, cards_count: 20, online: true }],
@@ -193,103 +189,109 @@ describe('app store message flow', () => {
     expect(useAppStore.getState().bottomCardsRevealed).toBe(true);
   });
 
-  it('keeps saved credentials while Connected is only provisional', () => {
-    storeReconnect('old-player', 'old-token');
-    useAppStore.setState({ playerId: 'old-player', reconnectToken: 'old-token' });
-    useAppStore.getState().prepareConnection(loadReconnect());
+  it('keeps only player metadata while Connected is provisional', () => {
+    useAppStore.setState({ playerId: 'old-player', playerName: '旧玩家' });
+    useAppStore.getState().prepareConnection();
 
     useAppStore.getState().handleMessage({
       type: MsgType.Connected,
-      payload: { player_id: 'temp-player', player_name: '临时玩家', reconnect_token: 'temp-token' }
+      payload: {
+        player_id: 'temp-player',
+        player_name: '临时玩家',
+        web_session_ticket: 'temporary-ticket',
+        reconnect_available: true
+      }
     });
 
     const state = useAppStore.getState();
-    expect(state.connectionStatus).toBe('fresh-connected');
+    expect(state.connectionStatus).toBe('reconnecting');
     expect(state.playerId).toBe('old-player');
-    expect(state.provisionalIdentity?.id).toBe('temp-player');
-    expect(loadReconnect()).toEqual({ id: 'old-player', token: 'old-token' });
+    expect(state.provisionalIdentity).toEqual({ id: 'temp-player', name: '临时玩家' });
   });
 
-  it('persists only the rotated identity confirmed by Reconnected', () => {
-    storeReconnect('old-player', 'old-token');
-    useAppStore.getState().prepareConnection(loadReconnect());
+  it('accepts restored player metadata confirmed by Reconnected', () => {
+    useAppStore.getState().prepareConnection();
     useAppStore.getState().handleMessage({
       type: MsgType.Connected,
-      payload: { player_id: 'temp-player', player_name: '临时玩家', reconnect_token: 'temp-token' }
+      payload: {
+        player_id: 'temp-player',
+        player_name: '临时玩家',
+        web_session_ticket: 'temporary-ticket',
+        reconnect_available: true
+      }
     });
-    useAppStore.getState().setConnectionStatus('reconnecting');
     useAppStore.getState().handleMessage({
       type: MsgType.Reconnected,
       payload: {
         player_id: 'old-player',
         player_name: '青竹',
         room_code: '',
-        reconnect_token: 'rotated-token'
+        web_session_ticket: 'rotated-ticket'
       }
     });
 
     expect(useAppStore.getState().connectionStatus).toBe('reconnected');
     expect(useAppStore.getState().playerId).toBe('old-player');
-    expect(useAppStore.getState().reconnectToken).toBe('rotated-token');
-    expect(loadReconnect()).toEqual({ id: 'old-player', token: 'rotated-token' });
+    expect(useAppStore.getState().provisionalIdentity).toBeNull();
   });
 
   it.each([
     [1003, '重连令牌无效'],
     [1004, '重连令牌已过期']
-  ])('accepts the provisional identity after reconnect error %s', (code, message) => {
-    storeReconnect('old-player', 'old-token');
+  ])('does not accept the provisional identity after reconnect error %s', (code, message) => {
     useAppStore.setState({ phase: 'playing', roomCode: '888888' });
-    useAppStore.getState().prepareConnection(loadReconnect());
+    useAppStore.getState().prepareConnection();
     useAppStore.getState().handleMessage({
       type: MsgType.Connected,
-      payload: { player_id: 'temp-player', player_name: '临时玩家', reconnect_token: 'temp-token' }
+      payload: {
+        player_id: 'temp-player',
+        player_name: '临时玩家',
+        web_session_ticket: 'temporary-ticket',
+        reconnect_available: true
+      }
     });
-    useAppStore.getState().setConnectionStatus('reconnecting');
     useAppStore.getState().handleMessage({
       type: MsgType.Error,
       payload: { code, message, request_id: '' }
     });
 
     const state = useAppStore.getState();
-    expect(state.connectionStatus).toBe('connected');
-    expect(state.playerId).toBe('temp-player');
-    expect(state.phase).toBe('lobby');
-    expect(state.roomCode).toBe('');
-    expect(state.reconnectNotice).toContain(message);
-    expect(loadReconnect()).toEqual({ id: 'temp-player', token: 'temp-token' });
+    expect(state.connectionStatus).toBe('reconnecting');
+    expect(state.playerId).toBe('');
+    expect(state.provisionalIdentity).toEqual({ id: 'temp-player', name: '临时玩家' });
+    expect(state.phase).toBe('playing');
+    expect(state.roomCode).toBe('888888');
+    expect(state.reconnectNotice).toBe('');
+    expect(state.error).toBe(message);
   });
 
-  it('does not overwrite credentials rotated by another tab after a reconnect conflict', () => {
-    storeReconnect('shared-player', 'shared-token');
-    useAppStore.getState().prepareConnection(loadReconnect());
-    useAppStore.getState().handleMessage({
-      type: MsgType.Connected,
-      payload: { player_id: 'tab-two-temp', player_name: '标签页二', reconnect_token: 'tab-two-token' }
-    });
-    useAppStore.getState().setConnectionStatus('reconnecting');
-
-    // Another tab won the single-use token race and committed its rotation.
-    storeReconnect('shared-player', 'rotated-by-tab-one');
-    useAppStore.getState().handleMessage({
-      type: MsgType.Error,
-      payload: { code: 1003, message: '重连令牌无效', request_id: '' }
-    });
-
-    expect(useAppStore.getState().playerId).toBe('tab-two-temp');
-    expect(loadReconnect()).toEqual({ id: 'shared-player', token: 'rotated-by-tab-one' });
-  });
-
-  it('keeps credential expiry server-authoritative and rejects malformed records', () => {
-    storeReconnect('expired-player', 'expired-token', Date.now() - 1);
-    expect(loadReconnect()).toEqual({ id: 'expired-player', token: 'expired-token' });
-
+  it('removes the legacy credential without reading or replacing it', () => {
     localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'legacy-player', token: 'legacy-token' }));
-    expect(loadReconnect()).toEqual({ id: 'legacy-player', token: 'legacy-token' });
-
-    localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: '', token: 'missing-player' }));
-    expect(loadReconnect()).toBeNull();
+    const getItem = vi.spyOn(Storage.prototype, 'getItem');
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    clearLegacyReconnectCredential();
     expect(localStorage.getItem('ddz_next_reconnect')).toBeNull();
+    expect(getItem).toHaveBeenCalledTimes(1);
+    expect(setItem).not.toHaveBeenCalled();
+    getItem.mockRestore();
+    setItem.mockRestore();
+  });
+
+  it('reports legacy credential cleanup failures without exposing values', () => {
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new DOMException('blocked sensitive-value', 'SecurityError');
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    clearLegacyReconnectCredential();
+
+    expect(warn).toHaveBeenCalledWith(
+      'Unable to remove the legacy browser session credential',
+      'SecurityError'
+    );
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('sensitive-value');
+    removeItem.mockRestore();
+    warn.mockRestore();
   });
 
   it('updates hand and action history after playing cards', () => {
@@ -359,7 +361,3 @@ describe('app store message flow', () => {
     expect(Object.keys(useAppStore.getState().seatActions)).toEqual(['p2']);
   });
 });
-
-function storeReconnect(id: string, token: string, expiresAt?: number): void {
-  localStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token, expires_at: expiresAt }));
-}

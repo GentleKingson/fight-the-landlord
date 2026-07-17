@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/observability"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
@@ -120,6 +122,8 @@ type Matcher struct {
 	botFactory      BotFactory
 	queueTimeout    time.Duration
 	botFillDelay    time.Duration
+	metrics         *observability.Metrics
+	logger          *slog.Logger
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -157,6 +161,8 @@ type MatcherDeps struct {
 	QueueTimeout        time.Duration
 	BotFillDelay        time.Duration
 	Context             context.Context
+	Metrics             *observability.Metrics
+	Logger              *slog.Logger
 }
 
 // NewMatcher creates a matcher whose timers and workers are rooted in one
@@ -181,6 +187,10 @@ func NewMatcher(deps MatcherDeps) *Matcher {
 			return bot.NewBotClient(engine)
 		}
 	}
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	m := &Matcher{
 		roomManager:     deps.RoomManager,
 		redisStore:      deps.RedisStore,
@@ -194,6 +204,8 @@ func NewMatcher(deps MatcherDeps) *Matcher {
 		botFactory:      factory,
 		queueTimeout:    timeout,
 		botFillDelay:    fillDelay,
+		metrics:         deps.Metrics,
+		logger:          logger.With("component", "match"),
 		ctx:             ctx,
 		cancel:          cancel,
 		closedDone:      make(chan struct{}),
@@ -255,7 +267,11 @@ func (assembly *managedRoomAssembly) Rollback() error {
 
 // AddToQueue adds one physical client generation to the authoritative queue.
 func (m *Matcher) AddToQueue(client types.ClientInterface) bool {
-	if client == nil || client.GetRoom() != "" {
+	if client == nil {
+		return false
+	}
+	if client.GetRoom() != "" {
+		m.logEnqueue(client.GetID(), "rejected", "already_in_room", 0)
 		return false
 	}
 	playerID := client.GetID()
@@ -263,8 +279,14 @@ func (m *Matcher) AddToQueue(client types.ClientInterface) bool {
 	deadline := joinedAt.Add(m.queueTimeout)
 
 	m.mu.Lock()
-	if m.closed || m.entries[playerID] != nil {
+	if m.closed {
 		m.mu.Unlock()
+		m.logEnqueue(playerID, "rejected", "closed", 0)
+		return false
+	}
+	if m.entries[playerID] != nil {
+		m.mu.Unlock()
+		m.logEnqueue(playerID, "rejected", "already_queued", 0)
 		return false
 	}
 	entry := m.newEntryLocked(client, joinedAt, deadline, false)
@@ -275,7 +297,9 @@ func (m *Matcher) AddToQueue(client types.ClientInterface) bool {
 	}
 	queueLength := len(m.queue)
 	m.mu.Unlock()
+	m.reportQueueCurrent()
 
+	m.logEnqueue(playerID, "accepted", "none", queueLength)
 	log.Printf("🔍 玩家 %s 加入匹配队列，当前队列长度: %d", client.GetName(), queueLength)
 	current, delivered := m.publishQueuedEntry(entry, client, false, "match queued")
 	if current && !delivered {
@@ -285,6 +309,17 @@ func (m *Matcher) AddToQueue(client types.ClientInterface) bool {
 		m.launchAttempt(attempt)
 	}
 	return true
+}
+
+func (m *Matcher) logEnqueue(playerID, result, reason string, queueDepth int) {
+	m.logger.Info("match enqueue",
+		"event", "match_enqueue",
+		"player_id", playerID,
+		"mode", "standard",
+		"result", result,
+		"reason", reason,
+		"queue_depth", queueDepth,
+	)
 }
 
 func (m *Matcher) newEntryLocked(client types.ClientInterface, joinedAt, deadline time.Time, ownedBot bool) *QueueEntry {
@@ -325,6 +360,9 @@ func (m *Matcher) expireEntry(entry *QueueEntry) {
 	if entry.State != QueueStateQueued {
 		m.cancelEntryLocked(entry, "timeout", "")
 		m.mu.Unlock()
+		if m.metrics != nil {
+			m.metrics.MatchCancelled("timeout")
+		}
 		return
 	}
 	client := entry.client
@@ -350,6 +388,10 @@ func (m *Matcher) expireEntry(entry *QueueEntry) {
 		m.scheduleBotFillLocked()
 	}
 	m.mu.Unlock()
+	m.reportQueueCurrent()
+	if m.metrics != nil {
+		m.metrics.MatchCancelled("timeout")
+	}
 }
 
 // RemoveFromQueue cancels both queued and not-yet-committed inflight work.
@@ -380,6 +422,12 @@ func (m *Matcher) cancelEntry(client types.ClientInterface, reason, canceledBy s
 	}
 	accepted := m.cancelEntryLocked(entry, reason, canceledBy)
 	m.mu.Unlock()
+	if accepted {
+		m.reportQueueCurrent()
+		if m.metrics != nil {
+			m.metrics.MatchCancelled(reason)
+		}
+	}
 	return accepted
 }
 
@@ -528,32 +576,8 @@ func (m *Matcher) attemptWorker(attempt *matchAttempt) {
 }
 
 func (m *Matcher) runAttempt(attempt *matchAttempt) {
-	if err := m.validateAttempt(attempt); err != nil {
-		m.failAttempt(attempt, nil, false, "participant_unavailable", err)
-		return
-	}
-	if m.beginRoom == nil {
-		m.failAttempt(attempt, nil, false, "assembly_failed", errors.New("match room assembler unavailable"))
-		return
-	}
-
-	clients := attemptClients(attempt)
-	assembly, err := m.beginRoom(attempt.ctx, clients[0])
-	if err != nil {
-		m.failAttempt(attempt, nil, false, "assembly_failed", err)
-		return
-	}
-	gameRoom := assembly.Room()
-	if gameRoom == nil {
-		m.failAttempt(attempt, assembly, false, "assembly_failed", errors.New("room transaction began without a room identity"))
-		return
-	}
-	if !m.bindAttemptRoom(attempt, gameRoom) {
-		m.failAttempt(attempt, assembly, false, protocol.MatchCancelReason, attempt.ctx.Err())
-		return
-	}
-	if err := m.validateAttempt(attempt); err != nil {
-		m.failAttempt(attempt, assembly, false, "participant_unavailable", err)
+	assembly, gameRoom, clients, prepared := m.prepareAttempt(attempt)
+	if !prepared {
 		return
 	}
 	if !m.joinAttemptParticipants(attempt, assembly, clients[1:]) {
@@ -584,8 +608,50 @@ func (m *Matcher) runAttempt(attempt *matchAttempt) {
 		m.failAttempt(attempt, assembly, roomLifecycleOwnsBots, protocol.MatchCancelReason, attempt.ctx.Err())
 		return
 	}
+	if m.metrics != nil {
+		for _, entry := range attempt.entries {
+			if !entry.ownedBot {
+				m.metrics.ObserveMatchWait(time.Since(entry.JoinedAt))
+			}
+		}
+	}
+	m.reportQueueCurrent()
 
 	m.publishCommittedMatch(attempt, gameRoom, clients, startingPlayers)
+}
+
+func (m *Matcher) prepareAttempt(
+	attempt *matchAttempt,
+) (assembly RoomAssembly, gameRoom *room.Room, clients []types.ClientInterface, prepared bool) {
+	if err := m.validateAttempt(attempt); err != nil {
+		m.failAttempt(attempt, nil, false, "participant_unavailable", err)
+		return nil, nil, nil, false
+	}
+	if m.beginRoom == nil {
+		m.failAttempt(attempt, nil, false, "assembly_failed", errors.New("match room assembler unavailable"))
+		return nil, nil, nil, false
+	}
+
+	clients = attemptClients(attempt)
+	assembly, err := m.beginRoom(attempt.ctx, clients[0])
+	if err != nil {
+		m.failAttempt(attempt, nil, false, "assembly_failed", err)
+		return nil, nil, nil, false
+	}
+	gameRoom = assembly.Room()
+	if gameRoom == nil {
+		m.failAttempt(attempt, assembly, false, "assembly_failed", errors.New("room transaction began without a room identity"))
+		return nil, nil, nil, false
+	}
+	if !m.bindAttemptRoom(attempt, gameRoom) {
+		m.failAttempt(attempt, assembly, false, protocol.MatchCancelReason, attempt.ctx.Err())
+		return nil, nil, nil, false
+	}
+	if err := m.validateAttempt(attempt); err != nil {
+		m.failAttempt(attempt, assembly, false, "participant_unavailable", err)
+		return nil, nil, nil, false
+	}
+	return assembly, gameRoom, clients, true
 }
 
 func (m *Matcher) joinAttemptParticipants(attempt *matchAttempt, assembly RoomAssembly, clients []types.ClientInterface) bool {
@@ -714,10 +780,62 @@ type attemptRollback struct {
 }
 
 func (m *Matcher) failAttempt(attempt *matchAttempt, assembly RoomAssembly, roomLifecycleOwnsBots bool, fallbackReason string, cause error) {
+	stage := matchRollbackStage(fallbackReason, cause, assembly != nil)
+	if m.metrics != nil {
+		m.metrics.MatchRollback(stage)
+	}
 	rollback := m.markAttemptRolledBack(attempt, fallbackReason)
+	m.logger.Warn("match rolled back",
+		"event", "match_rollback",
+		"mode", matchMode(attempt),
+		"result", "rolled_back",
+		"reason", boundedMatchReason(rollback.reason),
+		"stage", stage,
+		"participant_count", len(rollback.entries),
+	)
+	if m.metrics != nil && rollback.reason != protocol.MatchCancelReason && rollback.reason != "disconnected" && rollback.reason != "connection_replaced" {
+		m.metrics.MatchCancelled(rollback.reason)
+	}
 	m.rollbackRoomAssembly(assembly, rollback.reason, cause)
 	m.notifyRolledBackEntries(rollback, roomLifecycleOwnsBots)
 	m.releaseRolledBackEntries(attempt, rollback.entries)
+}
+
+func matchRollbackStage(reason string, cause error, hasAssembly bool) string {
+	switch {
+	case reason == "participant_unavailable":
+		return "validate"
+	case !hasAssembly:
+		return "begin"
+	case reason == protocol.MatchCancelReason || errors.Is(cause, context.Canceled):
+		return "cancel"
+	default:
+		return "commit"
+	}
+}
+
+func boundedMatchReason(reason string) string {
+	switch reason {
+	case protocol.MatchCancelReason,
+		"assembly_failed",
+		"connection_replaced",
+		"delivery_failed",
+		"disconnected",
+		"participant_unavailable",
+		"room_removed",
+		"shutdown",
+		"timeout":
+		return reason
+	default:
+		return "other"
+	}
+}
+
+func matchMode(attempt *matchAttempt) string {
+	if attempt != nil && attempt.practice {
+		return "practice"
+	}
+	return "standard"
 }
 
 func (m *Matcher) markAttemptRolledBack(attempt *matchAttempt, fallbackReason string) attemptRollback {
@@ -789,6 +907,7 @@ func (m *Matcher) releaseRolledBackEntries(attempt *matchAttempt, entries []*Que
 		m.scheduleBotFillLocked()
 	}
 	m.mu.Unlock()
+	m.reportQueueCurrent()
 }
 
 func (m *Matcher) isCurrent(entry *QueueEntry) bool {
@@ -838,8 +957,18 @@ func (m *Matcher) publishCommittedMatch(attempt *matchAttempt, gameRoom *room.Ro
 		return
 	}
 
-	log.Printf("🎮 匹配成功！房间 %s，玩家: %s, %s, %s",
-		gameRoom.Code, clients[0].GetName(), clients[1].GetName(), clients[2].GetName())
+	started := time.Now()
+	if len(attempt.entries) > 0 {
+		started = attempt.entries[0].JoinedAt
+	}
+	m.logger.Info("match committed",
+		"event", "match_success",
+		"room_id", gameRoom.Code,
+		"mode", matchMode(attempt),
+		"result", "committed",
+		"participant_count", len(clients),
+		"duration_ms", time.Since(started).Milliseconds(),
+	)
 }
 
 func (m *Matcher) publishRoomJoinedSnapshots(attempt *matchAttempt, gameRoom *room.Room, clients []types.ClientInterface) bool {
@@ -913,6 +1042,7 @@ func (m *Matcher) newPublishedSession(attempt *matchAttempt, gameRoom *room.Room
 		return nil, false
 	}
 	gs := session.NewGameSessionWithPlayers(gameRoom, sessionPlayers, m.leaderboard, m.gameConfig)
+	gs.SetMetrics(m.metrics)
 	gs.SetRoomManager(m.roomManager)
 	if !m.registerPublishedSession(attempt, gameRoom, gs) {
 		gs.Retire()
@@ -1247,6 +1377,16 @@ func (m *Matcher) GetQueueLength() int {
 	return len(m.queue)
 }
 
+func (m *Matcher) reportQueueCurrent() {
+	if m == nil || m.metrics == nil {
+		return
+	}
+	m.mu.Lock()
+	current := len(m.entries)
+	m.mu.Unlock()
+	m.metrics.SetMatchQueueCurrent(current)
+}
+
 // Close cancels authoritative deadlines, bot fill, and inflight transactions,
 // then waits until every matcher-owned worker has exited.
 func (m *Matcher) Close() error {
@@ -1275,6 +1415,7 @@ func (m *Matcher) Close() error {
 		published[gameRoom] = attempt
 	}
 	m.mu.Unlock()
+	m.reportQueueCurrent()
 
 	for gameRoom, attempt := range published {
 		attempt.publishMu.Lock()
@@ -1309,6 +1450,7 @@ func (m *Matcher) Close() error {
 		entry.deliveryMu.Unlock()
 	}
 	m.workers.Wait()
+	m.reportQueueCurrent()
 	close(m.closedDone)
 	return nil
 }

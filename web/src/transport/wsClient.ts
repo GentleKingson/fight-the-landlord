@@ -1,10 +1,8 @@
 import { ProtocolDecodeError, ProtocolEncodeError, decodeMessage, encodeMessage } from '../protocol/codec';
 import { MsgType, type CommandMeta, type IncomingMessage, type MessageType, type OutgoingPayload } from '../protocol/types';
 import {
-  forgetReconnect,
-  loadReconnect,
-  useAppStore,
-  type StoredIdentity
+  clearLegacyReconnectCredential,
+  useAppStore
 } from '../stores/appStore';
 import { readClientVersion } from '../version/compatibility';
 
@@ -19,6 +17,8 @@ export type CommandMetadata = Partial<CommandMeta> & { request_id: string };
 export interface GameSocketOptions {
   heartbeatIntervalMs?: number;
   pongTimeoutMs?: number;
+  sessionRefreshIntervalMs?: number;
+  sessionRequestTimeoutMs?: number;
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
   reconnectJitterRatio?: number;
@@ -29,6 +29,8 @@ export interface GameSocketOptions {
 interface ResolvedGameSocketOptions {
   heartbeatIntervalMs: number;
   pongTimeoutMs: number;
+  sessionRefreshIntervalMs: number;
+  sessionRequestTimeoutMs: number;
   reconnectBaseDelayMs: number;
   reconnectMaxDelayMs: number;
   reconnectJitterRatio: number;
@@ -39,6 +41,8 @@ interface ResolvedGameSocketOptions {
 const DEFAULT_OPTIONS: ResolvedGameSocketOptions = {
   heartbeatIntervalMs: 5000,
   pongTimeoutMs: 10_000,
+  sessionRefreshIntervalMs: 24 * 60 * 60 * 1000,
+  sessionRequestTimeoutMs: 10_000,
   reconnectBaseDelayMs: 1000,
   reconnectMaxDelayMs: 30_000,
   reconnectJitterRatio: 0.2,
@@ -48,11 +52,13 @@ const DEFAULT_OPTIONS: ResolvedGameSocketOptions = {
 
 const PROTOCOL_VERSION = '1';
 const WEB_CLIENT_KIND = 'web';
+const WEB_SESSION_CAPABILITY = 'http_only_session_ticket';
 const REQUIRED_CAPABILITIES = [
   'command_correlation',
   'idempotency',
   'game_context',
-  'protobuf_chat'
+  'protobuf_chat',
+  WEB_SESSION_CAPABILITY
 ] as const;
 
 export class GameSocket {
@@ -61,7 +67,14 @@ export class GameSocket {
   private pongWatchdog: number | null = null;
   private reconnectTimer: number | null = null;
   private reconnectAttempt = 0;
-  private reconnectIdentity: StoredIdentity | null = null;
+  private awaitingReconnect = false;
+  private reconnectRequestId: string | null = null;
+  private provisionalTicket = '';
+  private readonly pendingSessionCommits = new Set<Promise<void>>();
+  private readonly pendingSessionRefreshes = new Set<Promise<void>>();
+  private sessionRefreshTimer: number | null = null;
+  private sessionRefreshOwner: WebSocket | null = null;
+  private sessionRefreshDueAt = 0;
   private intentionalClose = false;
   private networkOffline = false;
   private reconnectWhenClosed = false;
@@ -75,6 +88,7 @@ export class GameSocket {
 
   constructor(private readonly url: string, options: GameSocketOptions = {}) {
     this.options = resolveOptions(options);
+    clearLegacyReconnectCredential();
   }
 
   connect(): void {
@@ -92,9 +106,8 @@ export class GameSocket {
       return;
     }
 
-    this.reconnectIdentity = loadReconnect();
     const store = useAppStore.getState();
-    store.prepareConnection(this.reconnectIdentity);
+    store.prepareConnection();
 
     let socket: WebSocket;
     try {
@@ -109,6 +122,9 @@ export class GameSocket {
     this.socket = socket;
     this.negotiated = false;
     this.helloRequestId = null;
+    this.awaitingReconnect = false;
+    this.reconnectRequestId = null;
+    this.provisionalTicket = '';
     this.closeError = null;
     this.consecutiveMalformedFrames = 0;
     socket.binaryType = 'arraybuffer';
@@ -153,6 +169,7 @@ export class GameSocket {
       this.consecutiveMalformedFrames = 0;
       if (message.type === MsgType.Pong) this.clearPongWatchdog();
       if (!this.advanceNegotiationState(message, socket)) return;
+      if (this.rejectFailedReconnect(message, socket)) return;
       const handlingResult = useAppStore.getState().handleMessage(message);
       if (handlingResult?.authoritativeResyncRequired) {
         this.closeRecoverableSocket(socket, handlingResult.reason, 4003, 'authoritative resync');
@@ -170,8 +187,12 @@ export class GameSocket {
     socket.onclose = () => {
       if (this.socket !== socket) return;
       this.stopHeartbeat();
+      this.stopSessionRefresh();
       this.negotiated = false;
       this.helloRequestId = null;
+      this.awaitingReconnect = false;
+      this.reconnectRequestId = null;
+      this.provisionalTicket = '';
       this.socket = null;
       const reconnectImmediately = this.reconnectWhenClosed;
       const closeError = this.closeError;
@@ -197,9 +218,12 @@ export class GameSocket {
     const store = useAppStore.getState();
     store.setConnectionStatus('closing');
     this.stopHeartbeat();
+    this.stopSessionRefresh();
     this.clearReconnectTimer();
     this.reconnectAttempt = 0;
-    this.reconnectIdentity = null;
+    this.awaitingReconnect = false;
+    this.reconnectRequestId = null;
+    this.provisionalTicket = '';
     this.negotiated = false;
     this.helloRequestId = null;
     this.consecutiveMalformedFrames = 0;
@@ -214,24 +238,31 @@ export class GameSocket {
   }
 
   forgetIdentity(): void {
-    forgetReconnect();
-    this.reconnectIdentity = null;
+    clearLegacyReconnectCredential();
     useAppStore.getState().clearIdentity();
   }
 
   async logout(): Promise<boolean> {
-    // Detach handlers before reading the credential. A late Reconnected frame
-    // can no longer rotate localStorage while revocation is in flight.
+    // Detach handlers before revocation so a late reconnect response cannot
+    // republish identity state while the HttpOnly cookie is being cleared.
     this.shutdown();
-    const identity = loadReconnect();
     this.forgetIdentity();
+    // Commit and refresh responses can both set an HttpOnly cookie after their
+    // caller has detached. Let every issued mutation settle before revocation.
+    const pendingCookieMutations = [
+      ...this.pendingSessionCommits,
+      ...this.pendingSessionRefreshes
+    ];
+    if (pendingCookieMutations.length > 0) {
+      await Promise.allSettled(pendingCookieMutations);
+    }
     let revokeFailed = false;
-    if (identity && typeof fetch === 'function') {
+    if (typeof fetch === 'function') {
       try {
-        const response = await fetch('/session/revoke', {
+        const response = await this.requestSessionMutation('/session/revoke', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ player_id: identity.id, token: identity.token }),
+          body: JSON.stringify({}),
           credentials: 'same-origin',
           keepalive: true
         });
@@ -286,34 +317,194 @@ export class GameSocket {
     if (message.type === MsgType.Connected) {
       this.reconnectAttempt = 0;
       const currentStore = useAppStore.getState();
-      if (this.reconnectIdentity) {
+      const payload = message.payload as {
+        reconnect_available?: boolean;
+        web_session_ticket?: string;
+      };
+      this.provisionalTicket = payload.web_session_ticket ?? '';
+      if (payload.reconnect_available) {
+        this.awaitingReconnect = true;
         currentStore.setConnectionStatus('reconnecting');
-        const result = this.sendCommand(MsgType.Reconnect, {
-          player_id: this.reconnectIdentity.id,
-          token: this.reconnectIdentity.token
-        });
+        const requestId = createRequestID();
+        this.reconnectRequestId = requestId;
+        const result = this.send(MsgType.Reconnect, {}, { request_id: requestId });
         if (!result.ok) currentStore.setError('无法发送重连请求，将在连接恢复后重试');
       } else {
-        queueMicrotask(() => {
-          if (this.socket === socket) useAppStore.getState().setConnectionStatus('connected');
-        });
+        this.awaitingReconnect = false;
+        this.reconnectRequestId = null;
+        this.commitWebSessionTicket(this.provisionalTicket, socket);
       }
-      this.sendCommand(MsgType.GetOnlineCount);
-      this.sendCommand(MsgType.GetMaintenanceStatus);
       return;
     }
 
     if (message.type === MsgType.Reconnected) {
-      this.reconnectIdentity = null;
-      queueMicrotask(() => {
-        if (this.socket === socket) useAppStore.getState().setConnectionStatus('connected');
-      });
+      const payload = message.payload as { web_session_ticket?: string };
+      this.awaitingReconnect = false;
+      this.reconnectRequestId = null;
+      this.provisionalTicket = '';
+      this.commitWebSessionTicket(payload.web_session_ticket ?? '', socket);
       return;
     }
 
-    if (message.type === MsgType.Error && useAppStore.getState().connectionStatus === 'connected') {
-      this.reconnectIdentity = null;
+  }
+
+  private rejectFailedReconnect(message: IncomingMessage, socket: WebSocket): boolean {
+    if (message.type !== MsgType.Error || !this.awaitingReconnect) return false;
+    const payload = message.payload as { message?: string; request_id?: string };
+    const responseRequestId = payload.request_id || message.command?.request_id;
+    if (responseRequestId !== this.reconnectRequestId) return false;
+
+    this.awaitingReconnect = false;
+    this.reconnectRequestId = null;
+    this.provisionalTicket = '';
+    useAppStore.getState().prepareConnection();
+    const detail = payload.message ? `：${payload.message}` : '';
+    this.closeRecoverableSocket(
+      socket,
+      `Web 会话恢复失败${detail}，正在重新协商`,
+      4003,
+      'web session reconnect failed'
+    );
+    return true;
+  }
+
+  private commitWebSessionTicket(ticket: string, socket: WebSocket): void {
+    if (!ticket) {
+      this.closeRecoverableSocket(socket, '服务器未提供 Web 会话确认票据', 4003, 'missing web session ticket');
+      return;
     }
+    if (typeof fetch !== 'function') {
+      this.closeRecoverableSocket(socket, '浏览器无法确认 Web 会话', 4003, 'web session commit unavailable');
+      return;
+    }
+    const commit = async (): Promise<void> => {
+      if (this.socket !== socket) return;
+      const response = await this.requestSessionMutation('/session/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket }),
+        credentials: 'same-origin',
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (this.socket !== socket) return;
+      await this.trackPendingSessionRefresh(this.requestSessionRefresh());
+      if (this.socket !== socket) return;
+      const store = useAppStore.getState();
+      store.setConnected(true);
+      store.setConnectionStatus('connected');
+      this.startSessionRefresh(socket);
+      this.sendCommand(MsgType.GetOnlineCount);
+      this.sendCommand(MsgType.GetMaintenanceStatus);
+    };
+    const pendingRefreshes = [...this.pendingSessionRefreshes];
+    const pendingCommit = (pendingRefreshes.length > 0
+      ? Promise.allSettled(pendingRefreshes).then(commit)
+      : commit()
+    ).catch((error: unknown) => {
+      if (this.socket !== socket) return;
+      this.closeRecoverableSocket(
+        socket,
+        `Web 会话确认失败：${errorMessage(error)}`,
+        4003,
+        'web session commit failed'
+      );
+    });
+    this.pendingSessionCommits.add(pendingCommit);
+    void pendingCommit.finally(() => this.pendingSessionCommits.delete(pendingCommit));
+  }
+
+  private startSessionRefresh(socket: WebSocket): void {
+    if (this.socket !== socket) return;
+    this.stopSessionRefresh();
+    this.sessionRefreshOwner = socket;
+    this.scheduleSessionRefresh(socket);
+  }
+
+  private scheduleSessionRefresh(socket: WebSocket): void {
+    if (this.sessionRefreshOwner !== socket || this.socket !== socket || this.intentionalClose) return;
+    this.clearSessionRefreshTimer();
+    this.sessionRefreshDueAt = Date.now() + this.options.sessionRefreshIntervalMs;
+    this.sessionRefreshTimer = window.setTimeout(() => {
+      this.sessionRefreshTimer = null;
+      this.refreshWebSession(socket);
+    }, this.options.sessionRefreshIntervalMs);
+  }
+
+  private refreshWebSession(socket: WebSocket): void {
+    if (
+      this.sessionRefreshOwner !== socket
+      || this.socket !== socket
+      || this.intentionalClose
+      || this.pendingSessionRefreshes.size > 0
+    ) return;
+    this.clearSessionRefreshTimer();
+    this.sessionRefreshDueAt = 0;
+    const pendingRefresh = this.trackPendingSessionRefresh(this.requestSessionRefresh().catch((error: unknown) => {
+      if (this.sessionRefreshOwner !== socket || this.socket !== socket) return;
+      useAppStore.getState().setError(`Web 会话续期失败：${errorMessage(error)}；当前连接可继续使用，将自动重试`);
+    }));
+    void pendingRefresh.finally(() => {
+      if (this.sessionRefreshOwner === socket && this.socket === socket && !this.intentionalClose) {
+        this.scheduleSessionRefresh(socket);
+      }
+    });
+  }
+
+  private async requestSessionRefresh(): Promise<void> {
+    const response = await this.requestSessionMutation('/session/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+      credentials: 'same-origin',
+      cache: 'no-store'
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  }
+
+  private async requestSessionMutation(path: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    let timeout: number | null = null;
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = window.setTimeout(() => {
+        controller.abort();
+        reject(new Error(`request timed out after ${this.options.sessionRequestTimeoutMs}ms`));
+      }, this.options.sessionRequestTimeoutMs);
+    });
+    try {
+      return await Promise.race([
+        fetch(path, { ...init, signal: controller.signal }),
+        timedOut
+      ]);
+    } finally {
+      if (timeout !== null) window.clearTimeout(timeout);
+    }
+  }
+
+  private trackPendingSessionRefresh(pendingRefresh: Promise<void>): Promise<void> {
+    this.pendingSessionRefreshes.add(pendingRefresh);
+    void pendingRefresh.then(
+      () => this.pendingSessionRefreshes.delete(pendingRefresh),
+      () => this.pendingSessionRefreshes.delete(pendingRefresh)
+    );
+    return pendingRefresh;
+  }
+
+  private refreshSessionIfDue(): void {
+    const socket = this.sessionRefreshOwner;
+    if (!socket || this.sessionRefreshDueAt === 0 || Date.now() < this.sessionRefreshDueAt) return;
+    this.refreshWebSession(socket);
+  }
+
+  private stopSessionRefresh(): void {
+    this.clearSessionRefreshTimer();
+    this.sessionRefreshOwner = null;
+    this.sessionRefreshDueAt = 0;
+  }
+
+  private clearSessionRefreshTimer(): void {
+    if (this.sessionRefreshTimer !== null) window.clearTimeout(this.sessionRefreshTimer);
+    this.sessionRefreshTimer = null;
   }
 
   private advanceNegotiationState(message: IncomingMessage, socket: WebSocket): boolean {
@@ -464,6 +655,8 @@ export class GameSocket {
       this.connect();
     } else if (this.socket.readyState === WebSocket.CLOSING || this.socket.readyState === WebSocket.CLOSED) {
       this.reconnectWhenClosed = true;
+    } else if (this.socket.readyState === WebSocket.OPEN && this.negotiated) {
+      this.refreshSessionIfDue();
     }
   };
 
@@ -474,6 +667,7 @@ export class GameSocket {
     this.closeError = null;
     this.clearReconnectTimer();
     this.stopHeartbeat();
+    this.stopSessionRefresh();
     const store = useAppStore.getState();
     store.setConnected(false);
     store.setConnectionStatus('offline');
@@ -490,6 +684,7 @@ export class GameSocket {
     if (this.networkOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
     if (this.socket?.readyState === WebSocket.OPEN && this.negotiated) {
       this.startHeartbeat(true);
+      this.refreshSessionIfDue();
     } else if (!this.socket) {
       this.clearReconnectTimer();
       this.connect();
@@ -510,6 +705,14 @@ export function createGameSocket(): GameSocket {
 function resolveOptions(options: GameSocketOptions): ResolvedGameSocketOptions {
   const heartbeatIntervalMs = positiveDuration(options.heartbeatIntervalMs, DEFAULT_OPTIONS.heartbeatIntervalMs);
   const pongTimeoutMs = positiveDuration(options.pongTimeoutMs, DEFAULT_OPTIONS.pongTimeoutMs);
+  const sessionRefreshIntervalMs = positiveDuration(
+    options.sessionRefreshIntervalMs,
+    DEFAULT_OPTIONS.sessionRefreshIntervalMs
+  );
+  const sessionRequestTimeoutMs = positiveDuration(
+    options.sessionRequestTimeoutMs,
+    DEFAULT_OPTIONS.sessionRequestTimeoutMs
+  );
   const reconnectBaseDelayMs = positiveDuration(options.reconnectBaseDelayMs, DEFAULT_OPTIONS.reconnectBaseDelayMs);
   const reconnectMaxDelayMs = positiveDuration(options.reconnectMaxDelayMs, DEFAULT_OPTIONS.reconnectMaxDelayMs);
   const reconnectJitterRatio = Math.min(1, Math.max(0, options.reconnectJitterRatio ?? DEFAULT_OPTIONS.reconnectJitterRatio));
@@ -520,6 +723,8 @@ function resolveOptions(options: GameSocketOptions): ResolvedGameSocketOptions {
   return {
     heartbeatIntervalMs,
     pongTimeoutMs,
+    sessionRefreshIntervalMs,
+    sessionRequestTimeoutMs,
     reconnectBaseDelayMs,
     reconnectMaxDelayMs,
     reconnectJitterRatio,

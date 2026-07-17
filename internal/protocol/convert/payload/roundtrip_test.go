@@ -123,9 +123,11 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 	t.Run("Connected", func(t *testing.T) {
 		t.Parallel()
 		original := protocol.ConnectedPayload{
-			PlayerID:       "p1",
-			PlayerName:     "Player1",
-			ReconnectToken: "token123",
+			PlayerID:           "p1",
+			PlayerName:         "Player1",
+			ReconnectToken:     "token123",
+			WebSessionTicket:   "ticket123",
+			ReconnectAvailable: true,
 		}
 
 		data, err := EncodePayload(protocol.MsgConnected, original)
@@ -135,9 +137,7 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 		err = DecodePayload(protocol.MsgConnected, data, &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.Equal(t, original.PlayerName, result.PlayerName)
-		assert.Equal(t, original.ReconnectToken, result.ReconnectToken)
+		assert.Equal(t, original, result)
 	})
 
 	t.Run("Pong", func(t *testing.T) {
@@ -616,11 +616,15 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 	t.Run("Reconnected with GameState", func(t *testing.T) {
 		t.Parallel()
 		original := protocol.ReconnectedPayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-			RoomCode:   "123456",
+			PlayerID:         "p1",
+			PlayerName:       "Player1",
+			RoomCode:         "123456",
+			WebSessionTicket: "rotated-ticket",
 			GameState: &protocol.GameStateDTO{
-				Phase: "ended",
+				Phase:           "ended",
+				SnapshotVersion: 42,
+				GameID:          "game-roundtrip-7",
+				TurnID:          19,
 				Players: []protocol.PlayerInfo{
 					{ID: "p1", Name: "Player1", Seat: 0, IsLandlord: true},
 				},
@@ -655,6 +659,10 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 		require.NotNil(t, result.GameState)
 		assert.Equal(t, "ended", result.GameState.Phase)
 		assert.True(t, result.GameState.MustPlay)
+		assert.Equal(t, original.WebSessionTicket, result.WebSessionTicket)
+		assert.Equal(t, original.GameState.SnapshotVersion, result.GameState.SnapshotVersion)
+		assert.Equal(t, original.GameState.GameID, result.GameState.GameID)
+		assert.Equal(t, original.GameState.TurnID, result.GameState.TurnID)
 		require.NotNil(t, result.GameState.Settlement)
 		assert.Equal(t, original.GameState.Settlement, result.GameState.Settlement)
 	})

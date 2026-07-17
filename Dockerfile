@@ -56,6 +56,6 @@ COPY config.yaml /app/config.yaml
 EXPOSE 1780
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
-    CMD ["/app/server", "-healthcheck"]
+    CMD ["/app/server", "-healthcheck", "-healthcheck-url", "http://127.0.0.1:1780/readyz"]
 
 CMD ["/app/server"]
