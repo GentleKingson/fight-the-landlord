@@ -345,6 +345,12 @@ jobs:
       - name: Verify Compose security invariants
         run: ./scripts/check-compose-security.sh
 
+      - name: Test public-test preflight
+        run: ./tests/test-preflight-public-test.sh
+
+      - name: Test isolated Redis backup and restore
+        run: ./tests/test-redis-backup.sh
+
       - name: Prepare production environment
         run: |
           mkdir -p artifacts
