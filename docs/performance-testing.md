@@ -5,7 +5,8 @@
 
 ## 已实现的场景
 
-每次运行按顺序执行：
+每次运行按非零配置执行以下场景；普通 `run-load-test.sh` 的 matcher 操作数默认是
+`0`，PR smoke 与 soak workflow 会显式设置各自需要的值：
 
 1. 以可配置并发度建立指定数量的 WebSocket 连接，完成 `hello`、协议协商和
    TUI 会话创建。
@@ -31,7 +32,15 @@ export SERVER_MAX_CONNECTIONS=2000
 export SECURITY_RATE_LIMIT_PER_SECOND=2000
 export SECURITY_RATE_LIMIT_PER_MINUTE=100000
 export SECURITY_MESSAGE_LIMIT_PER_SECOND=100
+export REDIS_PASSWORD="$(openssl rand -hex 32)"
+docker compose up -d --wait redis poker-server
 ```
+
+这些变量已由 `docker-compose.yml` 显式传入服务容器；`docker compose config`
+可在启动前核对最终值。测试结束后必须执行
+`docker compose down --timeout 90 --volumes --remove-orphans`。也可以直接用同一组环境
+变量启动 `go run ./cmd/server`，但不能只在一个终端 `export` 后测试另一个未继承环境的
+既有服务。
 
 服务就绪后运行：
 

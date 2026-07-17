@@ -60,8 +60,26 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s douzero -p 'test_model
 
 jq -e '
   .services["poker-server"].environment.SERVER_ENV == "production" and
-  .services["poker-server"].environment.REDIS_PASSWORD == env.REDIS_PASSWORD
+  .services["poker-server"].environment.REDIS_PASSWORD == env.REDIS_PASSWORD and
+  .services["poker-server"].environment.SERVER_MAX_CONNECTIONS == "10000" and
+  .services["poker-server"].environment.SECURITY_RATE_LIMIT_PER_SECOND == "10" and
+  .services["poker-server"].environment.SECURITY_RATE_LIMIT_PER_MINUTE == "60" and
+  .services["poker-server"].environment.SECURITY_MESSAGE_LIMIT_PER_SECOND == "20"
 ' <<<"$default_config" >/dev/null
+
+load_config="$(
+  SERVER_MAX_CONNECTIONS=2000 \
+  SECURITY_RATE_LIMIT_PER_SECOND=2000 \
+  SECURITY_RATE_LIMIT_PER_MINUTE=100000 \
+  SECURITY_MESSAGE_LIMIT_PER_SECOND=100 \
+  docker compose --env-file .env.example config --format json
+)"
+jq -e '
+  .services["poker-server"].environment.SERVER_MAX_CONNECTIONS == "2000" and
+  .services["poker-server"].environment.SECURITY_RATE_LIMIT_PER_SECOND == "2000" and
+  .services["poker-server"].environment.SECURITY_RATE_LIMIT_PER_MINUTE == "100000" and
+  .services["poker-server"].environment.SECURITY_MESSAGE_LIMIT_PER_SECOND == "100"
+' <<<"$load_config" >/dev/null
 
 digest_config="$(
   GAME_IMAGE_REF='gentlekingson/fight-the-landlord@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
