@@ -194,8 +194,8 @@ func Load(path string) (*Config, error) {
 
 	// 本地开发便利：自动加载 .env.local（仅本地，已 gitignore）。
 	// .env 是 Docker 专用（含 REDIS_ADDR=redis:6379 等容器内地址），
-	if err := godotenv.Load(".env.local"); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("load .env.local: %w", err)
+	if err := loadLocalEnv(".env.local"); err != nil {
+		return nil, err
 	}
 	if err := loadFromEnv(cfg); err != nil {
 		return nil, err
@@ -205,6 +205,16 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadLocalEnv deliberately hides parser diagnostics. Some dotenv parsers
+// include an unterminated value verbatim in their error, which can expose a
+// Redis password or management key before structured log redaction is active.
+func loadLocalEnv(filename string) error {
+	if err := godotenv.Load(filename); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("load local environment file: invalid or unreadable")
+	}
+	return nil
 }
 
 // --- 环境变量辅助函数 ---

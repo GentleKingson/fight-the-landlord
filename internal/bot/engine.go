@@ -29,7 +29,12 @@ func (e *HeuristicEngine) DecidePlay(_ context.Context, botName string, gctx Gam
 	if cards == nil {
 		log.Printf("🤖 %s 选择 pass", botName)
 	} else {
-		log.Printf("🤖 %s 出牌: %s", botName, cardsToStr(cards))
+		parsed, err := rule.ParseHand(cards)
+		if err != nil {
+			log.Printf("🤖 %s 出牌: count=%d", botName, len(cards))
+		} else {
+			log.Printf("🤖 %s 出牌: count=%d type=%s", botName, len(cards), parsed.Type.String())
+		}
 	}
 	return cards
 }

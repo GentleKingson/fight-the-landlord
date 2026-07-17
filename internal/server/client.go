@@ -133,7 +133,9 @@ func (c *Client) ReadPump() {
 		frameType, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("读取错误: %v", err)
+				// Peer close text is attacker-controlled and may contain secrets or
+				// chat content. Keep the ordinary log to a fixed category.
+				log.Printf("WebSocket 读取异常关闭")
 			}
 			break
 		}
@@ -339,7 +341,7 @@ func (c *Client) checkMessageRateLimit(
 		return true, true
 	}
 
-	log.Printf("客户端 %s (IP: %s) 消息过于频繁", c.GetName(), c.IP)
+	log.Printf("客户端 %s 消息过于频繁", c.GetName())
 	response := codec.NewCorrelatedCommandErrorMessage(
 		protocol.ErrCodeRateLimit, "消息发送过于频繁", requestID, messageType,
 	)

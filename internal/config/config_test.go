@@ -93,6 +93,24 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	assert.Nil(t, cfg)
 }
 
+func TestLoadLocalEnvDoesNotExposeMalformedSecret(t *testing.T) {
+	for name, content := range map[string]string{
+		"redis password": `REDIS_PASSWORD="redis-secret-sentinel`,
+		"admin key":      `ADMIN_KEY="admin-secret-sentinel`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".env.local")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+			err := loadLocalEnv(path)
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "redis-secret-sentinel")
+			assert.NotContains(t, err.Error(), "admin-secret-sentinel")
+			assert.EqualError(t, err, "load local environment file: invalid or unreadable")
+		})
+	}
+}
+
 func TestLoad_AppliesDefaults(t *testing.T) {
 	t.Parallel()
 

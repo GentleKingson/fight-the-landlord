@@ -8,6 +8,16 @@ preflight="$repo_root/scripts/preflight-public-test.sh"
 fixtures="$script_dir/fixtures/preflight-public-test"
 base_compose="$fixtures/compose.yml"
 tests_run=0
+redis_secret_sentinel="7wSLYCu5kTFpG9J4hVK2dXrN6BqMz8Ae"
+
+assert_no_secret_output() {
+  local output="$1"
+  if grep -Fq "$redis_secret_sentinel" "$output"; then
+    printf 'FAIL: preflight output exposed the Redis password fixture\n' >&2
+    rm -f "$output"
+    exit 1
+  fi
+}
 
 isolated_command() {
   env -i \
@@ -42,6 +52,8 @@ run_success() {
     exit 1
   fi
 
+  assert_no_secret_output "$output"
+
   rm -f "$output"
   tests_run=$((tests_run + 1))
 }
@@ -71,6 +83,8 @@ run_failure() {
     rm -f "$output"
     exit 1
   fi
+
+  assert_no_secret_output "$output"
 
   rm -f "$output"
   tests_run=$((tests_run + 1))

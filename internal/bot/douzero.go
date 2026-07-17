@@ -171,7 +171,7 @@ func (e *DouZeroEngine) decidePlayWithProvenance(ctx context.Context, botName st
 		return playDecisionResult{cards: e.invalidFallback(botName, invalidActionCannotBeat, gctx), usedRuleFallback: true}
 	}
 
-	log.Printf("🎮 [DouZero] %s 出牌: %s", botName, cardsToStr(cards))
+	log.Printf("🎮 [DouZero] %s 出牌: count=%d type=%s", botName, len(cards), parsed.Type.String())
 	return playDecisionResult{cards: cards}
 }
 
