@@ -2,4 +2,3 @@ services:
   redis:
     ports:
       - "0.0.0.0:6379:6379"
-
