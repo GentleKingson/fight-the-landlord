@@ -63,5 +63,7 @@ reject_regex douzero/README.md 'docker build -t palemoky/fight-the-landlord'
 require_literal .github/workflows/release.yml 'IMAGE_NAME: gentlekingson/${{ github.event.repository.name }}'
 require_literal .github/workflows/release.yml 'images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}'
 require_literal .github/workflows/release.yml 'images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-douzero'
+require_literal .github/workflows/release.yml 'GO_TRIXIE_DIGEST: sha256:'
+require_literal .github/workflows/release.yml '"golang:${GO_VERSION}-trixie@${GO_TRIXIE_DIGEST}"'
 
 printf 'Release identity checks passed for %s\n' "$fork_repo"

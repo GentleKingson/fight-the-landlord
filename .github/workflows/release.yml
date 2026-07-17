@@ -21,6 +21,8 @@ jobs:
   build-client:
     name: Build client binaries
     runs-on: ubuntu-latest
+    env:
+      GO_TRIXIE_DIGEST: sha256:4e603da0ea8df4a8ab10cbf0b3061f7823d277e82ea210a47c32a5fafb43cc43
     strategy:
       matrix:
         goos: [linux, darwin, windows]
@@ -58,7 +60,7 @@ jobs:
             -v "$PWD:/src" -w /src \
             -e CGO_ENABLED=1 \
             -e GIT_CEILING_DIRECTORIES=/src \
-            "golang:${GO_VERSION}-trixie" \
+            "golang:${GO_VERSION}-trixie@${GO_TRIXIE_DIGEST}" \
             sh -c "
               apt-get update && \
               apt-get install -y libasound2-dev libgl1-mesa-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libxxf86vm-dev && \
