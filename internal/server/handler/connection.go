@@ -29,6 +29,15 @@ func (h *Handler) handlePing(client types.ClientInterface, msg *protocol.Message
 
 // handleReconnect 处理断线重连
 func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Message) {
+	webClient, browserAttempt := client.(types.WebSessionClient)
+	browserAttempt = browserAttempt && webClient.IsBrowserTransport()
+	browserSucceeded := false
+	defer func() {
+		if browserAttempt && !browserSucceeded {
+			webClient.InvalidateProvisionalWebSessionTicket()
+			client.Close()
+		}
+	}()
 	if h.metrics != nil {
 		h.metrics.ReconnectAttempt()
 	}
@@ -56,22 +65,56 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		))
 		return
 	}
+	// Browser reconnect first drains the exact active generation without holding
+	// global authority, then reacquires and revalidates both token and registry
+	// ownership before any restore or publication can begin.
+	var unlockAuthority func()
+	if browserAttempt {
+		var authorityOK bool
+		unlockAuthority, authorityOK = types.AcquireBrowserReconnectAuthority(
+			h.server, webClient.BrowserReconnectToken(), client,
+		)
+		if !authorityOK {
+			if h.metrics != nil {
+				h.metrics.ReconnectFailure("authority_race")
+			}
+			sendMessage(client, codec.NewCommandErrorMessageWithText(
+				protocol.ErrCodeReconnectInvalid,
+				"Web 会话状态已变化，请重新连接",
+				protocol.MsgReconnect,
+			))
+			return
+		}
+	} else {
+		unlockAuthority = types.LockSessionAuthority(h.server)
+	}
+	defer unlockAuthority()
 
 	temporaryID := client.GetID()
 	temporaryName := client.GetName()
-	restored, ok := h.restoreReconnectSession(client, payload, temporaryID)
+	restored, webSessionTicket, ok := h.restoreReconnectSession(client, payload, temporaryID)
 	if !ok {
 		return
 	}
-	previous, ok := h.rebindRestoredClient(client, restored, temporaryID)
+	previous, ok := h.rebindRestoredClient(client, restored, temporaryID, webSessionTicket)
 	if !ok {
+		return
+	}
+	if webSessionTicket != "" && !h.sessionManager.IsCurrentBrowserRestore(restored) {
+		if h.metrics != nil {
+			h.metrics.ReconnectFailure("superseded")
+		}
+		h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName, webSessionTicket)
 		return
 	}
 	// 构建重连响应
 	reconnectPayload := protocol.ReconnectedPayload{
-		PlayerID:       restored.PlayerID,
-		PlayerName:     restored.PlayerName,
-		ReconnectToken: restored.ReconnectToken,
+		PlayerID:         restored.PlayerID,
+		PlayerName:       restored.PlayerName,
+		WebSessionTicket: webSessionTicket,
+	}
+	if webSessionTicket == "" {
+		reconnectPayload.ReconnectToken = restored.ReconnectToken
 	}
 
 	// A replaced connection may finish its disconnect cleanup concurrently.
@@ -84,7 +127,7 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		if h.metrics != nil {
 			h.metrics.ReconnectFailure("delivery")
 		}
-		h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName)
+		h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName, webSessionTicket)
 		return
 	}
 	if restoredRoom == nil {
@@ -93,13 +136,14 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 			if h.metrics != nil {
 				h.metrics.ReconnectFailure("delivery")
 			}
-			h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName)
+			h.rollbackReconnect(client, previous, restored, temporaryID, temporaryName, webSessionTicket)
 			return
 		}
 	} else if !responseSent {
 		if h.metrics != nil {
 			h.metrics.ReconnectFailure("snapshot_skipped")
 		}
+		h.rollbackRestoredCredential(client, restored, webSessionTicket)
 		h.closeSkippedReconnect(client, previous, restored.PlayerID)
 		return
 	}
@@ -112,6 +156,11 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	}
 	if previous != nil && previous != client {
 		previous.Close()
+		types.RetireBrowserSessionClient(h.server, restored.PlayerID, previous)
+	}
+	if browserAttempt {
+		browserSucceeded = true
+		webClient.DiscardProvisionalWebSessionTicket()
 	}
 
 	log.Printf("🔄 玩家 %s (%s) 重连成功", restored.PlayerName, restored.PlayerID)
@@ -124,10 +173,50 @@ func (h *Handler) restoreReconnectSession(
 	client types.ClientInterface,
 	payload *protocol.ReconnectPayload,
 	temporaryID string,
-) (*session.RestoredSession, bool) {
-	restored, err := h.sessionManager.RestoreSession(payload.Token, payload.PlayerID, temporaryID)
+) (*session.RestoredSession, string, bool) {
+	webClient, browserTransport := client.(types.WebSessionClient)
+	browserTransport = browserTransport && webClient.IsBrowserTransport()
+	var restored *session.RestoredSession
+	var err error
+	if browserTransport {
+		if payload.Token != "" || payload.PlayerID != "" || webClient.BrowserReconnectToken() == "" {
+			err = session.ErrInvalidReconnect
+		} else {
+			restored, err = h.sessionManager.RestoreSessionByToken(webClient.BrowserReconnectToken(), temporaryID)
+		}
+	} else {
+		restored, err = h.sessionManager.RestoreSession(payload.Token, payload.PlayerID, temporaryID)
+	}
+	if err == nil && browserTransport {
+		ticket, ticketErr := webClient.IssueWebSessionTicket(
+			restored.ReconnectToken,
+			webClient.BrowserReconnectToken(),
+			func() bool { return h.rollbackRestoredSession(restored) },
+			func() bool { return h.sessionManager.OrphanBrowserRestore(restored) },
+		)
+		if ticketErr != nil {
+			h.rollbackRestoredSession(restored)
+			if h.metrics != nil {
+				h.metrics.ReconnectFailure("ticket")
+			}
+			sendMessage(client, codec.NewCommandErrorMessageWithText(
+				protocol.ErrCodeUnknown, "Web 会话确认票据创建失败", protocol.MsgReconnect,
+			))
+			client.Close()
+			return nil, "", false
+		}
+		if !webClient.TrackWebSessionTicket(ticket) {
+			webClient.InvalidateWebSessionTicket(ticket)
+			if h.metrics != nil {
+				h.metrics.ReconnectFailure("ticket")
+			}
+			client.Close()
+			return nil, "", false
+		}
+		return restored, ticket, true
+	}
 	if err == nil {
-		return restored, true
+		return restored, "", true
 	}
 	code := protocol.ErrCodeReconnectInvalid
 	if errors.Is(err, session.ErrReconnectExpired) {
@@ -141,13 +230,14 @@ func (h *Handler) restoreReconnectSession(
 		h.metrics.ReconnectFailure(reason)
 	}
 	sendMessage(client, codec.NewCommandErrorMessage(code, protocol.MsgReconnect))
-	return nil, false
+	return nil, "", false
 }
 
 func (h *Handler) rebindRestoredClient(
 	client types.ClientInterface,
 	restored *session.RestoredSession,
 	temporaryID string,
+	webSessionTicket string,
 ) (types.ClientInterface, bool) {
 	previous, err := h.server.RebindClient(
 		temporaryID, restored.PlayerID, restored.PlayerName, restored.RoomCode, client,
@@ -155,9 +245,7 @@ func (h *Handler) rebindRestoredClient(
 	if err == nil {
 		return previous, true
 	}
-	if !h.sessionManager.RollbackRestore(restored) {
-		h.sessionManager.SetOffline(restored.PlayerID)
-	}
+	h.rollbackRestoredCredential(client, restored, webSessionTicket)
 	if h.metrics != nil {
 		h.metrics.ReconnectFailure("rebind")
 	}
@@ -199,21 +287,49 @@ func (h *Handler) restoreReconnectRoom(
 func (h *Handler) rollbackReconnect(
 	client, previous types.ClientInterface,
 	restored *session.RestoredSession,
-	temporaryID, temporaryName string,
+	temporaryID, temporaryName, webSessionTicket string,
 ) {
-	if err := h.server.RollbackRebindClient(
+	rebindErr := h.server.RollbackRebindClient(
 		temporaryID, temporaryName, restored.PlayerID, restored.RoomCode, client, previous,
-	); err != nil {
-		log.Printf("重连身份回滚失败: %v", err)
+	)
+	h.rollbackRestoredCredential(client, restored, webSessionTicket)
+	if rebindErr != nil {
+		log.Printf("重连身份回滚失败: %v", rebindErr)
 		h.sessionManager.SetOffline(restored.PlayerID)
 		client.Close()
 		return
 	}
-	if !h.sessionManager.RollbackRestore(restored) {
-		log.Printf("重连凭据回滚失败: player=%s", restored.PlayerID)
-		h.sessionManager.SetOffline(restored.PlayerID)
-	}
 	client.Close()
+}
+
+func (h *Handler) rollbackRestoredCredential(
+	client types.ClientInterface,
+	restored *session.RestoredSession,
+	webSessionTicket string,
+) {
+	if webSessionTicket != "" {
+		invalidateWebSessionTicket(client, webSessionTicket)
+		return
+	}
+	h.rollbackRestoredSession(restored)
+}
+
+func (h *Handler) rollbackRestoredSession(restored *session.RestoredSession) bool {
+	if h.sessionManager.RollbackRestore(restored) {
+		return true
+	}
+	log.Printf("重连凭据回滚失败: player=%s", restored.PlayerID)
+	h.sessionManager.SetOffline(restored.PlayerID)
+	return false
+}
+
+func invalidateWebSessionTicket(client types.ClientInterface, ticket string) {
+	if ticket == "" {
+		return
+	}
+	if webClient, ok := client.(types.WebSessionClient); ok {
+		webClient.InvalidateWebSessionTicket(ticket)
+	}
 }
 
 func (h *Handler) closeSkippedReconnect(
@@ -224,6 +340,7 @@ func (h *Handler) closeSkippedReconnect(
 	log.Printf("玩家 %s 的重连快照因身份已变化而跳过", playerID)
 	if previous != nil && previous != client {
 		previous.Close()
+		types.RetireBrowserSessionClient(h.server, playerID, previous)
 		if h.matcher != nil {
 			h.matcher.PlayerDisconnected(previous)
 		}

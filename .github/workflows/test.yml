@@ -307,8 +307,11 @@ jobs:
       GAME_SHUTDOWN_TIMEOUT: "1"
       GAME_SHUTDOWN_CHECK_INTERVAL: "1"
       SERVER_MIN_CLIENT_VERSION: ""
-      SECURITY_ALLOWED_ORIGINS: http://127.0.0.1:1782
-      E2E_BASE_URL: http://127.0.0.1:1782
+      SECURITY_ALLOWED_ORIGINS: https://127.0.0.1:1783
+      SECURITY_TRUSTED_PROXY_CIDRS: 172.16.0.0/12
+      E2E_BASE_URL: https://127.0.0.1:1783
+      E2E_TLS_PROXY_TARGET: http://127.0.0.1:1782
+      E2E_TLS_PROXY_PORT: "1783"
       E2E_EXPECTED_VERSION: ci
       E2E_COMPOSE_PROJECT_NAME: fight-the-landlord-production-e2e
       E2E_COMPOSE_FILE: ${{ github.workspace }}/docker-compose.yml

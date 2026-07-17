@@ -4,20 +4,16 @@ export type ConnectionStatus = 'idle' | 'connecting' | 'fresh-connected' | 'reco
 
 export interface StoredIdentity {
   id: string;
-  token: string;
-}
-
-export interface ProvisionalIdentity extends StoredIdentity {
   name: string;
 }
+
+export type ProvisionalIdentity = StoredIdentity;
 
 export interface ConnectionSlice extends ServerClockState {
   connected: boolean;
   connectionStatus: ConnectionStatus;
   playerId: string;
   playerName: string;
-  reconnectToken: string;
-  reconnectCandidate: StoredIdentity | null;
   provisionalIdentity: ProvisionalIdentity | null;
   reconnectNotice: string;
   latency: number;
@@ -30,8 +26,6 @@ export const initialConnectionSlice: ConnectionSlice = {
   connectionStatus: 'idle',
   playerId: '',
   playerName: '',
-  reconnectToken: '',
-  reconnectCandidate: null,
   provisionalIdentity: null,
   reconnectNotice: '',
   latency: 0,

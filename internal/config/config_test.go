@@ -202,6 +202,8 @@ func TestConfigValidateRejectsUnsafeRuntimeValues(t *testing.T) {
 		{name: "relative metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "metrics" }, field: "observability.metrics_path"},
 		{name: "unclean metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/ops/../metrics" }, field: "observability.metrics_path"},
 		{name: "reserved metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/readyz" }, field: "observability.metrics_path"},
+		{name: "session commit metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/session/commit" }, field: "observability.metrics_path"},
+		{name: "session refresh metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/session/refresh" }, field: "observability.metrics_path"},
 		{name: "invalid log format", mutate: func(cfg *Config) { cfg.Observability.LogFormat = "yaml" }, field: "observability.log_format"},
 	}
 

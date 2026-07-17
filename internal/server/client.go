@@ -61,16 +61,27 @@ type Client struct {
 	RoomID string // 当前所在房间 ID
 	IP     string // 客户端 IP 地址
 
-	server        *Server
-	conn          *websocket.Conn
-	send          chan []byte
-	done          chan struct{}
-	lease         *connectionLease
-	clientVersion string
-	clientKind    string
-	capabilities  []string
+	server                        *Server
+	conn                          *websocket.Conn
+	send                          chan []byte
+	done                          chan struct{}
+	lease                         *connectionLease
+	clientVersion                 string
+	clientKind                    string
+	capabilities                  []string
+	browserTransport              bool
+	browserReconnectToken         string
+	browserTicketOwnerToken       string
+	provisionalWebSessionTicket   string
+	trackedWebSessionTickets      map[string]struct{}
+	webSessionClosed              bool
+	authorizedWebSessionToken     string
+	lastAuthorizedWebSessionToken string
+	webSessionTransition          bool
 
 	mu            sync.RWMutex
+	webSessionMu  sync.Mutex
+	webCommandMu  sync.RWMutex
 	lifecycleMu   sync.RWMutex
 	lifecycleOnce sync.Once
 	closeOnce     sync.Once
@@ -183,6 +194,18 @@ func (c *Client) handleIncomingFrame(frameType int, frame []byte) bool {
 		_ = c.SendMessage(response)
 		return true
 	}
+	releaseAuthority, authorized := c.beginBrowserCommandAuthority(msg.Type)
+	if !authorized {
+		_ = c.SendMessage(codec.NewCorrelatedCommandErrorMessage(
+			protocol.ErrCodeReconnectInvalid,
+			"Web 会话尚未确认或已撤销",
+			requestID,
+			msg.Type,
+		))
+		c.Close()
+		return false
+	}
+	defer releaseAuthority()
 	playerID := c.GetID()
 	cache := c.server.activeCommandCache()
 	lookup, err := cache.begin(playerID, requestID, commandFingerprint(msg))
@@ -670,9 +693,11 @@ func (c *Client) handleDisconnect() {
 func (c *Client) Close() {
 	c.initializeLifecycle()
 	c.closeOnce.Do(func() {
+		c.closed.Store(true)
+		c.RevokeWebSessionAuthorization()
+		c.invalidateAllWebSessionTickets()
 		c.lifecycleMu.Lock()
 		defer c.lifecycleMu.Unlock()
-		c.closed.Store(true)
 		close(c.done)
 	})
 }
@@ -690,6 +715,10 @@ func (c *Client) initializeLifecycle() {
 
 func (c *Client) isClosed() bool {
 	return c.closed.Load()
+}
+
+func (c *Client) IsClosed() bool {
+	return c == nil || c.closed.Load()
 }
 
 // SetRoom 设置客户端所在房间
@@ -779,3 +808,283 @@ func (c *Client) rollbackReboundIdentity(expectedPlayerID, temporaryID, temporar
 }
 
 func (c *Client) IsBot() bool { return false }
+
+func (c *Client) IsBrowserTransport() bool {
+	return c != nil && c.browserTransport
+}
+
+func (c *Client) BrowserReconnectToken() string {
+	if c == nil || !c.browserTransport {
+		return ""
+	}
+	return c.browserReconnectToken
+}
+
+func (c *Client) IssueWebSessionTicket(
+	token, predecessorToken string,
+	rollback, orphan func() bool,
+) (string, error) {
+	if c == nil || !c.browserTransport || c.server == nil {
+		return "", errWebSessionTicketEntropy
+	}
+	return c.server.activeWebSessionTickets().Issue(
+		token,
+		predecessorToken,
+		c.browserTicketOwnerToken,
+		func() bool { return c.webSessionTicketOwnerValid() },
+		func() bool { return c.ConfirmWebSession(token) },
+		func() bool { return c.abortPendingWebSession(rollback) },
+		func() bool { return c.abortPendingWebSession(orphan) },
+	)
+}
+
+func (c *Client) ConfirmWebSession(token string) bool {
+	if c == nil || token == "" || c.IsClosed() || c.server == nil || c.server.sessionManager == nil {
+		return false
+	}
+	playerID := c.GetID()
+	if c.server.GetClientByID(playerID) != c || !c.server.sessionManager.CanReconnectToken(token) {
+		return false
+	}
+	c.webSessionMu.Lock()
+	if c.webSessionTransition {
+		c.webSessionMu.Unlock()
+		return false
+	}
+	defer c.webSessionMu.Unlock()
+	if c.webSessionClosed || c.closed.Load() {
+		return false
+	}
+	c.authorizedWebSessionToken = token
+	return true
+}
+
+func (c *Client) RevokeWebSessionAuthorization() {
+	if c == nil {
+		return
+	}
+	c.webSessionMu.Lock()
+	if c.authorizedWebSessionToken != "" {
+		c.lastAuthorizedWebSessionToken = c.authorizedWebSessionToken
+	}
+	c.authorizedWebSessionToken = ""
+	c.webSessionMu.Unlock()
+}
+
+func (c *Client) browserSessionCredentialSnapshot() string {
+	if c == nil {
+		return ""
+	}
+	c.webSessionMu.Lock()
+	defer c.webSessionMu.Unlock()
+	if c.authorizedWebSessionToken != "" {
+		return c.authorizedWebSessionToken
+	}
+	return c.lastAuthorizedWebSessionToken
+}
+
+func (c *Client) beginWebSessionTransition(expectedToken string) bool {
+	if c == nil || expectedToken == "" {
+		return false
+	}
+	c.webSessionMu.Lock()
+	defer c.webSessionMu.Unlock()
+	if c.webSessionTransition {
+		return false
+	}
+	if c.authorizedWebSessionToken != "" && c.authorizedWebSessionToken != expectedToken {
+		return false
+	}
+	c.webSessionTransition = true
+	return true
+}
+
+func (c *Client) endWebSessionTransition() {
+	if c == nil {
+		return
+	}
+	c.webSessionMu.Lock()
+	c.webSessionTransition = false
+	c.webSessionMu.Unlock()
+}
+
+func (c *Client) webSessionTicketOwnerValid() bool {
+	if c == nil || c.IsClosed() || c.server == nil {
+		return false
+	}
+	return c.server.GetClientByID(c.GetID()) == c
+}
+
+func (c *Client) abortPendingWebSession(callback func() bool) bool {
+	if c.IsClosed() {
+		return callback == nil || callback()
+	}
+	c.webCommandMu.Lock()
+	defer c.webCommandMu.Unlock()
+	if c.IsClosed() {
+		return callback == nil || callback()
+	}
+	c.RevokeWebSessionAuthorization()
+	result := callback == nil || callback()
+	c.Close()
+	return result
+}
+
+func (c *Client) beginBrowserCommandAuthority(messageType protocol.MessageType) (func(), bool) {
+	if c == nil || !c.browserTransport || messageType == protocol.MsgPing || messageType == protocol.MsgReconnect {
+		return func() {}, true
+	}
+	if c.server == nil {
+		return func() {}, false
+	}
+	c.server.sessionAuthorityMu.RLock()
+	// Never wait for a per-client writer while holding global authority. A
+	// writer means this exact session is crossing an authority transition, so
+	// rejecting the command is both safer and keeps unrelated authority writes
+	// available.
+	if !c.webCommandMu.TryRLock() {
+		c.server.sessionAuthorityMu.RUnlock()
+		return func() {}, false
+	}
+	if c.IsClosed() {
+		c.webCommandMu.RUnlock()
+		c.server.sessionAuthorityMu.RUnlock()
+		return func() {}, false
+	}
+	c.webSessionMu.Lock()
+	token := c.authorizedWebSessionToken
+	transitioning := c.webSessionTransition
+	c.webSessionMu.Unlock()
+	playerID := c.GetID()
+	if transitioning || token == "" || c.server.GetClientByID(playerID) != c || c.server.sessionManager == nil ||
+		!c.server.sessionManager.CanReconnectToken(token) {
+		c.webCommandMu.RUnlock()
+		c.server.sessionAuthorityMu.RUnlock()
+		return func() {}, false
+	}
+	// The global lock only linearizes the token/client validation against
+	// commit, refresh, revoke, reconnect, and ticket expiry. The per-client read
+	// lock remains held for command execution so revoking this exact session can
+	// drain it without a slow command stalling the authority plane globally.
+	c.server.sessionAuthorityMu.RUnlock()
+	return func() {
+		c.webCommandMu.RUnlock()
+	}, true
+}
+
+func (c *Client) revokeAuthorizedWebSessionAndClose() {
+	if c == nil {
+		return
+	}
+	c.webCommandMu.Lock()
+	defer c.webCommandMu.Unlock()
+	// Even an independently closed client must cross this barrier: Close can
+	// race an earlier authorized command and does not itself wait for commands.
+	if c.IsClosed() {
+		return
+	}
+	c.RevokeWebSessionAuthorization()
+	c.Close()
+}
+
+func (c *Client) TrackWebSessionTicket(ticket string) bool {
+	if c == nil || ticket == "" {
+		return false
+	}
+	c.webSessionMu.Lock()
+	defer c.webSessionMu.Unlock()
+	if c.webSessionClosed {
+		return false
+	}
+	if c.trackedWebSessionTickets == nil {
+		c.trackedWebSessionTickets = make(map[string]struct{})
+	}
+	c.trackedWebSessionTickets[ticket] = struct{}{}
+	return true
+}
+
+func (c *Client) InvalidateWebSessionTicket(ticket string) {
+	if c == nil || ticket == "" {
+		return
+	}
+	c.webSessionMu.Lock()
+	delete(c.trackedWebSessionTickets, ticket)
+	if c.provisionalWebSessionTicket == ticket {
+		c.provisionalWebSessionTicket = ""
+	}
+	c.webSessionMu.Unlock()
+	if c.server == nil {
+		return
+	}
+	c.server.activeWebSessionTickets().Invalidate(ticket)
+}
+
+func (c *Client) setProvisionalWebSessionTicket(ticket string) bool {
+	if ticket == "" {
+		return false
+	}
+	c.webSessionMu.Lock()
+	defer c.webSessionMu.Unlock()
+	if c.webSessionClosed {
+		return false
+	}
+	if c.trackedWebSessionTickets == nil {
+		c.trackedWebSessionTickets = make(map[string]struct{})
+	}
+	c.trackedWebSessionTickets[ticket] = struct{}{}
+	c.provisionalWebSessionTicket = ticket
+	return true
+}
+
+func (c *Client) InvalidateProvisionalWebSessionTicket() {
+	if c == nil {
+		return
+	}
+	c.webSessionMu.Lock()
+	ticket := c.provisionalWebSessionTicket
+	c.provisionalWebSessionTicket = ""
+	c.webSessionMu.Unlock()
+	c.InvalidateWebSessionTicket(ticket)
+}
+
+func (c *Client) DiscardProvisionalWebSessionTicket() {
+	if c == nil {
+		return
+	}
+	c.webSessionMu.Lock()
+	ticket := c.provisionalWebSessionTicket
+	c.provisionalWebSessionTicket = ""
+	delete(c.trackedWebSessionTickets, ticket)
+	c.webSessionMu.Unlock()
+	if c.server != nil {
+		c.server.activeWebSessionTickets().Discard(ticket)
+	}
+}
+
+func (c *Client) invalidateAllWebSessionTickets() {
+	if c == nil {
+		return
+	}
+	c.webSessionMu.Lock()
+	c.webSessionClosed = true
+	tickets := make([]string, 0, len(c.trackedWebSessionTickets)+1)
+	for ticket := range c.trackedWebSessionTickets {
+		tickets = append(tickets, ticket)
+	}
+	if c.provisionalWebSessionTicket != "" {
+		if _, tracked := c.trackedWebSessionTickets[c.provisionalWebSessionTicket]; !tracked {
+			tickets = append(tickets, c.provisionalWebSessionTicket)
+		}
+	}
+	c.trackedWebSessionTickets = nil
+	c.provisionalWebSessionTicket = ""
+	c.webSessionMu.Unlock()
+
+	if c.server == nil {
+		return
+	}
+	manager := c.server.activeWebSessionTickets()
+	for _, ticket := range tickets {
+		manager.Invalidate(ticket)
+	}
+}

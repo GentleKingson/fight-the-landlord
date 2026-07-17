@@ -370,6 +370,20 @@ func TestMessageRateLimiter_ClearRateLimit(t *testing.T) {
 	assert.False(t, warning)
 }
 
+func TestChatRateLimiterClearRateLimit(t *testing.T) {
+	t.Parallel()
+	limiter := NewChatRateLimiter(1, 2, time.Minute)
+	clientID := "chat-client"
+	allowed, _ := limiter.AllowChat(clientID)
+	assert.True(t, allowed)
+	allowed, _ = limiter.AllowChat(clientID)
+	assert.False(t, allowed)
+
+	limiter.ClearRateLimit(clientID)
+	allowed, _ = limiter.AllowChat(clientID)
+	assert.True(t, allowed)
+}
+
 func TestOriginChecker_AllowAll(t *testing.T) {
 	t.Parallel()
 

@@ -15,7 +15,8 @@
     "bench:rules": "vitest bench --run tests/rules.bench.ts",
     "test:e2e": "playwright test",
     "test:e2e:real": "playwright test --config playwright.real.config.ts",
-    "test:e2e:production": "playwright test --config playwright.production.config.ts"
+    "test:e2e:production": "playwright test --config playwright.production.config.ts",
+    "proxy:e2e:tls": "node scripts/https-reverse-proxy.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

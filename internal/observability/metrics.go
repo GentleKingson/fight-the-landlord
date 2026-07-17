@@ -310,7 +310,7 @@ var (
 	commandTypes         = set("reconnect", "ping", "create_room", "join_room", "leave_room", "quick_match", "practice_match", "cancel_match", "ready", "cancel_ready", "bid", "play_cards", "pass", "get_stats", "get_leaderboard", "get_room_list", "get_online_count", "get_maintenance_status", "chat")
 	commandResults       = set("ok", "error", "invalid", "rate_limited", "unavailable", "cache_hit", "conflict")
 	protocolErrorReasons = set("non_binary_frame", "decode", "invalid_command", "invalid_request_id", "handshake")
-	reconnectReasons     = set("decode", "already_bound", "invalid", "expired", "rebind", "delivery", "snapshot_skipped")
+	reconnectReasons     = set("decode", "already_bound", "invalid", "expired", "rebind", "delivery", "snapshot_skipped", "ticket", "superseded", "authority_race")
 	matchReasons         = set("cancelled", "timeout", "disconnected", "connection_replaced", "delivery_failed", "shutdown", "room_removed", "participant_unavailable", "assembly_failed")
 	rollbackStages       = set("validate", "begin", "bind", "join", "commit", "start", "publish", "persist", "cancel")
 	redisOperations      = set("dial", "ping", "get", "set", "del", "hgetall", "hset", "expire", "zadd", "zscore", "zrank", "zrevrank", "zrange", "zrevrange", "pipeline")

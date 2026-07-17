@@ -396,7 +396,7 @@ func validateObservabilityConfig(observability ObservabilityConfig) error {
 		return fmt.Errorf("observability.metrics_path must be a clean absolute HTTP path")
 	}
 	switch metricsPath {
-	case "/", "/ws", "/health", "/livez", "/readyz", "/version", "/session/revoke":
+	case "/", "/ws", "/health", "/livez", "/readyz", "/version", "/session/commit", "/session/refresh", "/session/revoke":
 		return fmt.Errorf("observability.metrics_path conflicts with reserved route %q", metricsPath)
 	}
 	if strings.ContainsAny(metricsPath, "?#") {

@@ -71,6 +71,13 @@ type Server struct {
 	slowClientDisconnects atomic.Int64
 	commandCacheOnce      sync.Once
 	commandCache          *commandCache
+	webSessionTicketsOnce sync.Once
+	webSessionTickets     *webSessionTicketManager
+	sessionAuthorityMu    sync.RWMutex
+	// retiredBrowserClients is guarded by sessionAuthorityMu. A generation is
+	// retained only until its last pre-replacement command crosses webCommandMu.
+	retiredBrowserClients map[string]map[*Client]string
+	browserRevokeDrains   map[string]*browserRevokeDrain
 	readinessCheck        func(context.Context) error
 	shuttingDown          atomic.Bool
 	runtimeCtx            context.Context
@@ -88,6 +95,14 @@ type Server struct {
 	// 维护模式
 	maintenanceMode bool
 	maintenanceMu   sync.RWMutex
+}
+
+type browserRevokeDrain struct {
+	clients      map[*Client]struct{}
+	credentials  map[string]struct{}
+	dependencies map[*browserRevokeDrain]struct{}
+	done         chan struct{}
+	completeOnce sync.Once
 }
 
 // NewServer 创建服务器实例
@@ -172,11 +187,12 @@ func newServerRuntime(
 				metrics.SetConnectionsCurrent(active)
 			}
 		}),
-		commandCache:  newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL),
-		runtimeCtx:    runtimeCtx,
-		runtimeCancel: runtimeCancel,
-		metrics:       metrics,
-		logger:        slog.Default().With("component", "server"),
+		commandCache:      newCommandCache(defaultCommandCacheCapacity, defaultCommandCacheTTL),
+		webSessionTickets: newWebSessionTicketManager(),
+		runtimeCtx:        runtimeCtx,
+		runtimeCancel:     runtimeCancel,
+		metrics:           metrics,
+		logger:            slog.Default().With("component", "server"),
 	}
 	s.readinessCheck = func(ctx context.Context) error { return rdb.Ping(ctx).Err() }
 	return s

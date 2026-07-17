@@ -38,6 +38,8 @@ message ConnectedPayload {
   string player_id = 1;
   string player_name = 2;
   string reconnect_token = 3;
+  string web_session_ticket = 4;
+  bool reconnect_available = 5;
 }
 
 // ReconnectedPayload 重连成功响应
@@ -47,6 +49,7 @@ message ReconnectedPayload {
   string room_code = 3;
   GameStateDTO game_state = 4;
   string reconnect_token = 5;
+  string web_session_ticket = 6;
 }
 
 // PongPayload 心跳响应

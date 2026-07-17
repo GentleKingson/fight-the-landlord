@@ -47,6 +47,8 @@ func (s *Server) httpHandler(assets fs.FS) http.Handler {
 	mux.HandleFunc("/livez", s.handleLivez)
 	mux.HandleFunc("/readyz", s.handleReadyz)
 	mux.HandleFunc("/version", s.handleVersion)
+	mux.HandleFunc("/session/commit", s.handleSessionCommit)
+	mux.HandleFunc("/session/refresh", s.handleSessionRefresh)
 	mux.HandleFunc("/session/revoke", s.handleSessionRevoke)
 	if s.config != nil && s.config.Observability.MetricsPath != "" {
 		metricsHandler := http.NotFoundHandler()
@@ -81,49 +83,240 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-type revokeSessionRequest struct {
-	PlayerID string `json:"player_id"`
-	Token    string `json:"token"`
+type commitWebSessionRequest struct {
+	Ticket string `json:"ticket"`
+}
+
+func (s *Server) handleSessionCommit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !validateWebSessionRequest(w, r, s.originChecker) {
+		return
+	}
+	var payload commitWebSessionRequest
+	if !decodeBoundedJSON(w, r, &payload) || payload.Ticket == "" || len(payload.Ticket) > 128 {
+		http.Error(w, "invalid commit request", http.StatusBadRequest)
+		return
+	}
+	if s.sessionManager == nil || s.activeWebSessionTickets() == nil {
+		http.Error(w, "session service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	s.sessionAuthorityMu.Lock()
+	defer s.sessionAuthorityMu.Unlock()
+	token, ok := s.activeWebSessionTickets().Commit(
+		payload.Ticket,
+		readWebSessionCookie(r),
+		readWebSessionOwnerCookie(r),
+		s.sessionManager.CanReconnectToken,
+	)
+	if !ok {
+		http.Error(w, "invalid session ticket", http.StatusUnauthorized)
+		return
+	}
+	secure := requestUsesHTTPS(r, s.ipResolver)
+	http.SetCookie(w, webSessionCookie(token, secure, time.Now()))
+	http.SetCookie(w, expiredWebSessionOwnerCookie(secure))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleSessionRefresh(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !validateWebSessionRequest(w, r, s.originChecker) {
+		return
+	}
+	var payload map[string]json.RawMessage
+	if !decodeBoundedJSON(w, r, &payload) || payload == nil || len(payload) != 0 {
+		http.Error(w, "invalid refresh request", http.StatusBadRequest)
+		return
+	}
+	if s.sessionManager == nil || s.activeWebSessionTickets() == nil {
+		http.Error(w, "session service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	s.sessionAuthorityMu.Lock()
+	defer s.sessionAuthorityMu.Unlock()
+	token := readWebSessionCookie(r)
+	if token == "" || !s.sessionManager.ObserveWebSessionToken(token) {
+		http.Error(w, "invalid web session", http.StatusUnauthorized)
+		return
+	}
+	s.activeWebSessionTickets().ObserveSuccessor(token)
+	http.SetCookie(w, webSessionCookie(token, requestUsesHTTPS(r, s.ipResolver), time.Now()))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if !validateWebSessionRequest(w, r, s.originChecker) {
+		return
+	}
+
+	var payload map[string]json.RawMessage
+	if !decodeBoundedJSON(w, r, &payload) || payload == nil || len(payload) != 0 {
+		http.Error(w, "invalid revoke request", http.StatusBadRequest)
+		return
+	}
+	secure := requestUsesHTTPS(r, s.ipResolver)
+	http.SetCookie(w, expiredWebSessionCookie(secure))
+	http.SetCookie(w, expiredWebSessionOwnerCookie(secure))
+	if s.sessionManager != nil {
+		token := readWebSessionCookie(r)
+		owner := readWebSessionOwnerCookie(r)
+		if token != "" || owner != "" {
+			drainWork := make(map[*browserRevokeDrain]bool)
+			func() {
+				s.sessionAuthorityMu.Lock()
+				defer s.sessionAuthorityMu.Unlock()
+				browserClientsToClose := make(map[*Client]struct{})
+				credentials := make(map[string]struct{})
+				queueBrowserClient := func(browserClient *Client) {
+					if browserClient == nil {
+						return
+					}
+					if credential := browserClient.browserSessionCredentialSnapshot(); credential != "" {
+						credentials[credential] = struct{}{}
+					}
+					// Deny new commands while authority is still exclusively
+					// serialized. Waiting for an already-running command happens
+					// after releasing the global lock so one slow player cannot
+					// stall every unrelated browser session operation.
+					browserClient.RevokeWebSessionAuthorization()
+					browserClientsToClose[browserClient] = struct{}{}
+				}
+				closePlayer := func(playerID string) {
+					if client := s.GetClientByID(playerID); client != nil {
+						if browserClient, ok := client.(*Client); ok {
+							queueBrowserClient(browserClient)
+						} else {
+							client.Close()
+						}
+					}
+					s.collectRetiredBrowserSessionClients(playerID, browserClientsToClose, credentials)
+				}
+				if token != "" {
+					credentials[token] = struct{}{}
+					if existing := s.browserRevokeDrain(token); existing != nil {
+						drainWork[existing] = false
+					} else {
+						s.collectPendingWebSessionCredentialLineage(token, credentials)
+						playerID, lineage, revoked := s.sessionManager.RevokeSessionByTokenWithLineage(token)
+						for _, credential := range lineage {
+							credentials[credential] = struct{}{}
+						}
+						s.activeWebSessionTickets().InvalidatePendingCredential(token)
+						if revoked {
+							closePlayer(playerID)
+						}
+					}
+				}
+				if owner != "" {
+					credentials[owner] = struct{}{}
+					if existing := s.browserRevokeDrain(owner); existing != nil {
+						drainWork[existing] = false
+					} else {
+						s.activeWebSessionTickets().InvalidatePendingOwner(owner, func(successor string) {
+							credentials[successor] = struct{}{}
+							if existing := s.browserRevokeDrain(successor); existing != nil {
+								drainWork[existing] = false
+								return
+							}
+							playerID, lineage, revoked := s.sessionManager.RevokeSessionByTokenWithLineage(successor)
+							for _, credential := range lineage {
+								credentials[credential] = struct{}{}
+							}
+							if revoked {
+								closePlayer(playerID)
+							}
+						})
+					}
+				}
+				for drain, leader := range s.registerBrowserRevokeDrains(browserClientsToClose, credentials) {
+					if leader || !drainWork[drain] {
+						drainWork[drain] = leader
+					}
+				}
+			}()
+			for drain, leader := range drainWork {
+				if leader {
+					go func() {
+						defer s.completeBrowserRevokeDrain(drain)
+						for browserClient := range drain.clients {
+							browserClient.revokeAuthorizedWebSessionAndClose()
+						}
+						for dependency := range drain.dependencies {
+							<-dependency.done
+						}
+					}()
+				}
+			}
+			for drain := range drainWork {
+				<-drain.done
+			}
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// collectPendingWebSessionCredentialLineage snapshots both sides of an
+// unresolved ticket before revoke invalidation removes its indexes. It lets
+// predecessor and successor retry requests share one in-flight drain.
+func (s *Server) collectPendingWebSessionCredentialLineage(token string, credentials map[string]struct{}) {
+	manager := s.activeWebSessionTickets()
+	if manager == nil || token == "" {
+		return
+	}
+	manager.mu.Lock()
+	tickets := make(map[string]struct{})
+	for ticket := range manager.predecessorTickets[token] {
+		tickets[ticket] = struct{}{}
+	}
+	for ticket := range manager.successorTickets[token] {
+		tickets[ticket] = struct{}{}
+	}
+	for ticket := range tickets {
+		entry, ok := manager.entries[ticket]
+		if !ok {
+			continue
+		}
+		if entry.predecessorToken != "" {
+			credentials[entry.predecessorToken] = struct{}{}
+		}
+		if entry.token != "" {
+			credentials[entry.token] = struct{}{}
+		}
+	}
+	manager.mu.Unlock()
+}
+
+func validateWebSessionRequest(w http.ResponseWriter, r *http.Request, checker *OriginChecker) bool {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+		return false
 	}
-	if s.originChecker == nil || !s.originChecker.Check(r) {
+	if !browserOriginAllowed(checker, r) {
 		http.Error(w, "origin not allowed", http.StatusForbidden)
-		return
+		return false
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
-		return
+		return false
 	}
-	if s.sessionManager == nil {
-		http.Error(w, "session service unavailable", http.StatusServiceUnavailable)
-		return
-	}
+	return true
+}
 
+func decodeBoundedJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1024)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	var payload revokeSessionRequest
-	if err := decoder.Decode(&payload); err != nil || payload.PlayerID == "" || payload.Token == "" || len(payload.Token) > 128 {
-		http.Error(w, "invalid revoke request", http.StatusBadRequest)
-		return
+	if err := decoder.Decode(target); err != nil {
+		return false
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		http.Error(w, "invalid revoke request", http.StatusBadRequest)
-		return
+		return false
 	}
-	if !s.sessionManager.RevokeSession(payload.Token, payload.PlayerID) {
-		http.Error(w, "invalid session", http.StatusUnauthorized)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	return true
 }
 
 func newSPAHandler(assets fs.FS, clientVersion string) (http.Handler, error) {

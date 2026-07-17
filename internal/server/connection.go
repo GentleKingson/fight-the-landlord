@@ -44,9 +44,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	leaseTransferred := false
+	browserTicketOwnerToken := ""
 	defer func() {
 		if !leaseTransferred {
 			lease.release()
+			if browserTicketOwnerToken != "" {
+				s.activeWebSessionTickets().ReleaseOwnerNonce(browserTicketOwnerToken)
+			}
 		}
 	}()
 
@@ -66,28 +70,72 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 速率限制检查
+	// Reject excess attempts before allocating a nonce or timer. Otherwise
+	// malformed pre-upgrade traffic could exhaust the global nonce registry.
 	if !s.rateLimiter.Allow(clientIP) {
 		s.recordWebSocketRejection("rate_limit", clientIP)
 		log.Printf("🚫 IP %s 请求过于频繁", clientIP)
 		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 		return
 	}
+	browserTransport := isBrowserTransportRequest(r)
+	browserReconnectToken := ""
+	upgradeHeaders := http.Header(nil)
+	if browserTransport {
+		browserReconnectToken = readWebSessionCookie(r)
+		observed := false
+		known := false
+		if browserReconnectToken != "" && s.sessionManager != nil {
+			s.sessionAuthorityMu.Lock()
+			observed = s.sessionManager.ObserveWebSessionToken(browserReconnectToken)
+			if observed {
+				s.activeWebSessionTickets().ObserveSuccessor(browserReconnectToken)
+			}
+			known = s.sessionManager.IsKnownWebSessionToken(browserReconnectToken)
+			s.sessionAuthorityMu.Unlock()
+		}
+		if browserReconnectToken != "" && !observed && known {
+			s.recordWebSocketRejection("session_busy", clientIP)
+			http.Error(w, "Web session is unavailable", http.StatusConflict)
+			return
+		}
+		if !observed {
+			// Unknown or absent reconnect cookies do not become the binding for a
+			// new credential. A separate nonce is established by the 101 response.
+			browserReconnectToken = ""
+			var ownerErr error
+			browserTicketOwnerToken, ownerErr = s.activeWebSessionTickets().AcquireOwnerNonce()
+			if ownerErr != nil {
+				s.recordWebSocketRejection("session_owner", clientIP)
+				http.Error(w, "Session service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			upgradeHeaders = make(http.Header)
+			upgradeHeaders.Add("Set-Cookie", webSessionOwnerCookie(
+				browserTicketOwnerToken,
+				requestUsesHTTPS(r, s.ipResolver),
+				time.Now(),
+			).String())
+		}
+	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := upgrader.Upgrade(w, r, upgradeHeaders)
 	if err != nil {
 		s.recordWebSocketRejection("upgrade", clientIP)
 		log.Printf("WebSocket 升级失败: %v", err)
 		return
 	}
 	lease.activate()
-	negotiated, err := s.negotiateWebSocket(conn)
+	negotiated, err := s.negotiateWebSocket(conn, browserTransport)
 	if err != nil {
 		s.recordWebSocketRejection("handshake", clientIP)
 		log.Printf("协议握手失败 (IP: %s): %v", clientIP, err)
 		_ = conn.Close()
 		return
 	}
+	negotiated.browserTransport = browserTransport
+	negotiated.browserReconnectToken = browserReconnectToken
+	negotiated.browserTicketOwnerToken = browserTicketOwnerToken
 
 	leaseTransferred = s.activateWebSocketClient(conn, lease, negotiated, clientIP)
 }
@@ -98,11 +146,29 @@ func (s *Server) activateWebSocketClient(
 	negotiated negotiatedClient,
 	clientIP string,
 ) bool {
+	if negotiated.browserTransport {
+		s.sessionAuthorityMu.Lock()
+		defer s.sessionAuthorityMu.Unlock()
+		if negotiated.browserReconnectToken != "" && s.sessionManager != nil {
+			observed := s.sessionManager.ObserveWebSessionToken(negotiated.browserReconnectToken)
+			if observed {
+				s.activeWebSessionTickets().ObserveSuccessor(negotiated.browserReconnectToken)
+			}
+			if !observed {
+				s.recordWebSocketRejection("session_race", clientIP)
+				_ = conn.Close()
+				return false
+			}
+		}
+	}
 	client := newClientWithLease(s, conn, lease)
 	client.IP = clientIP
 	client.clientVersion = negotiated.version
 	client.clientKind = negotiated.kind
 	client.capabilities = append([]string(nil), negotiated.capabilities...)
+	client.browserTransport = negotiated.browserTransport
+	client.browserReconnectToken = negotiated.browserReconnectToken
+	client.browserTicketOwnerToken = negotiated.browserTicketOwnerToken
 	s.registerClient(client)
 
 	playerID := client.GetID()
@@ -116,15 +182,41 @@ func (s *Server) activateWebSocketClient(
 		return false
 	}
 
-	connected := codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
-		PlayerID:       playerID,
-		PlayerName:     playerName,
-		ReconnectToken: playerSession.ReconnectToken,
-	})
+	connectedPayload := protocol.ConnectedPayload{PlayerID: playerID, PlayerName: playerName}
+	if client.IsBrowserTransport() {
+		ticket, ticketErr := client.IssueWebSessionTicket(
+			playerSession.ReconnectToken,
+			client.BrowserReconnectToken(),
+			nil,
+			nil,
+		)
+		if ticketErr != nil {
+			s.recordWebSocketRejection("session_ticket", clientIP)
+			log.Printf("创建 Web 会话确认票据失败: %v", ticketErr)
+			s.unregisterClient(client)
+			s.sessionManager.DeleteSession(playerID)
+			_ = conn.Close()
+			return false
+		}
+		if !client.setProvisionalWebSessionTicket(ticket) {
+			client.InvalidateWebSessionTicket(ticket)
+			s.recordWebSocketRejection("session_ticket", clientIP)
+			s.unregisterClient(client)
+			s.sessionManager.DeleteSession(playerID)
+			_ = conn.Close()
+			return false
+		}
+		connectedPayload.WebSessionTicket = ticket
+		connectedPayload.ReconnectAvailable = s.sessionManager.CanReconnectToken(client.BrowserReconnectToken())
+	} else {
+		connectedPayload.ReconnectToken = playerSession.ReconnectToken
+	}
+	connected := codec.MustNewMessage(protocol.MsgConnected, connectedPayload)
 	if err := client.SendMessage(connected); err != nil {
 		s.recordWebSocketRejection("delivery", clientIP)
 		log.Printf("发送连接确认失败: %v", err)
 		s.unregisterClient(client)
+		client.InvalidateProvisionalWebSessionTicket()
 		s.sessionManager.DeleteSession(playerID)
 		_ = conn.Close()
 		return false
@@ -134,6 +226,7 @@ func (s *Server) activateWebSocketClient(
 		s.recordWebSocketRejection("shutdown", clientIP)
 		client.Close()
 		s.unregisterClient(client)
+		client.InvalidateProvisionalWebSessionTicket()
 		s.sessionManager.DeleteSession(playerID)
 		_ = conn.Close()
 		return false
@@ -161,6 +254,202 @@ func (s *Server) recordWebSocketRejection(reason, clientIP string) {
 	}
 	if s.logger != nil {
 		s.logger.Warn("websocket rejected", "event", "websocket_rejected", "error_code", reason, "client_ip", clientIP)
+	}
+}
+
+func (s *Server) LockSessionAuthority() {
+	if s != nil {
+		s.sessionAuthorityMu.Lock()
+	}
+}
+
+// AcquireBrowserReconnectAuthority drains the exact active browser generation
+// before reconnect can rotate or publish its identity. It never waits for a
+// client command while holding sessionAuthorityMu.
+func (s *Server) AcquireBrowserReconnectAuthority(
+	reconnectToken string,
+	reconnectingClient types.ClientInterface,
+) (func(), bool) {
+	if s == nil {
+		return func() {}, false
+	}
+	s.sessionAuthorityMu.Lock()
+	if reconnectToken == "" || s.sessionManager == nil {
+		return s.sessionAuthorityMu.Unlock, true
+	}
+	playerSession := s.sessionManager.GetSessionByToken(reconnectToken)
+	if playerSession == nil {
+		return s.sessionAuthorityMu.Unlock, true
+	}
+	playerID := playerSession.PlayerID
+	current, ok := s.GetClientByID(playerID).(*Client)
+	if !ok || !current.IsBrowserTransport() {
+		return s.sessionAuthorityMu.Unlock, true
+	}
+	// A reconnect command on the connection that already owns this identity is
+	// not a migration. Holding its command barrier through ticket rollback would
+	// make the ticket callback re-enter the same write lock and deadlock.
+	if reconnecting, concrete := reconnectingClient.(*Client); concrete && current == reconnecting {
+		s.sessionAuthorityMu.Unlock()
+		return func() {}, false
+	}
+
+	if !current.beginWebSessionTransition(reconnectToken) {
+		s.sessionAuthorityMu.Unlock()
+		return func() {}, false
+	}
+	s.sessionAuthorityMu.Unlock()
+	current.webCommandMu.Lock()
+	s.sessionAuthorityMu.Lock()
+	latest := s.sessionManager.GetSessionByToken(reconnectToken)
+	if latest == nil || latest.PlayerID != playerID || s.GetClientByID(playerID) != current {
+		current.endWebSessionTransition()
+		s.sessionAuthorityMu.Unlock()
+		current.webCommandMu.Unlock()
+		return func() {}, false
+	}
+	return func() {
+		current.endWebSessionTransition()
+		s.sessionAuthorityMu.Unlock()
+		current.webCommandMu.Unlock()
+	}, true
+}
+
+// RetireBrowserSessionClient is called while sessionAuthorityMu is write-held
+// by reconnect publication. It gates the displaced connection immediately,
+// then drains it asynchronously without retaining global authority.
+func (s *Server) RetireBrowserSessionClient(playerID string, client types.ClientInterface) {
+	retired, ok := client.(*Client)
+	if s == nil || playerID == "" || !ok || !retired.IsBrowserTransport() {
+		return
+	}
+	retired.RevokeWebSessionAuthorization()
+	if s.retiredBrowserClients == nil {
+		s.retiredBrowserClients = make(map[string]map[*Client]string)
+	}
+	lineage := s.retiredBrowserClients[playerID]
+	if lineage == nil {
+		lineage = make(map[*Client]string)
+		s.retiredBrowserClients[playerID] = lineage
+	}
+	if _, exists := lineage[retired]; exists {
+		return
+	}
+	lineage[retired] = retired.browserSessionCredentialSnapshot()
+	go s.drainRetiredBrowserSessionClient(playerID, retired)
+}
+
+func (s *Server) drainRetiredBrowserSessionClient(playerID string, retired *Client) {
+	retired.webCommandMu.Lock()
+	retired.webCommandMu.Unlock()
+
+	s.sessionAuthorityMu.Lock()
+	defer s.sessionAuthorityMu.Unlock()
+	lineage := s.retiredBrowserClients[playerID]
+	delete(lineage, retired)
+	if len(lineage) == 0 {
+		delete(s.retiredBrowserClients, playerID)
+	}
+}
+
+// collectRetiredBrowserSessionClients is called under sessionAuthorityMu and
+// snapshots exact generations for a revoke response barrier. Removal may race
+// only after a generation has already drained, so an omitted entry is safe.
+func (s *Server) collectRetiredBrowserSessionClients(
+	playerID string,
+	clients map[*Client]struct{},
+	credentials map[string]struct{},
+) {
+	for retired, credential := range s.retiredBrowserClients[playerID] {
+		retired.RevokeWebSessionAuthorization()
+		clients[retired] = struct{}{}
+		if credential != "" {
+			credentials[credential] = struct{}{}
+		}
+	}
+}
+
+// registerBrowserRevokeDrains publishes an immutable response barrier under
+// sessionAuthorityMu and returns every pre-existing barrier that intersects
+// the credential set. A new barrier contains only clients not already covered
+// by those barriers, so one cross-lineage request cannot discard newly revoked
+// generations when one of its credentials is already draining.
+func (s *Server) registerBrowserRevokeDrains(
+	clients map[*Client]struct{},
+	credentials map[string]struct{},
+) map[*browserRevokeDrain]bool {
+	work := make(map[*browserRevokeDrain]bool)
+	coveredClients := make(map[*Client]struct{})
+	for credential := range credentials {
+		if drain := s.browserRevokeDrains[credential]; drain != nil {
+			work[drain] = false
+			for client := range drain.clients {
+				coveredClients[client] = struct{}{}
+			}
+		}
+	}
+
+	uncoveredClients := make(map[*Client]struct{})
+	for client := range clients {
+		if _, covered := coveredClients[client]; !covered {
+			uncoveredClients[client] = struct{}{}
+		}
+	}
+	unmappedCredentials := make(map[string]struct{})
+	for credential := range credentials {
+		if credential != "" && s.browserRevokeDrains[credential] == nil {
+			unmappedCredentials[credential] = struct{}{}
+		}
+	}
+	if len(uncoveredClients) == 0 && (len(work) == 0 || len(unmappedCredentials) == 0) {
+		return work
+	}
+
+	drain := &browserRevokeDrain{
+		clients:      uncoveredClients,
+		credentials:  unmappedCredentials,
+		dependencies: make(map[*browserRevokeDrain]struct{}, len(work)),
+		done:         make(chan struct{}),
+	}
+	for dependency := range work {
+		drain.dependencies[dependency] = struct{}{}
+	}
+	if s.browserRevokeDrains == nil {
+		s.browserRevokeDrains = make(map[string]*browserRevokeDrain)
+	}
+	for credential := range unmappedCredentials {
+		s.browserRevokeDrains[credential] = drain
+	}
+	work[drain] = true
+	return work
+}
+
+func (s *Server) browserRevokeDrain(credential string) *browserRevokeDrain {
+	if credential == "" {
+		return nil
+	}
+	return s.browserRevokeDrains[credential]
+}
+
+func (s *Server) completeBrowserRevokeDrain(drain *browserRevokeDrain) {
+	if s == nil || drain == nil {
+		return
+	}
+	drain.completeOnce.Do(func() {
+		s.sessionAuthorityMu.Lock()
+		for credential := range drain.credentials {
+			if s.browserRevokeDrains[credential] == drain {
+				delete(s.browserRevokeDrains, credential)
+			}
+		}
+		close(drain.done)
+		s.sessionAuthorityMu.Unlock()
+	})
+}
+
+func (s *Server) UnlockSessionAuthority() {
+	if s != nil {
+		s.sessionAuthorityMu.Unlock()
 	}
 }
 

@@ -20,6 +20,7 @@ func TestJSONLoggerIsMachineParseableAndRedactsSecrets(t *testing.T) {
 		slog.String("event", "command_complete"),
 		slog.String("request_id", "request-1"),
 		slog.String("reconnect_token", "token-sentinel"),
+		slog.String("web_session_ticket", "ticket-sentinel"),
 		slog.String("redis.password", "password-sentinel"),
 		slog.String("cookie", "cookie-sentinel"),
 	)
@@ -30,9 +31,11 @@ func TestJSONLoggerIsMachineParseableAndRedactsSecrets(t *testing.T) {
 	assert.Equal(t, "command_complete", record["event"])
 	assert.Equal(t, "request-1", record["request_id"])
 	assert.Equal(t, redactedValue, record["reconnect_token"])
+	assert.Equal(t, redactedValue, record["web_session_ticket"])
 	assert.Equal(t, redactedValue, record["redis.password"])
 	assert.Equal(t, redactedValue, record["cookie"])
 	assert.NotContains(t, output.String(), "token-sentinel")
+	assert.NotContains(t, output.String(), "ticket-sentinel")
 	assert.NotContains(t, output.String(), "password-sentinel")
 	assert.NotContains(t, output.String(), "cookie-sentinel")
 }

@@ -114,18 +114,18 @@ function metaContent(html: string, name: string): string {
 
 function rawWebSocketStatus(origin: string): Promise<number> {
   const target = new URL('/ws', baseURL);
-  const requester = target.protocol === 'https:' ? https.request : http.request;
+  const headers = {
+    Connection: 'Upgrade',
+    Upgrade: 'websocket',
+    Origin: origin,
+    'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
+    'Sec-WebSocket-Version': '13'
+  };
 
   return new Promise((resolve, reject) => {
-    const request = requester(target, {
-      headers: {
-        Connection: 'Upgrade',
-        Upgrade: 'websocket',
-        Origin: origin,
-        'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
-        'Sec-WebSocket-Version': '13'
-      }
-    });
+    const request = target.protocol === 'https:'
+      ? https.request(target, { headers, rejectUnauthorized: false })
+      : http.request(target, { headers });
     const timer = setTimeout(() => {
       request.destroy(new Error('timed out waiting for WebSocket upgrade response'));
     }, 5_000);

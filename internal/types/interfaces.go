@@ -27,6 +27,68 @@ type ClientInterface interface {
 	IsBot() bool
 }
 
+// WebSessionClient is an optional capability implemented only by browser
+// WebSocket transports. It keeps HttpOnly-cookie credentials out of the
+// general client interface and leaves TUI/bot token payloads unchanged.
+type WebSessionClient interface {
+	IsBrowserTransport() bool
+	BrowserReconnectToken() string
+	IssueWebSessionTicket(token, predecessorToken string, rollback, orphan func() bool) (string, error)
+	TrackWebSessionTicket(ticket string) bool
+	InvalidateWebSessionTicket(ticket string)
+	InvalidateProvisionalWebSessionTicket()
+	DiscardProvisionalWebSessionTicket()
+}
+
+// SessionAuthorityLocker serializes browser restore publication and HTTP
+// credential mutation. Production Server implements it; lightweight immutable
+// test and bot servers may omit it.
+type SessionAuthorityLocker interface {
+	LockSessionAuthority()
+	UnlockSessionAuthority()
+}
+
+// BrowserSessionClientRetirer is an optional production capability for keeping
+// displaced browser connections attached to their player lineage until every
+// command authorized before replacement has drained.
+type BrowserSessionClientRetirer interface {
+	RetireBrowserSessionClient(playerID string, client ClientInterface)
+}
+
+// BrowserReconnectAuthorityAcquirer drains the exact browser connection that
+// currently owns a credential without holding global session authority while
+// it waits. A successful return holds the reconnect publication boundary until
+// unlock is called.
+type BrowserReconnectAuthorityAcquirer interface {
+	AcquireBrowserReconnectAuthority(reconnectToken string, reconnectingClient ClientInterface) (unlock func(), ok bool)
+}
+
+func LockSessionAuthority(server ServerInterface) func() {
+	locker, ok := server.(SessionAuthorityLocker)
+	if !ok {
+		return func() {}
+	}
+	locker.LockSessionAuthority()
+	return locker.UnlockSessionAuthority
+}
+
+func RetireBrowserSessionClient(server ServerInterface, playerID string, client ClientInterface) {
+	if retirer, ok := server.(BrowserSessionClientRetirer); ok {
+		retirer.RetireBrowserSessionClient(playerID, client)
+	}
+}
+
+func AcquireBrowserReconnectAuthority(
+	server ServerInterface,
+	reconnectToken string,
+	reconnectingClient ClientInterface,
+) (func(), bool) {
+	if acquirer, ok := server.(BrowserReconnectAuthorityAcquirer); ok {
+		return acquirer.AcquireBrowserReconnectAuthority(reconnectToken, reconnectingClient)
+	}
+	return LockSessionAuthority(server), true
+}
+
 // RoomConditionalSender is an optional capability for atomically ordering a
 // room-scoped delivery with room identity changes on a physical connection.
 // A false result with a nil error means the expected room no longer matched.

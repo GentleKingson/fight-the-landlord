@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -89,6 +90,279 @@ func TestSessionManagerRevokeRejectsStaleRotatedToken(t *testing.T) {
 	assert.True(t, sm.RevokeSession(restored.ReconnectToken, "p1"))
 	assert.Nil(t, sm.GetSession("p1"))
 	assert.False(t, sm.CanReconnect(restored.ReconnectToken, "p1"))
+}
+
+func TestSessionManagerCookieTokenLookupRestoresAndRevokesWithoutPlayerID(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	original := sm.MustCreateSession("p1", "Player1")
+	originalToken := original.ReconnectToken
+	sm.SetOffline(original.PlayerID)
+
+	restored, err := sm.RestoreSessionByToken(originalToken, "temporary")
+	require.NoError(t, err)
+	assert.Equal(t, original.PlayerID, restored.PlayerID)
+	assert.NotEqual(t, originalToken, restored.ReconnectToken)
+	_, err = sm.RestoreSessionByToken(originalToken, "another-temporary")
+	assert.ErrorIs(t, err, ErrInvalidReconnect)
+	assert.True(t, sm.CanReconnectToken(restored.ReconnectToken))
+	assert.True(t, sm.RevokeSessionByToken(restored.ReconnectToken))
+	assert.False(t, sm.CanReconnectToken(restored.ReconnectToken))
+}
+
+func TestSessionManagerCookieTokenLookupRejectsExpiredCredential(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 17, 12, 0, 0, 0, time.UTC)
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	sm.now = func() time.Time { return now }
+	original := sm.MustCreateSession("p1", "Player1")
+	sm.SetOffline(original.PlayerID)
+	now = now.Add(reconnectTimeout)
+
+	assert.False(t, sm.CanReconnectToken(original.ReconnectToken))
+	_, err := sm.RestoreSessionByToken(original.ReconnectToken, "temporary")
+	assert.ErrorIs(t, err, ErrReconnectExpired)
+}
+
+func TestSessionManagerCookieTokenHasOnlyOneConcurrentConsumer(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	original := sm.MustCreateSession("p1", "Player1")
+	originalToken := original.ReconnectToken
+	sm.SetOffline(original.PlayerID)
+	sm.MustCreateSession("temporary-1", "Temporary 1")
+	sm.MustCreateSession("temporary-2", "Temporary 2")
+
+	results := make(chan error, 2)
+	for _, temporaryID := range []string{"temporary-1", "temporary-2"} {
+		go func() {
+			_, err := sm.RestoreSessionByToken(originalToken, temporaryID)
+			results <- err
+		}()
+	}
+
+	successes := 0
+	invalid := 0
+	for range 2 {
+		if err := <-results; err == nil {
+			successes++
+		} else if errors.Is(err, ErrInvalidReconnect) {
+			invalid++
+		}
+	}
+	assert.Equal(t, 1, successes)
+	assert.Equal(t, 1, invalid)
+}
+
+func TestSessionManagerBrowserCommitObservationRetiresPredecessor(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	original := sm.MustCreateSession("player", "Player")
+	predecessor := original.ReconnectToken
+	sm.SetOffline(original.PlayerID)
+	sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSessionByToken(predecessor, "temporary")
+	require.NoError(t, err)
+
+	assert.False(t, sm.CanReconnectToken(predecessor), "an active pending predecessor is not a second consumer")
+	assert.True(t, sm.ObserveWebSessionToken(restored.ReconnectToken))
+	assert.False(t, sm.CanReconnectToken(predecessor))
+	assert.True(t, sm.CanReconnectToken(restored.ReconnectToken))
+	_, err = sm.RestoreSessionByToken(predecessor, "other-temporary")
+	assert.ErrorIs(t, err, ErrInvalidReconnect)
+}
+
+func TestSessionManagerDelayedPredecessorRevokeKillsObservedSuccessor(t *testing.T) {
+	t.Parallel()
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	original := sm.MustCreateSession("player", "Player")
+	predecessor := original.ReconnectToken
+	sm.SetOffline(original.PlayerID)
+	sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSessionByToken(predecessor, "temporary")
+	require.NoError(t, err)
+	require.True(t, sm.ObserveWebSessionToken(restored.ReconnectToken))
+
+	playerID, revoked := sm.RevokeSessionByTokenWithPlayer(predecessor)
+	assert.True(t, revoked)
+	assert.Equal(t, original.PlayerID, playerID)
+	assert.Nil(t, sm.GetSession(original.PlayerID))
+	assert.False(t, sm.CanReconnectToken(restored.ReconnectToken))
+}
+
+func TestSessionManagerRevocationLineageIsUncappedByTombstoneCapacity(t *testing.T) {
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	original := sm.MustCreateSession("player", "Player")
+	token0 := original.ReconnectToken
+
+	sm.MustCreateSession("temporary-1", "Temporary 1")
+	first, err := sm.RestoreSessionByToken(token0, "temporary-1")
+	require.NoError(t, err)
+	token1 := first.ReconnectToken
+	require.True(t, sm.ObserveWebSessionToken(token1))
+
+	sm.MustCreateSession("temporary-2", "Temporary 2")
+	second, err := sm.RestoreSessionByToken(token1, "temporary-2")
+	require.NoError(t, err)
+	token2 := second.ReconnectToken
+	require.True(t, sm.ObserveWebSessionToken(token2))
+
+	sm.mu.Lock()
+	for i := range maxRevokedWebTokens {
+		sm.revokedWebTokens[fmt.Sprintf("capacity-%d", i)] = time.Now().Add(time.Hour)
+	}
+	sm.mu.Unlock()
+
+	playerID, lineage, revoked := sm.RevokeSessionByTokenWithLineage(token2)
+	require.True(t, revoked)
+	assert.Equal(t, original.PlayerID, playerID)
+	assert.ElementsMatch(t, []string{token0, token1, token2}, lineage)
+	assert.Len(t, sm.revokedWebTokens, maxRevokedWebTokens,
+		"full tombstone storage must not truncate the returned live lineage")
+}
+
+func TestSessionManagerDiscardedSuccessorAliasCanRevokePredecessorWinner(t *testing.T) {
+	t.Parallel()
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	original := sm.MustCreateSession("player", "Player")
+	predecessor := original.ReconnectToken
+	sm.SetOffline(original.PlayerID)
+	sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSessionByToken(predecessor, "temporary")
+	require.NoError(t, err)
+	require.True(t, sm.OrphanBrowserRestore(restored))
+	require.True(t, sm.ObserveWebSessionToken(predecessor))
+
+	playerID, revoked := sm.RevokeSessionByTokenWithPlayer(restored.ReconnectToken)
+	assert.True(t, revoked)
+	assert.Equal(t, original.PlayerID, playerID)
+	assert.Nil(t, sm.GetSession(original.PlayerID))
+}
+
+func TestSessionManagerRevocationAliasExpiresWithoutRevokingCurrentSession(t *testing.T) {
+	now := time.Date(2026, time.July, 17, 12, 0, 0, 0, time.UTC)
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	sm.now = func() time.Time { return now }
+	original := sm.MustCreateSession("player", "Player")
+	predecessor := original.ReconnectToken
+	sm.SetOffline(original.PlayerID)
+	sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSessionByToken(predecessor, "temporary")
+	require.NoError(t, err)
+	require.True(t, sm.ObserveWebSessionToken(restored.ReconnectToken))
+	require.True(t, sm.IsKnownWebSessionToken(predecessor))
+
+	now = now.Add(webRevocationAliasTTL)
+	playerID, revoked := sm.RevokeSessionByTokenWithPlayer(predecessor)
+	assert.False(t, revoked)
+	assert.Empty(t, playerID)
+	assert.True(t, sm.CanReconnectToken(restored.ReconnectToken))
+}
+
+func TestSessionManagerBrowserResponseLossRecoversEitherStoredCookie(t *testing.T) {
+	for _, outcome := range []string{"predecessor", "successor"} {
+		t.Run(outcome, func(t *testing.T) {
+			sm := NewSessionManager()
+			t.Cleanup(func() { require.NoError(t, sm.Close()) })
+			original := sm.MustCreateSession("player", "Player")
+			predecessor := original.ReconnectToken
+			sm.SetOffline(original.PlayerID)
+			sm.MustCreateSession("temporary-1", "Temporary 1")
+			restored, err := sm.RestoreSessionByToken(predecessor, "temporary-1")
+			require.NoError(t, err)
+			require.True(t, sm.OrphanBrowserRestore(restored))
+			assert.True(t, sm.CanReconnectToken(predecessor))
+			assert.True(t, sm.CanReconnectToken(restored.ReconnectToken))
+
+			presented := predecessor
+			other := restored.ReconnectToken
+			if outcome == "successor" {
+				presented, other = other, presented
+			}
+			sm.MustCreateSession("temporary-2", "Temporary 2")
+			next, restoreErr := sm.RestoreSessionByToken(presented, "temporary-2")
+			require.NoError(t, restoreErr)
+			assert.Equal(t, original.PlayerID, next.PlayerID)
+
+			sm.MustCreateSession("temporary-3", "Temporary 3")
+			_, replayErr := sm.RestoreSessionByToken(other, "temporary-3")
+			assert.ErrorIs(t, replayErr, ErrInvalidReconnect)
+		})
+	}
+}
+
+func TestSessionManagerBrowserAmbiguousOutcomeHasOneConcurrentResolver(t *testing.T) {
+	t.Parallel()
+
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	original := sm.MustCreateSession("player", "Player")
+	predecessor := original.ReconnectToken
+	sm.SetOffline(original.PlayerID)
+	sm.MustCreateSession("temporary-1", "Temporary 1")
+	restored, err := sm.RestoreSessionByToken(predecessor, "temporary-1")
+	require.NoError(t, err)
+	require.True(t, sm.OrphanBrowserRestore(restored))
+	sm.MustCreateSession("temporary-old", "Temporary Old")
+	sm.MustCreateSession("temporary-new", "Temporary New")
+
+	results := make(chan error, 2)
+	go func() {
+		_, restoreErr := sm.RestoreSessionByToken(predecessor, "temporary-old")
+		results <- restoreErr
+	}()
+	go func() {
+		_, restoreErr := sm.RestoreSessionByToken(restored.ReconnectToken, "temporary-new")
+		results <- restoreErr
+	}()
+
+	successes := 0
+	invalid := 0
+	for range 2 {
+		if result := <-results; result == nil {
+			successes++
+		} else if errors.Is(result, ErrInvalidReconnect) {
+			invalid++
+		}
+	}
+	assert.Equal(t, 1, successes)
+	assert.Equal(t, 1, invalid)
+}
+
+func TestSessionManagerOrphanedPredecessorKeepsFullDisconnectWindow(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 17, 12, 0, 0, 0, time.UTC)
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	sm.now = func() time.Time { return now }
+	original := sm.MustCreateSession("player", "Player")
+	predecessor := original.ReconnectToken
+	sm.SetOffline(original.PlayerID)
+	now = now.Add(reconnectTimeout - time.Second)
+	sm.MustCreateSession("temporary", "Temporary")
+	restored, err := sm.RestoreSessionByToken(predecessor, "temporary")
+	require.NoError(t, err)
+
+	now = now.Add(24 * time.Hour)
+	require.True(t, sm.OrphanBrowserRestore(restored))
+	sm.SetOffline(original.PlayerID)
+	assert.Equal(t, now.Add(reconnectTimeout), original.ReconnectTokenExpiresAt)
+	require.True(t, sm.ObserveWebSessionToken(predecessor))
+	now = now.Add(reconnectTimeout - time.Second)
+	assert.True(t, sm.CanReconnectToken(predecessor))
 }
 
 func TestSessionManagerLongLivedOnlineCredentialGetsFullReconnectWindow(t *testing.T) {

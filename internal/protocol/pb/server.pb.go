@@ -263,12 +263,14 @@ func (x *WarningPayload) GetMessage() string {
 
 // ConnectedPayload 连接成功响应
 type ConnectedPayload struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	PlayerId       string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
-	PlayerName     string                 `protobuf:"bytes,2,opt,name=player_name,json=playerName,proto3" json:"player_name,omitempty"`
-	ReconnectToken string                 `protobuf:"bytes,3,opt,name=reconnect_token,json=reconnectToken,proto3" json:"reconnect_token,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	PlayerId           string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	PlayerName         string                 `protobuf:"bytes,2,opt,name=player_name,json=playerName,proto3" json:"player_name,omitempty"`
+	ReconnectToken     string                 `protobuf:"bytes,3,opt,name=reconnect_token,json=reconnectToken,proto3" json:"reconnect_token,omitempty"`
+	WebSessionTicket   string                 `protobuf:"bytes,4,opt,name=web_session_ticket,json=webSessionTicket,proto3" json:"web_session_ticket,omitempty"`
+	ReconnectAvailable bool                   `protobuf:"varint,5,opt,name=reconnect_available,json=reconnectAvailable,proto3" json:"reconnect_available,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ConnectedPayload) Reset() {
@@ -322,16 +324,31 @@ func (x *ConnectedPayload) GetReconnectToken() string {
 	return ""
 }
 
+func (x *ConnectedPayload) GetWebSessionTicket() string {
+	if x != nil {
+		return x.WebSessionTicket
+	}
+	return ""
+}
+
+func (x *ConnectedPayload) GetReconnectAvailable() bool {
+	if x != nil {
+		return x.ReconnectAvailable
+	}
+	return false
+}
+
 // ReconnectedPayload 重连成功响应
 type ReconnectedPayload struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	PlayerId       string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
-	PlayerName     string                 `protobuf:"bytes,2,opt,name=player_name,json=playerName,proto3" json:"player_name,omitempty"`
-	RoomCode       string                 `protobuf:"bytes,3,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
-	GameState      *GameStateDTO          `protobuf:"bytes,4,opt,name=game_state,json=gameState,proto3" json:"game_state,omitempty"`
-	ReconnectToken string                 `protobuf:"bytes,5,opt,name=reconnect_token,json=reconnectToken,proto3" json:"reconnect_token,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	PlayerId         string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	PlayerName       string                 `protobuf:"bytes,2,opt,name=player_name,json=playerName,proto3" json:"player_name,omitempty"`
+	RoomCode         string                 `protobuf:"bytes,3,opt,name=room_code,json=roomCode,proto3" json:"room_code,omitempty"`
+	GameState        *GameStateDTO          `protobuf:"bytes,4,opt,name=game_state,json=gameState,proto3" json:"game_state,omitempty"`
+	ReconnectToken   string                 `protobuf:"bytes,5,opt,name=reconnect_token,json=reconnectToken,proto3" json:"reconnect_token,omitempty"`
+	WebSessionTicket string                 `protobuf:"bytes,6,opt,name=web_session_ticket,json=webSessionTicket,proto3" json:"web_session_ticket,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ReconnectedPayload) Reset() {
@@ -395,6 +412,13 @@ func (x *ReconnectedPayload) GetGameState() *GameStateDTO {
 func (x *ReconnectedPayload) GetReconnectToken() string {
 	if x != nil {
 		return x.ReconnectToken
+	}
+	return ""
+}
+
+func (x *ReconnectedPayload) GetWebSessionTicket() string {
+	if x != nil {
+		return x.WebSessionTicket
 	}
 	return ""
 }
@@ -1183,12 +1207,14 @@ const file_internal_protocol_proto_server_proto_rawDesc = "" +
 	"\fcommand_type\x18\x02 \x01(\x0e2\x15.protocol.MessageTypeR\vcommandType\">\n" +
 	"\x0eWarningPayload\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"y\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xd8\x01\n" +
 	"\x10ConnectedPayload\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1f\n" +
 	"\vplayer_name\x18\x02 \x01(\tR\n" +
 	"playerName\x12'\n" +
-	"\x0freconnect_token\x18\x03 \x01(\tR\x0ereconnectToken\"\xcf\x01\n" +
+	"\x0freconnect_token\x18\x03 \x01(\tR\x0ereconnectToken\x12,\n" +
+	"\x12web_session_ticket\x18\x04 \x01(\tR\x10webSessionTicket\x12/\n" +
+	"\x13reconnect_available\x18\x05 \x01(\bR\x12reconnectAvailable\"\xfd\x01\n" +
 	"\x12ReconnectedPayload\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1f\n" +
 	"\vplayer_name\x18\x02 \x01(\tR\n" +
@@ -1196,7 +1222,8 @@ const file_internal_protocol_proto_server_proto_rawDesc = "" +
 	"\troom_code\x18\x03 \x01(\tR\broomCode\x125\n" +
 	"\n" +
 	"game_state\x18\x04 \x01(\v2\x16.protocol.GameStateDTOR\tgameState\x12'\n" +
-	"\x0freconnect_token\x18\x05 \x01(\tR\x0ereconnectToken\"c\n" +
+	"\x0freconnect_token\x18\x05 \x01(\tR\x0ereconnectToken\x12,\n" +
+	"\x12web_session_ticket\x18\x06 \x01(\tR\x10webSessionTicket\"c\n" +
 	"\vPongPayload\x12)\n" +
 	"\x10client_timestamp\x18\x01 \x01(\x03R\x0fclientTimestamp\x12)\n" +
 	"\x10server_timestamp\x18\x02 \x01(\x03R\x0fserverTimestamp\"n\n" +

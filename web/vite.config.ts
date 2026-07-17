@@ -43,6 +43,10 @@ export default defineConfig(({ mode }) => {
         '/health': {
           target: wsTarget.replace(/^ws/, 'http'),
           changeOrigin: true
+        },
+        '/session': {
+          target: wsTarget.replace(/^ws/, 'http'),
+          changeOrigin: true
         }
       }
     }

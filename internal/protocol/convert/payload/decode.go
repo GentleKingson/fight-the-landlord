@@ -240,9 +240,11 @@ func decodeSessionMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.ConnectedPayload) = protocol.ConnectedPayload{
-			PlayerID:       pbMsg.PlayerId,
-			PlayerName:     pbMsg.PlayerName,
-			ReconnectToken: pbMsg.ReconnectToken,
+			PlayerID:           pbMsg.PlayerId,
+			PlayerName:         pbMsg.PlayerName,
+			ReconnectToken:     pbMsg.ReconnectToken,
+			WebSessionTicket:   pbMsg.WebSessionTicket,
+			ReconnectAvailable: pbMsg.ReconnectAvailable,
 		}
 		return true, nil
 	case protocol.MsgPong:
@@ -265,11 +267,12 @@ func decodeSessionMessages(msgType protocol.MessageType, data []byte, target any
 			gameState = convert.ProtoToGameStateDTO(pbMsg.GameState)
 		}
 		*target.(*protocol.ReconnectedPayload) = protocol.ReconnectedPayload{
-			PlayerID:       pbMsg.PlayerId,
-			PlayerName:     pbMsg.PlayerName,
-			RoomCode:       pbMsg.RoomCode,
-			GameState:      gameState,
-			ReconnectToken: pbMsg.ReconnectToken,
+			PlayerID:         pbMsg.PlayerId,
+			PlayerName:       pbMsg.PlayerName,
+			RoomCode:         pbMsg.RoomCode,
+			GameState:        gameState,
+			ReconnectToken:   pbMsg.ReconnectToken,
+			WebSessionTicket: pbMsg.WebSessionTicket,
 		}
 		return true, nil
 	case protocol.MsgError:
