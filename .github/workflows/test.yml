@@ -349,6 +349,7 @@ jobs:
         run: |
           mkdir -p artifacts
           echo "REDIS_PASSWORD=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "ADMIN_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
 
       - name: Build production image
         run: |
