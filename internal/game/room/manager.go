@@ -220,9 +220,18 @@ func (rm *RoomManager) LeaveRoom(client types.ClientInterface) bool {
 		return false
 	}
 	removed := snapshotPlayer(player)
-	empty := len(room.players) == 1
+	removeRoom := true
+	for remainingID, remaining := range room.players {
+		if remainingID == removed.ID {
+			continue
+		}
+		if remaining == nil || !remaining.IsBot {
+			removeRoom = false
+			break
+		}
+	}
 	var removal roomRemovalDispatch
-	if empty {
+	if removeRoom {
 		removal, _ = rm.removePublishedRoomLocked(room, RoomRemovalLeft)
 	} else {
 		types.CompareAndSetRoom(client, removed.ID, roomCode, "")
@@ -245,8 +254,8 @@ func (rm *RoomManager) LeaveRoom(client types.ClientInterface) bool {
 		"result", "left",
 	)
 
-	// 如果房间空了，删除房间
-	if empty {
+	// 如果房间空了或只剩机器人，删除房间
+	if removeRoom {
 		rm.dispatchRoomRemoval(removal)
 	} else {
 		rm.saveRoomAsync(room)
