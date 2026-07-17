@@ -300,6 +300,22 @@ if game_environment.get("SERVER_ENV", "").strip().lower() == "production":
 else:
     error("server_env", "SERVER_ENV must be production")
 
+admin_key = game_environment.get("ADMIN_KEY")
+if admin_key is None:
+    admin_key = effective_environment.get("ADMIN_KEY", "")
+
+admin_key_length = len(admin_key.encode("utf-8"))
+if not admin_key:
+    error("admin_key_empty", "ADMIN_KEY must be non-empty in production")
+elif admin_key != admin_key.strip() or any(char in admin_key for char in "\x00\r\n"):
+    error("admin_key_format", "ADMIN_KEY must not contain surrounding whitespace or control characters")
+elif admin_key_length < 32:
+    error("admin_key_short", "ADMIN_KEY must be at least 32 bytes")
+elif admin_key_length > 1024:
+    error("admin_key_long", "ADMIN_KEY must not exceed 1024 bytes")
+else:
+    passed("admin_key", "ADMIN_KEY meets the production length and format requirements")
+
 password = game_environment.get("REDIS_PASSWORD")
 if password is None:
     password = effective_environment.get("REDIS_PASSWORD", "")

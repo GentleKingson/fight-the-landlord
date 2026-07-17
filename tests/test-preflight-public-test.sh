@@ -9,14 +9,19 @@ fixtures="$script_dir/fixtures/preflight-public-test"
 base_compose="$fixtures/compose.yml"
 tests_run=0
 redis_secret_sentinel="7wSLYCu5kTFpG9J4hVK2dXrN6BqMz8Ae"
+admin_secret_sentinel="7uDp2Nq9Kf4Vz8Wx1Ra6Lm3Hs5Yc0BeJ"
+short_admin_secret_sentinel="too-short"
 
 assert_no_secret_output() {
   local output="$1"
-  if grep -Fq "$redis_secret_sentinel" "$output"; then
-    printf 'FAIL: preflight output exposed the Redis password fixture\n' >&2
-    rm -f "$output"
-    exit 1
-  fi
+  local secret
+  for secret in "$redis_secret_sentinel" "$admin_secret_sentinel" "$short_admin_secret_sentinel"; do
+    if grep -Fq "$secret" "$output"; then
+      printf 'FAIL: preflight output exposed a secret fixture value\n' >&2
+      rm -f "$output"
+      exit 1
+    fi
+  done
 }
 
 isolated_command() {
@@ -47,6 +52,12 @@ run_success() {
   fi
   if grep -q '^ERROR' "$output"; then
     printf 'FAIL: %s printed an ERROR\n' "$name" >&2
+    sed -n '1,160p' "$output" >&2
+    rm -f "$output"
+    exit 1
+  fi
+  if ! grep -Fq 'PASS [admin_key]' "$output"; then
+    printf 'FAIL: %s did not validate ADMIN_KEY\n' "$name" >&2
     sed -n '1,160p' "$output" >&2
     rm -f "$output"
     exit 1
@@ -124,6 +135,18 @@ run_failure \
   "example Redis password" \
   redis_password_example \
   --env-file "$fixtures/example-password.env" \
+  --compose-file "$base_compose"
+
+run_failure \
+  "empty production admin key" \
+  admin_key_empty \
+  --env-file "$fixtures/empty-admin-key.env" \
+  --compose-file "$base_compose"
+
+run_failure \
+  "short production admin key" \
+  admin_key_short \
+  --env-file "$fixtures/short-admin-key.env" \
   --compose-file "$base_compose"
 
 run_failure \

@@ -4,6 +4,7 @@ services:
     environment:
       SERVER_ENV: ${SERVER_ENV:-}
       SERVER_MAX_CONNECTIONS: ${SERVER_MAX_CONNECTIONS:-}
+      ADMIN_KEY: ${ADMIN_KEY:-}
       SECURITY_ALLOWED_ORIGINS: ${SECURITY_ALLOWED_ORIGINS:-}
       SECURITY_TRUSTED_PROXY_CIDRS: ${SECURITY_TRUSTED_PROXY_CIDRS:-}
       SECURITY_RATE_LIMIT_PER_SECOND: ${SECURITY_RATE_LIMIT_PER_SECOND:-}
@@ -22,4 +23,3 @@ services:
   douzero:
     image: ${DOUZERO_IMAGE_REF:-registry.example.test/fight-the-landlord-douzero:v1.2.3}
     profiles: ["douzero"]
-
