@@ -217,6 +217,12 @@ restore_volume_snapshot() {
     ' sh "$snapshot_name" >/dev/null
 }
 
+remove_redis_container() {
+  # A stopped container can retain a stale unhealthy state after its mounted
+  # volume is replaced. Recreate it without touching the named data volume.
+  "${compose[@]}" rm --force --stop redis >/dev/null
+}
+
 redis_cli() {
   # shellcheck disable=SC2016 # Expanded by the container shell.
   "${compose[@]}" exec -T redis sh -eu -c '
@@ -256,7 +262,10 @@ rollback() {
   local rollback_status=0
   printf 'Restore failed; attempting to restore the pre-restore volume snapshot.\n' >&2
   "${compose[@]}" stop redis >/dev/null 2>&1 || true
-  restore_volume_snapshot "$rollback_snapshot" || rollback_status=$?
+  remove_redis_container || rollback_status=$?
+  if [[ "$rollback_status" -eq 0 ]]; then
+    restore_volume_snapshot "$rollback_snapshot" || rollback_status=$?
+  fi
   if [[ "$redis_was_running" == true && "$rollback_status" -eq 0 ]]; then
     "${compose[@]}" up -d redis >/dev/null 2>&1 || rollback_status=$?
     if [[ "$rollback_status" -eq 0 ]]; then
@@ -374,6 +383,11 @@ fi
 service_running redis && die "Redis is still running"
 service_running poker-server && die "poker-server is still running"
 service_running redis-debug && die "redis-debug is still running"
+
+# Always recreate Redis after changing /data. Besides applying the current
+# Compose configuration, this resets Docker health state before the restored
+# dataset is validated.
+remove_redis_container
 
 # Validate the RDB with the pinned Redis image before reading or changing the
 # target volume.

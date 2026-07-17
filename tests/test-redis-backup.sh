@@ -35,6 +35,7 @@ sha256_file() {
 }
 
 "${compose[@]}" up -d --wait redis
+initial_redis_cid="$("${compose[@]}" ps -q redis)"
 redis_cli SET player:stats:backup-test original >/dev/null
 redis_cli ZADD leaderboard:score 42 backup-test >/dev/null
 redis_cli SADD leaderboard:settlement:game-1 backup-test >/dev/null
@@ -136,6 +137,8 @@ fi
 grep -q 'Rollback completed' "$temp_dir/rollback.out"
 
 "${compose[@]}" up -d --wait redis
+rollback_redis_cid="$("${compose[@]}" ps -q redis)"
+[[ -n "$rollback_redis_cid" && "$rollback_redis_cid" != "$initial_redis_cid" ]]
 [[ "$(redis_cli GET player:stats:backup-test)" == changed ]]
 [[ "$(redis_cli EXISTS should-disappear)" == 1 ]]
 "${compose[@]}" stop redis
