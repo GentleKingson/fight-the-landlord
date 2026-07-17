@@ -2,7 +2,16 @@
 # 斗地主客户端一键安装脚本
 # 使用方法: curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.sh | bash
 
-set -e
+set -euo pipefail
+
+TMP_DIR=""
+
+cleanup() {
+    if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
+        rm -rf "$TMP_DIR"
+    fi
+}
+trap cleanup EXIT
 
 # 颜色输出
 RED='\033[0;31m'
@@ -83,14 +92,28 @@ download_binary() {
         error "下载失败: $DOWNLOAD_URL"
     fi
 
-    # 下载校验和
+    # Release checksums are mandatory. Installing an unverified binary is a
+    # hard failure rather than a network-error fallback.
     if ! curl -fsSL -o "${BINARY_NAME}.sha256" "$CHECKSUM_URL"; then
-        warn "无法下载校验和文件，跳过校验"
+        error "无法下载校验和文件: $CHECKSUM_URL"
+    fi
+
+    info "验证文件完整性..."
+    EXPECTED_SHA256=$(awk 'NR == 1 { print $1 }' "${BINARY_NAME}.sha256")
+    if ! [[ "$EXPECTED_SHA256" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+        error "校验和文件格式无效"
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL_SHA256=$(sha256sum "$BINARY_NAME" | awk '{ print $1 }')
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL_SHA256=$(shasum -a 256 "$BINARY_NAME" | awk '{ print $1 }')
     else
-        info "验证文件完整性..."
-        if ! sha256sum -c "${BINARY_NAME}.sha256" 2>/dev/null; then
-            error "文件校验失败"
-        fi
+        error "系统缺少 sha256sum 或 shasum，无法验证下载"
+    fi
+    EXPECTED_SHA256=$(printf '%s' "$EXPECTED_SHA256" | tr '[:upper:]' '[:lower:]')
+    ACTUAL_SHA256=$(printf '%s' "$ACTUAL_SHA256" | tr '[:upper:]' '[:lower:]')
+    if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+        error "文件校验失败"
     fi
 
     info "下载完成"
@@ -132,6 +155,7 @@ install_binary() {
     # 清理临时文件
     cd - > /dev/null
     rm -rf "$TMP_DIR"
+    TMP_DIR=""
 }
 
 # 主函数

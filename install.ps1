@@ -40,6 +40,7 @@ function Download-Binary {
 
     $binaryName = "fight-the-landlord-windows-amd64.exe"
     $downloadUrl = "https://github.com/GentleKingson/fight-the-landlord/releases/download/$Version/$binaryName"
+    $checksumUrl = "$downloadUrl.sha256"
 
     Write-Info "下载客户端..."
 
@@ -50,6 +51,17 @@ function Download-Binary {
 
     try {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $outputPath -UseBasicParsing
+        $checksumPath = "$outputPath.sha256"
+        Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing
+
+        $expectedHash = ((Get-Content -Raw -Path $checksumPath).Trim() -split '\s+')[0]
+        if ($expectedHash -notmatch '^[0-9A-Fa-f]{64}$') {
+            throw "校验和文件格式无效"
+        }
+        $actualHash = (Get-FileHash -Algorithm SHA256 -Path $outputPath).Hash
+        if ($actualHash.ToLowerInvariant() -ne $expectedHash.ToLowerInvariant()) {
+            throw "文件校验失败"
+        }
         Write-Info "下载完成"
         return $outputPath
     }

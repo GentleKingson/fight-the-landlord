@@ -48,6 +48,11 @@ for installer in install.sh install.ps1; do
   require_literal "$installer" "$fork_repo"
   reject_regex "$installer" 'palemoky/fight-the-landlord'
 done
+require_literal install.sh 'CHECKSUM_URL="${DOWNLOAD_URL}.sha256"'
+require_literal install.sh 'error "无法下载校验和文件: $CHECKSUM_URL"'
+reject_regex install.sh '跳过校验'
+require_literal install.ps1 '$checksumUrl = "$downloadUrl.sha256"'
+require_literal install.ps1 'Get-FileHash -Algorithm SHA256'
 
 require_literal internal/update/update.go "Repo         = \"${fork_repo}\""
 reject_regex internal/update/update.go 'Repo[[:space:]]*=.*palemoky/fight-the-landlord'
