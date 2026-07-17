@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 
 	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
@@ -143,6 +144,9 @@ func NewServer(cfg *config.Config) (*Server, error) {
 func connectRedis(cfg *config.Config, metrics *observability.Metrics) (*redis.Client, error) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB,
+		// This deployment is deliberately single-node. Disable the unsupported
+		// endpoint-handoff probe so it cannot appear as an application Redis error.
+		MaintNotificationsConfig: &maintnotifications.Config{Mode: maintnotifications.ModeDisabled},
 	})
 	if metrics != nil && metrics.Enabled() {
 		rdb.AddHook(observability.NewRedisHook(metrics))

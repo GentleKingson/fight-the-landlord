@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9/maintnotifications"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -139,6 +141,21 @@ func TestNewServerValidatesConfigurationBeforeDial(t *testing.T) {
 
 	assert.Nil(t, server)
 	assert.ErrorContains(t, err, "server.port")
+}
+
+func TestConnectRedisDisablesSingleNodeMaintenanceNotifications(t *testing.T) {
+	t.Parallel()
+
+	mini := miniredis.RunT(t)
+	cfg := config.Default()
+	cfg.Redis.Addr = mini.Addr()
+
+	client, err := connectRedis(cfg, observability.NewMetrics(true))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+
+	require.NotNil(t, client.Options().MaintNotificationsConfig)
+	assert.Equal(t, maintnotifications.ModeDisabled, client.Options().MaintNotificationsConfig.Mode)
 }
 
 func TestServer_ReadinessChecksDependencyAndShutdownState(t *testing.T) {
