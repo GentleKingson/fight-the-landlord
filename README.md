@@ -100,6 +100,10 @@ docker compose down
 中的 `SECURITY_ALLOWED_ORIGINS` 改为实际 HTTPS 来源，并在反向代理中保留
 `/ws` 的 WebSocket Upgrade 头。
 
+连接在线期间，重连凭证不会因墙钟时间过期；物理连接断开后有完整 2 分钟
+恢复窗口，成功恢复会单次消费并轮换凭证。`GAME_OFFLINE_WAIT_TIMEOUT` 只控制
+牌局中离线玩家的行动等待时间，不是会话重连期限。显式退出会立即撤销凭证。
+
 ```bash
 curl --fail http://localhost:1780/health
 curl --fail http://localhost:1780/version

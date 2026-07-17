@@ -155,6 +155,27 @@ func TestSessionManagerRepeatedOfflineSignalDoesNotExtendReconnectWindow(t *test
 	assert.Equal(t, deadline, original.ReconnectTokenExpiresAt)
 }
 
+func TestSessionManagerCleanupSeparatesReconnectWindowFromDeadSessionRetention(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	sm := NewSessionManager()
+	t.Cleanup(func() { require.NoError(t, sm.Close()) })
+	sm.now = func() time.Time { return now }
+	playerSession := sm.MustCreateSession("p1", "Player1")
+	token := playerSession.ReconnectToken
+	sm.SetOffline(playerSession.PlayerID)
+
+	now = now.Add(reconnectTimeout)
+	sm.cleanup()
+	assert.False(t, sm.CanReconnect(token, playerSession.PlayerID), "the credential expires at the recovery deadline")
+	assert.NotNil(t, sm.GetSession(playerSession.PlayerID), "dead metadata retention must not be mistaken for credential validity")
+
+	now = playerSession.DisconnectedAt.Add(deadSessionRetention + time.Second)
+	sm.cleanup()
+	assert.Nil(t, sm.GetSession(playerSession.PlayerID))
+}
+
 func TestSessionManager_OnlineStatus(t *testing.T) {
 	t.Parallel()
 	sm := NewSessionManager()
@@ -491,7 +512,7 @@ func TestSessionManagerCloseStopsCleanupWorker(t *testing.T) {
 	playerSession := sm.MustCreateSession("expired", "Expired Player")
 	sm.SetOffline(playerSession.PlayerID)
 	playerSession.mu.Lock()
-	playerSession.DisconnectedAt = time.Now().Add(-sessionExpireTime - time.Minute)
+	playerSession.DisconnectedAt = time.Now().Add(-deadSessionRetention - time.Minute)
 	playerSession.mu.Unlock()
 
 	require.Eventually(t, func() bool {

@@ -12,10 +12,12 @@ import (
 )
 
 const (
-	// 重连等待时间
+	// reconnectTimeout is the recovery window that starts on the first physical
+	// disconnect. Online credentials do not expire by wall-clock age.
 	reconnectTimeout = 2 * time.Minute
-	// 会话过期时间
-	sessionExpireTime = 10 * time.Minute
+	// deadSessionRetention only bounds how long expired offline metadata remains
+	// in memory. It is not a reconnect credential TTL.
+	deadSessionRetention = 10 * time.Minute
 )
 
 var (
@@ -438,8 +440,9 @@ func (sm *SessionManager) cleanup() {
 		if !session.IsOnline && !reconnectCredentialValidLocked(session, now) {
 			delete(sm.tokens, session.ReconnectToken)
 		}
-		// 清理离线超过会话过期时间的会话
-		if !session.IsOnline && now.Sub(session.DisconnectedAt) > sessionExpireTime {
+		// Retain dead metadata briefly for cleanup bookkeeping after the reconnect
+		// credential has already become unusable.
+		if !session.IsOnline && now.Sub(session.DisconnectedAt) > deadSessionRetention {
 			delete(sm.tokens, session.ReconnectToken)
 			delete(sm.sessions, playerID)
 		}
