@@ -287,6 +287,7 @@ func (gs *GameSession) computeScores(winner *GamePlayer, mult int) []protocol.Pl
 func (gs *GameSession) queueGameResultsLocked(winner *GamePlayer) {
 	// 计算获胜方
 	landlordWins := winner.IsLandlord
+	settledAt := time.Now()
 
 	roomPlayers := gs.room.SnapshotPlayers()
 	roomNames := make(map[string]string, len(roomPlayers))
@@ -313,6 +314,7 @@ func (gs *GameSession) queueGameResultsLocked(winner *GamePlayer) {
 
 		gs.pendingResults = append(gs.pendingResults, pendingGameResult{
 			gameID:     gs.gameID,
+			settledAt:  settledAt,
 			playerID:   p.ID,
 			playerName: playerName,
 			isLandlord: p.IsLandlord,

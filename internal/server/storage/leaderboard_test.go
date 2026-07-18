@@ -128,6 +128,38 @@ func TestLeaderboardPeriodicScoresAndClockBoundaries(t *testing.T) {
 	assert.Equal(t, 15, daily[1].Score)
 }
 
+func TestLeaderboardWholeGameStaysInSettlementTimeBuckets(t *testing.T) {
+	t.Parallel()
+	lm, _, clock := newTestLeaderboardManager(t)
+	ctx := context.Background()
+	settledAt := time.Date(2026, time.January, 11, 23, 59, 59, 0, time.UTC)
+	afterBoundary := settledAt.Add(2 * time.Second)
+
+	require.NoError(t, lm.RecordGameResultAt(
+		ctx, "boundary-game", settledAt, "p1", "Player1", true, true,
+	))
+	clock.Set(afterBoundary)
+	require.NoError(t, lm.RecordGameResultAt(
+		ctx, "boundary-game", settledAt, "p2", "Player2", false, false,
+	))
+
+	clock.Set(settledAt)
+	daily, err := lm.GetLeaderboard(ctx, LeaderboardTypeDaily, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, daily, 2)
+	weekly, err := lm.GetLeaderboard(ctx, LeaderboardTypeWeekly, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, weekly, 2)
+
+	clock.Set(afterBoundary)
+	daily, err = lm.GetLeaderboard(ctx, LeaderboardTypeDaily, 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, daily, "one game's players must not cross the midnight bucket")
+	weekly, err = lm.GetLeaderboard(ctx, LeaderboardTypeWeekly, 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, weekly, "one game's players must not cross the ISO week bucket")
+}
+
 func TestLeaderboardPeriodicScoreUsesAppliedDelta(t *testing.T) {
 	t.Parallel()
 	lm, _, _ := newTestLeaderboardManager(t)
@@ -187,9 +219,10 @@ func TestLeaderboardDeduplicatesSettlement(t *testing.T) {
 	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Player1", false, true))
 	settlementTTL, err := lm.redis.TTL(ctx, settledGameKey+"game-1").Result()
 	require.NoError(t, err)
-	assert.Less(t, settlementTTL, time.Duration(0), "settlement marker must not expire")
-	mr.FastForward(365 * 24 * time.Hour)
-	clock.Set(clock.Now().Add(365 * 24 * time.Hour))
+	assert.Greater(t, settlementTTL, 29*24*time.Hour)
+	assert.LessOrEqual(t, settlementTTL, settlementMarkerTTL)
+	mr.FastForward(29 * 24 * time.Hour)
+	clock.Set(clock.Now().Add(29 * 24 * time.Hour))
 	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Renamed", true, false))
 	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p2", "Player2", true, false))
 
@@ -207,6 +240,19 @@ func TestLeaderboardDeduplicatesSettlement(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, weekly, 1)
 	assert.Equal(t, "p2", weekly[0].PlayerID)
+}
+
+func TestLeaderboardSettlementMarkerExpires(t *testing.T) {
+	t.Parallel()
+	lm, mr, _ := newTestLeaderboardManager(t)
+	ctx := context.Background()
+
+	require.NoError(t, lm.RecordGameResult(ctx, "game-1", "p1", "Player1", false, true))
+	mr.FastForward(settlementMarkerTTL + time.Second)
+
+	exists, err := lm.redis.Exists(ctx, settledGameKey+"game-1").Result()
+	require.NoError(t, err)
+	assert.Zero(t, exists)
 }
 
 func TestLeaderboardConcurrentSettlementsDoNotLoseUpdates(t *testing.T) {
@@ -294,4 +340,6 @@ func TestLeaderboardRequiresSettlementIdentity(t *testing.T) {
 	lm, _, _ := newTestLeaderboardManager(t)
 	err := lm.RecordGameResult(context.Background(), "", "p1", "Player1", false, true)
 	assert.True(t, errors.Is(err, ErrInvalidGameResult))
+	err = lm.RecordGameResultAt(context.Background(), "game-1", time.Time{}, "p1", "Player1", false, true)
+	assert.ErrorIs(t, err, ErrInvalidGameResult)
 }

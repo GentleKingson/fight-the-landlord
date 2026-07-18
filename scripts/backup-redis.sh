@@ -231,14 +231,16 @@ wait_for_health() {
 
 wait_for_health || die "Redis did not become healthy within ${timeout_seconds}s"
 
-# These are lower bounds taken before BGSAVE. Player statistics and the total
+# These are inventories taken before BGSAVE. Player statistics and the total
 # leaderboard are durable application keys, so the subsequent RDB must contain
 # at least this state even if the live service writes more while the save runs.
+# Settlement markers expire after the retry window and are recorded for audit
+# only; an archive restored later may legitimately contain fewer of them.
 scan_count() {
   redis_cli -n "$redis_db" --scan --pattern "$1" | LC_ALL=C sort -u | awk 'END { print NR + 0 }'
 }
 min_player_stats_keys="$(scan_count 'player:stats:*')"
-min_settlement_keys="$(scan_count 'leaderboard:settlement:*')"
+settlement_keys_at_backup="$(scan_count 'leaderboard:settlement:*')"
 require_leaderboard_total="$(redis_cli -n "$redis_db" EXISTS leaderboard:score)"
 
 # Do not race a save already in progress. Then request a fresh server-side RDB
@@ -330,7 +332,8 @@ REDIS_VERSION=$redis_version
 REDIS_DB=$redis_db
 DATABASE_KEYS=$database_keys
 MIN_PLAYER_STATS_KEYS=$min_player_stats_keys
-MIN_SETTLEMENT_KEYS=$min_settlement_keys
+MIN_SETTLEMENT_KEYS=0
+SETTLEMENT_KEYS_AT_BACKUP=$settlement_keys_at_backup
 REQUIRE_LEADERBOARD_TOTAL=$require_leaderboard_total
 RDB_SHA256=$rdb_sha256
 EOF

@@ -20,6 +20,20 @@ const (
 	OperationalStateMaintenance = "maintenance"
 )
 
+type operationalQuiescenceStatus struct {
+	state         string
+	activeGames   int
+	startLeases   int
+	transitioning bool
+}
+
+func (status operationalQuiescenceStatus) safeToRestart() bool {
+	return status.state != OperationalStateNormal &&
+		status.activeGames == 0 &&
+		status.startLeases == 0 &&
+		!status.transitioning
+}
+
 // OperationalState reports the current admission state. The zero value is
 // normal so a minimally constructed Server remains usable in focused tests.
 func (s *Server) OperationalState() string {
@@ -156,6 +170,22 @@ func (s *Server) operationalQuiescenceSnapshot() (
 	s.operationalMu.Lock()
 	defer s.operationalMu.Unlock()
 	return operationalStateName(s.operationalState.Load()), s.gameStartLeases, s.operationalTransitioning
+}
+
+// operationalQuiescence is the authoritative restart gate shared by the
+// admin status endpoint and signal-driven shutdown.
+func (s *Server) operationalQuiescence() operationalQuiescenceStatus {
+	activeGames := 0
+	if s != nil && s.roomManager != nil {
+		activeGames = s.roomManager.GetActiveGamesCount()
+	}
+	state, startLeases, transitioning := s.operationalQuiescenceSnapshot()
+	return operationalQuiescenceStatus{
+		state:         state,
+		activeGames:   activeGames,
+		startLeases:   startLeases,
+		transitioning: transitioning,
+	}
 }
 
 func operationalStateName(state uint32) string {

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
@@ -17,6 +18,7 @@ type pendingDelivery struct {
 
 type pendingGameResult struct {
 	gameID     string
+	settledAt  time.Time
 	playerID   string
 	playerName string
 	isLandlord bool
@@ -75,9 +77,10 @@ func (gs *GameSession) dispatchPendingWork(work pendingWork) {
 	leaderboard := gs.leaderboard
 	if leaderboard != nil && leaderboard.IsReady() {
 		for _, result := range work.results {
-			if err := leaderboard.RecordGameResult(
+			if err := leaderboard.RecordGameResultAt(
 				context.Background(),
 				result.gameID,
+				result.settledAt,
 				result.playerID,
 				result.playerName,
 				result.isLandlord,

@@ -76,8 +76,9 @@ docker compose stop poker-server redis
 3. 在修改 volume 前创建 `pre-restore-redis-volume-*.tar.gz` 和校验文件；
 4. 清除旧 RDB/AOF 文件，安装目标 RDB，并通过仅使用 Unix socket 的临时 Redis
    转换成新的 multipart AOF，然后启动正式 Redis；
-5. 检查容器健康、认证 `PING`、AOF 已启用，以及 `player:stats:*`、
-   `leaderboard:settlement:*` 和 `leaderboard:score` 的预期数量。
+5. 检查容器健康、认证 `PING`、AOF 已启用，以及 `player:stats:*`
+   和 `leaderboard:score` 的预期数量。`leaderboard:settlement:*` 保留 30 天，
+   metadata 仅记录备份时的盘点数，恢复时不作持久 key 下限。
 
 成功后先检查 Redis 和服务版本，再启动游戏服务：
 

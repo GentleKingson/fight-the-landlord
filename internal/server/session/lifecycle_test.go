@@ -73,6 +73,27 @@ func TestStartGame_DealCards(t *testing.T) {
 	assert.Equal(t, 54, totalCards)
 }
 
+func TestQueueGameResultsUsesOneSettlementTimeForWholeGame(t *testing.T) {
+	t.Parallel()
+
+	r := room.NewMockRoom("SETTLED-AT", testutil.NewSimpleClient("p1", "Player1"))
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
+	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{})
+	gs.gameID = "boundary-game"
+	gs.players[0].IsLandlord = true
+
+	gs.queueGameResultsLocked(gs.players[0])
+
+	require.Len(t, gs.pendingResults, 3)
+	settledAt := gs.pendingResults[0].settledAt
+	require.False(t, settledAt.IsZero())
+	for _, result := range gs.pendingResults[1:] {
+		assert.Equal(t, settledAt, result.settledAt)
+	}
+}
+
 func TestRetireBeforeStartPreventsSessionActivation(t *testing.T) {
 	t.Parallel()
 

@@ -360,8 +360,9 @@ docker compose --env-file .env stop poker-server redis
 ```
 
 脚本校验外部和内部 SHA-256、固定归档清单及 RDB，修改前创建原 volume 快照，恢复
-后检查 Redis healthy、认证 `PING`、AOF，以及 `player:stats:*`、
-`leaderboard:score` 和 `leaderboard:settlement:*` 的保存下限。脚本绝不自动启动
+后检查 Redis healthy、认证 `PING`、AOF，以及 `player:stats:*` 和
+`leaderboard:score` 的保存下限。`leaderboard:settlement:*` 有 30 天 TTL，备份会记录
+盘点数量但恢复时不作持久 key 下限。脚本绝不自动启动
 `poker-server`。成功后人工检查并启动：
 
 ```bash

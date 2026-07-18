@@ -21,6 +21,7 @@ const (
 	settledGameKey       = "leaderboard:settlement:"
 	dailyLeaderboardTTL  = 48 * time.Hour
 	weeklyLeaderboardTTL = 8 * 24 * time.Hour
+	settlementMarkerTTL  = 30 * 24 * time.Hour
 
 	LeaderboardTypeTotal    = "total"
 	LeaderboardTypeDaily    = "daily"
@@ -31,7 +32,7 @@ const (
 
 var (
 	ErrInvalidLeaderboardType = errors.New("invalid leaderboard type")
-	ErrInvalidGameResult      = errors.New("game ID and player ID are required")
+	ErrInvalidGameResult      = errors.New("game ID, player ID, and settlement time are required")
 	ErrLeaderboardUnavailable = errors.New("leaderboard storage is unavailable")
 )
 
@@ -211,15 +212,32 @@ func (lm *LeaderboardManager) RecordGameResult(
 	if !lm.IsReady() {
 		return ErrLeaderboardUnavailable
 	}
-	if strings.TrimSpace(gameID) == "" || strings.TrimSpace(playerID) == "" {
+	return lm.RecordGameResultAt(
+		ctx, gameID, lm.now(), playerID, playerName, isLandlord, isWinner,
+	)
+}
+
+// RecordGameResultAt records one player's settlement in the daily and weekly
+// buckets selected once by the game session. Every player in one game must use
+// the same settledAt value.
+func (lm *LeaderboardManager) RecordGameResultAt(
+	ctx context.Context,
+	gameID string,
+	settledAt time.Time,
+	playerID, playerName string,
+	isLandlord, isWinner bool,
+) error {
+	if !lm.IsReady() {
+		return ErrLeaderboardUnavailable
+	}
+	if strings.TrimSpace(gameID) == "" || strings.TrimSpace(playerID) == "" || settledAt.IsZero() {
 		return ErrInvalidGameResult
 	}
 
-	now := lm.now()
 	statsKey := playerStatsKey + playerID
 	settlementKey := settledGameKey + gameID
-	dailyKey := dailyLeaderboardKey(now)
-	weeklyKey := weeklyLeaderboardKey(now)
+	dailyKey := dailyLeaderboardKey(settledAt)
+	weeklyKey := weeklyLeaderboardKey(settledAt)
 
 	for range 32 {
 		err := lm.redis.Watch(ctx, func(tx *redis.Tx) error {
@@ -231,13 +249,13 @@ func (lm *LeaderboardManager) RecordGameResult(
 				return nil
 			}
 
-			stats, err := getOrCreateStatsFromCmd(ctx, tx, statsKey, playerID, playerName, now)
+			stats, err := getOrCreateStatsFromCmd(ctx, tx, statsKey, playerID, playerName, settledAt)
 			if err != nil {
 				return err
 			}
 			stats.PlayerName = playerName
 			stats.TotalGames++
-			stats.LastPlayedAt = now.Unix()
+			stats.LastPlayedAt = settledAt.Unix()
 
 			previousScore := stats.Score
 			scoreChange := updateRoleStats(stats, isLandlord, isWinner)
@@ -258,6 +276,7 @@ func (lm *LeaderboardManager) RecordGameResult(
 				pipe.ZIncrBy(ctx, weeklyKey, float64(periodScoreChange), playerID)
 				pipe.Expire(ctx, weeklyKey, weeklyLeaderboardTTL)
 				pipe.SAdd(ctx, settlementKey, playerID)
+				pipe.Expire(ctx, settlementKey, settlementMarkerTTL)
 				return nil
 			})
 			return err

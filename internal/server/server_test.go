@@ -284,15 +284,36 @@ func TestServer_MaintenanceMode(t *testing.T) {
 }
 
 func TestServer_GracefulShutdown_Logic(t *testing.T) {
-	// 这是一个逻辑测试，不涉及真实的 Redis/HTTP 关闭
-	t.Parallel()
+	t.Setenv("XIAOMI_SPEAKER_URL", "")
+	cfg := config.Default()
+	cfg.Game.ShutdownCheckInterval = 1
+	cfg.Game.RoomCleanupDelay = 0
+	server := &Server{
+		config:  cfg,
+		clients: make(map[string]*Client),
+	}
+	release, admitted := server.AcquireGameStartLease()
+	require.True(t, admitted)
 
-	// cfg := &config.Config{}
-	// mock config to prevent nil pointer if accessed
-	// But GracefulShutdown accesses s.config.Game.ShutdownCheckIntervalDuration()
-	// So we need to set it up properly or mock parts of it.
-	// Since s.roomManager is nil, we should construct a minimal server.
+	shutdownDone := make(chan struct{})
+	go func() {
+		server.GracefulShutdown(3 * time.Second)
+		close(shutdownDone)
+	}()
 
-	// Skip complex integration-like tests in unit tests unless we mock everything.
-	// Focusing on available simple logic.
+	require.Eventually(t, func() bool {
+		return server.OperationalState() == OperationalStateMaintenance
+	}, time.Second, time.Millisecond)
+	select {
+	case <-shutdownDone:
+		t.Fatal("shutdown continued while terminal settlement still held a start lease")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case <-shutdownDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown did not continue after the start lease was released")
+	}
 }

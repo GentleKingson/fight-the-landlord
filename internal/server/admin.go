@@ -364,19 +364,15 @@ func validateAdminPlayerID(w http.ResponseWriter, playerID string) bool {
 }
 
 func (s *Server) writeAdminStatus(w http.ResponseWriter) {
-	activeGames := 0
-	if s != nil && s.roomManager != nil {
-		activeGames = s.roomManager.GetActiveGamesCount()
-	}
 	muted, banned := 0, 0
 	if store := s.activeModerationStore(); store != nil {
 		muted, banned = store.counts()
 	}
-	state, startLeases, transitioning := s.operationalQuiescenceSnapshot()
+	quiescence := s.operationalQuiescence()
 	writeAdminJSON(w, http.StatusOK, adminStatusResponse{
-		State:         state,
-		ActiveGames:   activeGames,
-		SafeToRestart: state != OperationalStateNormal && activeGames == 0 && startLeases == 0 && !transitioning,
+		State:         quiescence.state,
+		ActiveGames:   quiescence.activeGames,
+		SafeToRestart: quiescence.safeToRestart(),
 		OnlinePlayers: s.GetOnlineCount(),
 		MutedPlayers:  muted,
 		BannedPlayers: banned,
