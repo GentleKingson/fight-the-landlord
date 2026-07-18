@@ -63,7 +63,7 @@ rm -rf "$lock_dir"
 archive="$(find "$temp_dir/backups" -maxdepth 1 -name 'redis-backup-*.tar.gz' -print | head -n 1)"
 [[ -n "$archive" && -f "${archive}.sha256" ]]
 tar -xOzf "$archive" metadata.txt | grep -qx 'MIN_SETTLEMENT_KEYS=0'
-tar -xOzf "$archive" metadata.txt | grep -qx 'SETTLEMENT_KEYS_AT_BACKUP=1'
+tar -xOzf "$archive" metadata.txt | grep -Eqx 'SETTLEMENT_KEYS_AT_BACKUP=[0-9]+'
 
 if "$repo_root/scripts/restore-redis.sh" \
   --compose-file "$repo_root/docker-compose.yml" \
