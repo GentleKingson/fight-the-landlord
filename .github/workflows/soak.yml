@@ -54,6 +54,7 @@ jobs:
       OBSERVABILITY_LOG_FORMAT: json
       GAME_SHUTDOWN_TIMEOUT: "1"
       GAME_SHUTDOWN_CHECK_INTERVAL: "1"
+      GAME_ROOM_CLEANUP_DELAY: "0"
     services:
       redis:
         image: redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005

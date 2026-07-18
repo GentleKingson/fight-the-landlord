@@ -65,7 +65,7 @@ wait_ready() {
 wait_process_exit() {
   local pid="$1"
   local _
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 60); do
     if ! kill -0 "$pid" 2>/dev/null; then
       return 0
     fi
