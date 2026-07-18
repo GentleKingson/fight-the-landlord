@@ -11,6 +11,9 @@
 # Secrets (Docker/K8s secret files, never commit)
 secrets/
 
+# Local Redis backups may contain player/session data and credentials.
+/backups/
+
 # Go test coverage output
 cover.out
 

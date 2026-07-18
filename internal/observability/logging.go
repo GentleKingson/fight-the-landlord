@@ -95,6 +95,13 @@ func attrsToAny(attrs []slog.Attr) []any {
 
 func sensitiveLogKey(key string) bool {
 	normalized := strings.ToLower(strings.NewReplacer("-", "_", ".", "_").Replace(key))
+	if normalized == "ip" || strings.HasSuffix(normalized, "_ip") || strings.HasSuffix(normalized, "_ip_address") {
+		return true
+	}
+	switch normalized {
+	case "admin_key", "hand", "player_hand", "cards", "played_cards", "chat", "chat_content", "chat_message":
+		return true
+	}
 	for _, marker := range []string{"token", "ticket", "password", "cookie", "authorization", "secret", "chat_body", "message_body"} {
 		if strings.Contains(normalized, marker) {
 			return true

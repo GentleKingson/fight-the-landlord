@@ -23,6 +23,12 @@ func TestJSONLoggerIsMachineParseableAndRedactsSecrets(t *testing.T) {
 		slog.String("web_session_ticket", "ticket-sentinel"),
 		slog.String("redis.password", "password-sentinel"),
 		slog.String("cookie", "cookie-sentinel"),
+		slog.String("client_ip", "203.0.113.77"),
+		slog.String("admin_key", "admin-key-sentinel"),
+		slog.Group("payload",
+			slog.String("player_hand", "hand-sentinel"),
+			slog.String("chat_content", "chat-sentinel"),
+		),
 	)
 
 	var record map[string]any
@@ -34,10 +40,20 @@ func TestJSONLoggerIsMachineParseableAndRedactsSecrets(t *testing.T) {
 	assert.Equal(t, redactedValue, record["web_session_ticket"])
 	assert.Equal(t, redactedValue, record["redis.password"])
 	assert.Equal(t, redactedValue, record["cookie"])
+	assert.Equal(t, redactedValue, record["client_ip"])
+	assert.Equal(t, redactedValue, record["admin_key"])
+	payload, ok := record["payload"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, redactedValue, payload["player_hand"])
+	assert.Equal(t, redactedValue, payload["chat_content"])
 	assert.NotContains(t, output.String(), "token-sentinel")
 	assert.NotContains(t, output.String(), "ticket-sentinel")
 	assert.NotContains(t, output.String(), "password-sentinel")
 	assert.NotContains(t, output.String(), "cookie-sentinel")
+	assert.NotContains(t, output.String(), "203.0.113.77")
+	assert.NotContains(t, output.String(), "admin-key-sentinel")
+	assert.NotContains(t, output.String(), "hand-sentinel")
+	assert.NotContains(t, output.String(), "chat-sentinel")
 }
 
 func TestTextLoggerIncludesStructuredFields(t *testing.T) {

@@ -128,7 +128,7 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	// 检查是否超限
 	if rate.secondCount > rl.maxRequestsPerSecond || rate.minuteCount > rl.maxRequestsPerMinute {
 		rate.bannedUntil = now.Add(rl.banDuration)
-		log.Printf("⚠️ IP %s 因请求过于频繁被暂时封禁 %v", ip, rl.banDuration)
+		log.Printf("⚠️ 客户端地址因请求过于频繁被暂时封禁 %v", rl.banDuration)
 		return false
 	}
 

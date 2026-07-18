@@ -3,6 +3,7 @@ import type { GameSocket } from '../../transport/wsClient';
 import { selectChatMessages, useAppStore, useChatStore } from '../../stores/appStore';
 import { Icon } from '../../shared/ui/Icon';
 import { createChatCommand, dispatchCommand } from '../../transport/commandDispatcher';
+import type { LeaderboardType } from '../../protocol/types';
 
 interface LobbyProps {
   socket: GameSocket;
@@ -255,17 +256,47 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
 }
 
 function LobbySubPanel({ socket, panel }: LobbyProps & { panel: string }) {
-  if (panel === 'leaderboard') return <LeaderboardPanel />;
+  if (panel === 'leaderboard') return <LeaderboardPanel socket={socket} />;
   if (panel === 'stats') return <StatsPanel />;
   if (panel === 'chat') return <LobbyChat socket={socket} />;
   return <RulesPanel />;
 }
 
-function LeaderboardPanel() {
+const leaderboardLabels: Record<LeaderboardType, string> = {
+  total: '总榜',
+  daily: '日榜',
+  weekly: '周榜'
+};
+
+function LeaderboardPanel({ socket }: LobbyProps) {
   const entries = useAppStore((state) => state.leaderboard);
+  const leaderboardType = useAppStore((state) => state.leaderboardType);
+  const pending = Boolean(useAppStore((state) => state.pendingCommands.leaderboard));
+
+  function selectLeaderboard(nextType: LeaderboardType) {
+    dispatchCommand(socket, {
+      kind: 'leaderboard', leaderboardType: nextType, offset: 0, limit: 30
+    });
+  }
+
   return (
     <section className="sub-panel">
-      <h2>战绩榜</h2>
+      <h2>{leaderboardLabels[leaderboardType]}</h2>
+      <div className="leaderboard-tabs" role="tablist" aria-label="排行榜周期">
+        {(Object.keys(leaderboardLabels) as LeaderboardType[]).map((type) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={leaderboardType === type}
+            className={leaderboardType === type ? 'is-active' : ''}
+            disabled={pending}
+            key={type}
+            onClick={() => selectLeaderboard(type)}
+          >
+            {leaderboardLabels[type]}
+          </button>
+        ))}
+      </div>
       <div className="ranking-list">
         {entries.length ? entries.map((entry, index) => (
           <div className="ranking-row" key={`${entry.player_id}_${index}`}>

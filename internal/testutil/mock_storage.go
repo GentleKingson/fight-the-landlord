@@ -15,8 +15,8 @@ type MockLeaderboard struct {
 	mock.Mock
 }
 
-func (m *MockLeaderboard) RecordGameResult(ctx context.Context, playerID, playerName string, isWinner, isLandlord bool) error {
-	args := m.Called(ctx, playerID, playerName, isWinner, isLandlord)
+func (m *MockLeaderboard) RecordGameResult(ctx context.Context, gameID, playerID, playerName string, isLandlord, isWinner bool) error {
+	args := m.Called(ctx, gameID, playerID, playerName, isLandlord, isWinner)
 	return args.Error(0)
 }
 
@@ -33,8 +33,8 @@ func (m *MockLeaderboard) GetPlayerRank(ctx context.Context, playerID string) (i
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockLeaderboard) GetLeaderboard(ctx context.Context, limit int) ([]*storage.LeaderboardEntry, error) {
-	args := m.Called(ctx, limit)
+func (m *MockLeaderboard) GetLeaderboard(ctx context.Context, leaderboardType string, offset, limit int) ([]*storage.LeaderboardEntry, error) {
+	args := m.Called(ctx, leaderboardType, offset, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

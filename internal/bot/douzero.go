@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -36,7 +36,12 @@ func (e *DouZeroEngine) SetMetrics(metrics *observability.Metrics) {
 func NewDouZeroEngine(serviceURL string) *DouZeroEngine {
 	return &DouZeroEngine{
 		serviceURL: serviceURL,
-		httpClient: &http.Client{Timeout: douzeroTimeout},
+		httpClient: &http.Client{
+			Timeout: douzeroTimeout,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
@@ -116,46 +121,99 @@ func (e *DouZeroEngine) DecideBid(_ context.Context, _ string, hand []card.Card,
 }
 
 func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx GameContext) []card.Card {
+	return e.decidePlayWithProvenance(ctx, botName, gctx).cards
+}
+
+func (e *DouZeroEngine) decidePlayWithProvenance(ctx context.Context, botName string, gctx GameContext) playDecisionResult {
 	if !gctx.MustPlay && !gctx.CanBeat {
-		return nil
+		return playDecisionResult{}
 	}
 
 	if gctx.DouZeroPos == "" {
 		log.Printf("🎮 [DouZero] %s: 位置未知，回退规则出牌", botName)
 		e.recordFallback()
-		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+		return playDecisionResult{cards: ruleFallback(gctx), usedRuleFallback: true}
 	}
 
 	req := e.buildRequest(gctx)
 	action, err := e.callService(ctx, req)
 	if err != nil {
-		log.Printf("🎮 [DouZero] %s: 服务错误: %v，回退规则出牌", botName, err)
-		if e.metrics != nil && isTimeoutError(err) {
-			e.metrics.BotTimeout("douzero")
-		}
-		e.recordFallback()
-		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+		return e.serviceErrorDecision(botName, err, gctx)
 	}
+	return e.actionDecision(botName, action, gctx)
+}
 
+func (e *DouZeroEngine) serviceErrorDecision(
+	botName string,
+	err error,
+	gctx GameContext,
+) playDecisionResult {
+	reason := invalidActionHTTPError
+	var invalidErr *douzeroActionError
+	if errors.As(err, &invalidErr) {
+		reason = invalidErr.reason
+	}
+	if e.metrics != nil && reason == invalidActionTimeout {
+		e.metrics.BotTimeout("douzero")
+	}
+	return e.fallbackDecision(botName, reason, gctx)
+}
+
+func (e *DouZeroEngine) actionDecision(
+	botName string,
+	action []int,
+	gctx GameContext,
+) playDecisionResult {
 	if len(action) == 0 {
 		if gctx.MustPlay {
-			log.Printf("🎮 [DouZero] %s: 返回 pass 但必须出牌，回退规则出牌", botName)
-			e.recordFallback()
-			return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+			return e.fallbackDecision(botName, invalidActionMustPlayPass, gctx)
 		}
 		log.Printf("🎮 [DouZero] %s: pass", botName)
-		return nil
+		return playDecisionResult{}
 	}
 
 	cards := e.douzeroToCards(action, gctx.Hand)
 	if cards == nil {
-		log.Printf("🎮 [DouZero] %s: 牌面转换失败，回退规则出牌", botName)
-		e.recordFallback()
-		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+		return e.fallbackDecision(botName, invalidActionNotOwned, gctx)
 	}
 
-	log.Printf("🎮 [DouZero] %s 出牌: %s", botName, cardsToStr(cards))
-	return cards
+	parsed, parseErr := rule.ParseHand(cards)
+	if parseErr != nil || parsed.Type == rule.Invalid {
+		return e.fallbackDecision(botName, invalidActionInvalidHand, gctx)
+	}
+	if !gctx.MustPlay && !gctx.RecentPlays[0].Played.IsEmpty() &&
+		!rule.CanBeat(parsed, gctx.RecentPlays[0].Played) {
+		return e.fallbackDecision(botName, invalidActionCannotBeat, gctx)
+	}
+
+	log.Printf("🎮 [DouZero] %s 出牌: count=%d type=%s", botName, len(cards), parsed.Type.String())
+	return playDecisionResult{cards: cards}
+}
+
+func (e *DouZeroEngine) fallbackDecision(
+	botName string,
+	reason invalidActionReason,
+	gctx GameContext,
+) playDecisionResult {
+	return playDecisionResult{
+		cards:            e.invalidFallback(botName, reason, gctx),
+		usedRuleFallback: true,
+	}
+}
+
+func (e *DouZeroEngine) invalidFallback(botName string, reason invalidActionReason, gctx GameContext) []card.Card {
+	e.RecordInvalidAction(reason)
+	e.recordFallback()
+	// Only the bounded reason is logged. In particular, never include the
+	// external response or the bot's complete hand.
+	log.Printf("🎮 [DouZero] %s: invalid action (%s), using rule fallback", botName, reason)
+	return ruleFallback(gctx)
+}
+
+func (e *DouZeroEngine) RecordInvalidAction(reason invalidActionReason) {
+	if e != nil && e.metrics != nil {
+		e.metrics.BotInvalidAction(string(reason))
+	}
 }
 
 func (e *DouZeroEngine) recordFallback() {
@@ -170,6 +228,14 @@ func isTimeoutError(err error) bool {
 	}
 	var networkError net.Error
 	return errors.As(err, &networkError) && networkError.Timeout()
+}
+
+type douzeroActionError struct {
+	reason invalidActionReason
+}
+
+func (e *douzeroActionError) Error() string {
+	return string(e.reason)
 }
 
 func (e *DouZeroEngine) buildRequest(gctx GameContext) douzeroRequest {
@@ -210,29 +276,40 @@ func (e *DouZeroEngine) buildRequest(gctx GameContext) douzeroRequest {
 func (e *DouZeroEngine) callService(ctx context.Context, req douzeroRequest) ([]int, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal: %w", err)
+		return nil, &douzeroActionError{reason: invalidActionDecodeError}
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		e.serviceURL+"/decide_play", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, &douzeroActionError{reason: invalidActionHTTPError}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := e.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("http: %w", err)
+		reason := invalidActionHTTPError
+		if isTimeoutError(err) {
+			reason = invalidActionTimeout
+		}
+		return nil, &douzeroActionError{reason: reason}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, &douzeroActionError{reason: invalidActionHTTPError}
+	}
 
 	var result douzeroResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&result); err != nil {
+		return nil, &douzeroActionError{reason: invalidActionDecodeError}
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, &douzeroActionError{reason: invalidActionDecodeError}
 	}
 
 	if result.Error != "" {
-		return nil, fmt.Errorf("service: %s", result.Error)
+		return nil, &douzeroActionError{reason: invalidActionHTTPError}
 	}
 
 	return result.Action, nil

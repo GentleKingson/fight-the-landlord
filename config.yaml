@@ -4,10 +4,10 @@ server:
   # production 会启用严格的来源与部署校验
   environment: "development"
   # WebSocket 监听地址
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 1780
   # 最大并发连接数（0 表示无限制）
-  max_connections: 10000
+  max_connections: 100
   # 要求的最低客户端版本（如 "v1.2.0"），留空表示不限制。
   # 低于此版本的客户端启动时会被强制自动升级，用于发布不兼容变更时保证版本一致。
   min_client_version: "v0.5.3"
@@ -41,9 +41,12 @@ game:
   offline_wait_timeout: 30
 
 security:
-  # 允许的来源（设置为 ["*"] 允许所有）
+  # 本地 Web 开发来源；公网部署必须通过环境变量替换为实际 HTTPS 来源。
   allowed_origins:
-    - "*"
+    - "http://localhost:1780"
+    - "http://127.0.0.1:1780"
+    - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
   # 仅来自这些网段的直连代理可以提供 X-Forwarded-For/X-Real-IP。
   trusted_proxy_cidrs: []
   # 连接速率限制
@@ -76,7 +79,7 @@ bot:
 
   # --- DouZero 引擎 ---
   # 启用后使用 DouZero 神经网络引擎；关闭时使用内置规则启发式机器人（无外部依赖）
-  douzero_enabled: true
+  douzero_enabled: false
   # Python DouZero 服务地址
   douzero_url: "http://localhost:2021"
 

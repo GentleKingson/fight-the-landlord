@@ -165,6 +165,10 @@ func TestHandlePlayCardsAtRejectsStaleGameAndTurn(t *testing.T) {
 	cardInfo := convert.CardToInfo(current.Hand[len(current.Hand)-1])
 	snapshot := gs.BuildGameStateDTO(current.ID, sessionManager)
 	handSize := len(current.Hand)
+	assert.True(t, gs.IsCurrentPlayTurn(current.ID, snapshot.GameID, snapshot.TurnID))
+	assert.False(t, gs.IsCurrentPlayTurn(current.ID, "old-game", snapshot.TurnID))
+	assert.False(t, gs.IsCurrentPlayTurn(current.ID, snapshot.GameID, snapshot.TurnID-1))
+	assert.False(t, gs.IsCurrentPlayTurn("another-player", snapshot.GameID, snapshot.TurnID))
 
 	err := gs.HandlePlayCardsAt(current.ID, []protocol.CardInfo{cardInfo}, "old-game", snapshot.TurnID)
 	require.ErrorIs(t, err, apperrors.ErrStaleGame)
@@ -176,6 +180,7 @@ func TestHandlePlayCardsAtRejectsStaleGameAndTurn(t *testing.T) {
 
 	require.NoError(t, gs.HandlePlayCardsAt(current.ID, []protocol.CardInfo{cardInfo}, snapshot.GameID, snapshot.TurnID))
 	assert.Len(t, current.Hand, handSize-1)
+	assert.False(t, gs.IsCurrentPlayTurn(current.ID, snapshot.GameID, snapshot.TurnID))
 }
 
 func TestBuildGameStateDTOPlayingHasAuthoritativeTurnAndLedger(t *testing.T) {

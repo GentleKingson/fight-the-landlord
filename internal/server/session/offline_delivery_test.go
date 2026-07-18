@@ -395,6 +395,8 @@ func TestGameOverKeepsRoomEndedUntilDeliveryCompletes(t *testing.T) {
 	gameConfig := config.GameConfig{TurnTimeout: 30, BidTimeout: 15, RoomTimeout: 10, OfflineWaitTimeout: 30}
 	_, gameRoom, clients := newBarrierDeliveryRoom(t, gameConfig)
 	gameSession := NewGameSession(gameRoom, storage.NewLeaderboardManager(nil), gameConfig)
+	leaseReleased := make(chan struct{})
+	gameSession.SetQuiescenceRelease(func() { close(leaseReleased) })
 	t.Cleanup(gameSession.StopAllTimers)
 	gameSession.Start()
 	clients[1].blockOn(protocol.MsgGameOver)
@@ -410,8 +412,14 @@ func TestGameOverKeepsRoomEndedUntilDeliveryCompletes(t *testing.T) {
 	}()
 	waitForSignal(t, clients[1].entered, "game-over delivery did not reach the barrier")
 	require.Equal(t, room.RoomStateEnded, gameRoom.State())
+	select {
+	case <-leaseReleased:
+		t.Fatal("quiescence lease released before terminal delivery completed")
+	default:
+	}
 
 	close(clients[1].release)
 	waitForSignal(t, deliveryDone, "game-over delivery did not complete")
+	waitForSignal(t, leaseReleased, "quiescence lease release after terminal delivery")
 	require.Equal(t, room.RoomStateWaiting, gameRoom.State())
 }

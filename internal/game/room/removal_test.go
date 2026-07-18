@@ -15,6 +15,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
 type conditionalTimeoutClient struct {
@@ -140,6 +141,65 @@ func TestRoomRemovalIsExactOnceAndOutsideOwnershipLocks(t *testing.T) {
 	require.EqualValues(t, 1, botClient.closeCount.Load())
 	require.Empty(t, botClient.GetRoom())
 	require.Nil(t, rm.GetRoom(gameRoom.Code))
+}
+
+func TestLeaveRoomRetiresWaitingRoomWhenOnlyBotsRemain(t *testing.T) {
+	rm := newMatchTransactionManager()
+	human := newConcurrencyClient("leaving-human")
+	firstBot := newRemovalBotClient("first-bot")
+	secondBot := newRemovalBotClient("second-bot")
+	gameRoom, err := rm.CreateRoom(human)
+	require.NoError(t, err)
+	_, err = rm.JoinRoom(firstBot, gameRoom.Code)
+	require.NoError(t, err)
+	_, err = rm.JoinRoom(secondBot, gameRoom.Code)
+	require.NoError(t, err)
+
+	var calls atomic.Int32
+	var removal RoomRemoval
+	rm.SetOnRoomRemoved(func(removed RoomRemoval) {
+		calls.Add(1)
+		removal = removed
+	})
+
+	require.True(t, rm.LeaveRoom(human))
+	require.False(t, rm.LeaveRoom(human))
+	require.False(t, rm.RemoveRoom(gameRoom, RoomRemovalRollback))
+	require.EqualValues(t, 1, calls.Load())
+	require.Same(t, gameRoom, removal.Room)
+	require.Equal(t, RoomRemovalLeft, removal.Reason)
+	require.Len(t, removal.Players, 3)
+	require.Nil(t, rm.GetRoom(gameRoom.Code))
+	for _, client := range []types.ClientInterface{human, firstBot, secondBot} {
+		require.Empty(t, client.GetRoom())
+	}
+	require.EqualValues(t, 1, firstBot.closeCount.Load())
+	require.EqualValues(t, 1, secondBot.closeCount.Load())
+}
+
+func TestLeaveRoomKeepsWaitingRoomWhenHumanRemains(t *testing.T) {
+	rm := newMatchTransactionManager()
+	leavingHuman := newConcurrencyClient("leaving-human")
+	remainingHuman := newConcurrencyClient("remaining-human")
+	botClient := newRemovalBotClient("remaining-bot")
+	gameRoom, err := rm.CreateRoom(leavingHuman)
+	require.NoError(t, err)
+	_, err = rm.JoinRoom(remainingHuman, gameRoom.Code)
+	require.NoError(t, err)
+	_, err = rm.JoinRoom(botClient, gameRoom.Code)
+	require.NoError(t, err)
+
+	var calls atomic.Int32
+	rm.SetOnRoomRemoved(func(RoomRemoval) { calls.Add(1) })
+
+	require.True(t, rm.LeaveRoom(leavingHuman))
+	require.Zero(t, calls.Load())
+	require.Same(t, gameRoom, rm.GetRoom(gameRoom.Code))
+	require.Empty(t, leavingHuman.GetRoom())
+	require.Equal(t, gameRoom.Code, remainingHuman.GetRoom())
+	require.Equal(t, gameRoom.Code, botClient.GetRoom())
+	require.Len(t, gameRoom.SnapshotPlayers(), 2)
+	require.Zero(t, botClient.closeCount.Load())
 }
 
 func TestTimeoutDispatchesLifecycleBeforeBotCloseAndHumanNotification(t *testing.T) {

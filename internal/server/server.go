@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 
 	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
@@ -92,9 +93,17 @@ type Server struct {
 	clientPumpsClosed     bool
 	clientPumpsWG         sync.WaitGroup
 
-	// 维护模式
-	maintenanceMode bool
-	maintenanceMu   sync.RWMutex
+	// 运营控制
+	operationalTransitionMu  sync.Mutex
+	operationalAdmissionMu   sync.RWMutex
+	operationalMu            sync.Mutex
+	operationalState         atomic.Uint32
+	gameStartLeases          int
+	operationalTransitioning bool
+	moderationOnce           sync.Once
+	moderation               *moderationStore
+	adminLimiterOnce         sync.Once
+	adminLimiter             *adminRateLimiter
 }
 
 type browserRevokeDrain struct {
@@ -135,6 +144,9 @@ func NewServer(cfg *config.Config) (*Server, error) {
 func connectRedis(cfg *config.Config, metrics *observability.Metrics) (*redis.Client, error) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB,
+		// This deployment is deliberately single-node. Disable the unsupported
+		// endpoint-handoff probe so it cannot appear as an application Redis error.
+		MaintNotificationsConfig: &maintnotifications.Config{Mode: maintnotifications.ModeDisabled},
 	})
 	if metrics != nil && metrics.Enabled() {
 		rdb.AddHook(observability.NewRedisHook(metrics))
@@ -212,6 +224,7 @@ func (s *Server) initializeGameRuntime(cfg *config.Config) {
 		BotEngine:           botEngine,
 		BotConfig:           cfg.BOT,
 		ResolveActiveClient: s.GetClientByID,
+		AcquireStartLease:   s.AcquireGameStartLease,
 		RegisterSession: func(roomCode string, gs *session.GameSession) bool {
 			return s.handler.SetGameSession(roomCode, gs)
 		},
@@ -225,10 +238,13 @@ func (s *Server) initializeGameRuntime(cfg *config.Config) {
 		SessionManager: s.sessionManager,
 		Metrics:        s.metrics,
 	})
-	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot) {
+	s.roomManager.SetStartAdmission(s.AcquireGameStartLease)
+	s.roomManager.SetOnGameStart(func(r *room.Room, players []room.PlayerSnapshot, releaseStartLease func()) {
 		gs := session.NewGameSessionWithPlayers(r, players, s.leaderboard, s.config.Game)
+		gs.SetQuiescenceRelease(releaseStartLease)
 		gs.SetMetrics(s.metrics)
 		if !s.handler.SetGameSession(r.Code, gs) {
+			gs.Retire()
 			return
 		}
 		for _, player := range players {

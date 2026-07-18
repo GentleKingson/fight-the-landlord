@@ -1,5 +1,5 @@
 import type { LeaderboardEntry, RoomListItem, StatsResultPayload } from '../../protocol/generated';
-import type { LobbyPanel } from '../../protocol/types';
+import type { LeaderboardType, LobbyPanel } from '../../protocol/types';
 
 export interface LobbySlice {
   onlineCount: number;
@@ -7,7 +7,7 @@ export interface LobbySlice {
   roomCodeInput: string;
   stats: StatsResultPayload | null;
   leaderboard: LeaderboardEntry[];
-  leaderboardType: string;
+  leaderboardType: LeaderboardType;
   roomList: RoomListItem[];
   matchDeadlineMs: number;
   matchPractice: boolean;

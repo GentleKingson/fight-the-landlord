@@ -22,6 +22,7 @@ const (
 	ErrCodeStaleGame         = 3006
 	ErrCodeStaleTurn         = 3007
 	ErrCodeServerMaintenance = 5003 // 服务器维护中
+	ErrCodeServerDraining    = 5004 // 服务器排空中
 )
 
 // ErrorMessages 错误码对应的消息
@@ -46,4 +47,5 @@ var ErrorMessages = map[int]string{
 	ErrCodeStaleGame:         "牌局已更新，请同步后重试",
 	ErrCodeStaleTurn:         "回合已更新，请同步后重试",
 	ErrCodeServerMaintenance: "服务器维护中",
+	ErrCodeServerDraining:    "服务器正在排空",
 }

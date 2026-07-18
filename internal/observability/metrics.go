@@ -47,6 +47,7 @@ type Metrics struct {
 	botDuration           *prometheus.HistogramVec
 	botTimeouts           *prometheus.CounterVec
 	botFallbacks          *prometheus.CounterVec
+	botInvalidActions     *prometheus.CounterVec
 }
 
 // NewMetrics constructs an isolated metric registry. Disabled metrics are
@@ -85,6 +86,7 @@ func NewMetrics(enabled bool) *Metrics {
 	m.botDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: metricsNamespace, Name: "bot_decision_seconds", Help: "Bot decision duration by engine.", Buckets: prometheus.DefBuckets}, []string{"engine"})
 	m.botTimeouts = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "bot_timeouts_total", Help: "Bot decision timeouts by engine."}, []string{"engine"})
 	m.botFallbacks = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "bot_fallback_total", Help: "Bot engine fallbacks between bounded engines."}, []string{"from", "to"})
+	m.botInvalidActions = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "bot_invalid_action_total", Help: "Invalid external bot actions by bounded reason."}, []string{"reason"})
 
 	m.registry.MustRegister(
 		m.connectionsCurrent, m.connectionsTotal, m.connectionsRejected, m.slowClientDisconnects,
@@ -92,7 +94,7 @@ func NewMetrics(enabled bool) *Metrics {
 		m.roomsCurrent, m.roomCleanups, m.gamesCurrent, m.gamesStarted, m.gamesFinished, m.gameDuration,
 		m.matchQueueCurrent, m.matchWait, m.matchCancelled, m.matchRollbacks,
 		m.commands, m.commandLatency, m.protocolErrors, m.idempotencyHits, m.idempotencyConflicts,
-		m.redisLatency, m.redisErrors, m.readiness, m.botDuration, m.botTimeouts, m.botFallbacks,
+		m.redisLatency, m.redisErrors, m.readiness, m.botDuration, m.botTimeouts, m.botFallbacks, m.botInvalidActions,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 	// Vector metric families do not appear in exposition until at least one
@@ -109,6 +111,9 @@ func NewMetrics(enabled bool) *Metrics {
 	m.botDuration.WithLabelValues("other")
 	m.botTimeouts.WithLabelValues("other")
 	m.botFallbacks.WithLabelValues("other", "other")
+	for _, reason := range botInvalidActionReasonValues {
+		m.botInvalidActions.WithLabelValues(reason)
+	}
 	return m
 }
 
@@ -284,6 +289,16 @@ func (m *Metrics) BotFallback(from, to string) {
 	m.botFallbacks.WithLabelValues(bounded(from, botEngines), bounded(to, botEngines)).Inc()
 }
 
+func (m *Metrics) BotInvalidAction(reason string) {
+	if !m.Enabled() {
+		return
+	}
+	if _, ok := botInvalidActionReasons[reason]; !ok {
+		return
+	}
+	m.botInvalidActions.WithLabelValues(reason).Inc()
+}
+
 func nonNegativeSeconds(duration time.Duration) float64 {
 	if duration < 0 {
 		return 0
@@ -308,12 +323,32 @@ func set(values ...string) map[string]struct{} {
 }
 
 var (
-	commandTypes         = set("reconnect", "ping", "create_room", "join_room", "leave_room", "quick_match", "practice_match", "cancel_match", "ready", "cancel_ready", "bid", "play_cards", "pass", "get_stats", "get_leaderboard", "get_room_list", "get_online_count", "get_maintenance_status", "chat")
-	commandResults       = set("ok", "error", "invalid", "rate_limited", "unavailable", "cache_hit", "conflict")
-	protocolErrorReasons = set("non_binary_frame", "decode", "invalid_command", "invalid_request_id", "handshake")
-	reconnectReasons     = set("decode", "already_bound", "invalid", "expired", "rebind", "delivery", "snapshot_skipped", "ticket", "superseded", "authority_race")
-	matchReasons         = set("cancel"+"led", "timeout", "disconnected", "connection_replaced", "delivery_failed", "shutdown", "room_removed", "participant_unavailable", "assembly_failed")
-	rollbackStages       = set("validate", "begin", "bind", "join", "commit", "start", "publish", "persist", "cancel")
-	redisOperations      = set("dial", "ping", "get", "set", "del", "hgetall", "hset", "expire", "zadd", "zscore", "zrank", "zrevrank", "zrange", "zrevrange", "pipeline")
-	botEngines           = set("heuristic", "douzero")
+	commandTypes                 = set("reconnect", "ping", "create_room", "join_room", "leave_room", "quick_match", "practice_match", "cancel_match", "ready", "cancel_ready", "bid", "play_cards", "pass", "get_stats", "get_leaderboard", "get_room_list", "get_online_count", "get_maintenance_status", "chat")
+	commandResults               = set("ok", "error", "invalid", "rate_limited", "unavailable", "cache_hit", "conflict")
+	protocolErrorReasons         = set("non_binary_frame", "decode", "invalid_command", "invalid_request_id", "handshake")
+	reconnectReasons             = set("decode", "already_bound", "invalid", "expired", "rebind", "delivery", "snapshot_skipped", "ticket", "superseded", "authority_race")
+	matchReasons                 = set("cancel"+"led", "timeout", "disconnected", "connection_replaced", "delivery_failed", "shutdown", "room_removed", "participant_unavailable", "assembly_failed")
+	rollbackStages               = set("validate", "begin", "bind", "join", "commit", "start", "publish", "persist", "cancel")
+	redisOperations              = set("dial", "ping", "get", "set", "del", "hgetall", "hset", "expire", "zadd", "zscore", "zrank", "zrevrank", "zrange", "zrevrange", "pipeline")
+	botEngines                   = set("heuristic", "douzero")
+	botInvalidActionReasonValues = []string{
+		"timeout",
+		"http_error",
+		"decode_error",
+		"not_owned",
+		"invalid_hand",
+		"cannot_beat",
+		"must_play_pass",
+		"stale_turn",
+		"submit_rejected",
+	}
+	botInvalidActionReasons = exactSet(botInvalidActionReasonValues...)
 )
+
+func exactSet(values ...string) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		result[value] = struct{}{}
+	}
+	return result
+}

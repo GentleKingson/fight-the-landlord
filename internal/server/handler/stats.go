@@ -5,6 +5,7 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
+	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
@@ -66,15 +67,18 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 		}
 	}
 
-	// 限制请求数量
-	if payload.Limit <= 0 || payload.Limit > 50 {
-		payload.Limit = 10
+	leaderboardType, err := storage.NormalizeLeaderboardType(payload.Type)
+	if err != nil {
+		sendMessage(client, codec.NewCommandErrorMessageWithText(
+			protocol.ErrCodeInvalidMsg,
+			"排行榜类型无效",
+			protocol.MsgGetLeaderboard,
+		))
+		return
 	}
-	if payload.Offset < 0 {
-		payload.Offset = 0
-	}
+	offset, limit := storage.NormalizeLeaderboardPagination(payload.Offset, payload.Limit)
 
-	entries, err := h.leaderboard.GetLeaderboard(context.Background(), payload.Limit)
+	entries, err := h.leaderboard.GetLeaderboard(context.Background(), leaderboardType, offset, limit)
 	if err != nil {
 		sendMessage(client, codec.NewCommandErrorMessageWithText(protocol.ErrCodeUnknown, "获取排行榜失败", protocol.MsgGetLeaderboard))
 		return
@@ -94,7 +98,7 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 	}
 
 	sendMessage(client, codec.MustNewMessage(protocol.MsgLeaderboardResult, protocol.LeaderboardResultPayload{
-		Type:    payload.Type,
+		Type:    leaderboardType,
 		Entries: protocolEntries,
 	}))
 }

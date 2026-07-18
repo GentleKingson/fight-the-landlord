@@ -257,6 +257,19 @@ func (h *Handler) restoreReconnectSession(
 ) (*session.RestoredSession, string, bool) {
 	restored, webClient, browserTransport, err := h.restoreReconnectCredential(client, payload, temporaryID)
 	if err == nil {
+		if playerBanned(h.server, restored.PlayerID) {
+			h.rollbackRestoredSession(restored)
+			if h.metrics != nil {
+				h.metrics.ReconnectFailure("invalid")
+			}
+			sendMessage(client, codec.NewCommandErrorMessageWithText(
+				protocol.ErrCodeReconnectInvalid,
+				"该玩家已被暂时封禁",
+				protocol.MsgReconnect,
+			))
+			client.Close()
+			return nil, "", false
+		}
 		if !browserTransport {
 			return restored, "", true
 		}

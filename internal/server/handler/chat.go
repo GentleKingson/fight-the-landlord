@@ -20,6 +20,10 @@ const (
 
 // handleChat 处理聊天消息
 func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message) {
+	if playerMuted(h.server, client.GetID()) {
+		sendChatError(client, protocol.ErrCodeRateLimit, "您已被暂时禁言")
+		return
+	}
 	payload, legacy, err := codec.ParseChatPayload(msg)
 	if err != nil {
 		sendChatError(client, protocol.ErrCodeInvalidMsg, "聊天消息格式无效")

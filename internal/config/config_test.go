@@ -93,6 +93,24 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	assert.Nil(t, cfg)
 }
 
+func TestLoadLocalEnvDoesNotExposeMalformedSecret(t *testing.T) {
+	for name, content := range map[string]string{
+		"redis password": `REDIS_PASSWORD="redis-secret-sentinel`,
+		"admin key":      `ADMIN_KEY="admin-secret-sentinel`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".env.local")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+			err := loadLocalEnv(path)
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "redis-secret-sentinel")
+			assert.NotContains(t, err.Error(), "admin-secret-sentinel")
+			assert.EqualError(t, err, "load local environment file: invalid or unreadable")
+		})
+	}
+}
+
 func TestLoad_AppliesDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -205,6 +223,8 @@ func TestConfigValidateRejectsUnsafeRuntimeValues(t *testing.T) {
 		{name: "session commit metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/session/commit" }, field: "observability.metrics_path"},
 		{name: "session refresh metrics path", mutate: func(cfg *Config) { cfg.Observability.MetricsPath = "/session/refresh" }, field: "observability.metrics_path"},
 		{name: "invalid log format", mutate: func(cfg *Config) { cfg.Observability.LogFormat = "yaml" }, field: "observability.log_format"},
+		{name: "short admin key", mutate: func(cfg *Config) { cfg.Admin.Key = "too-short" }, field: "ADMIN_KEY"},
+		{name: "admin key newline", mutate: func(cfg *Config) { cfg.Admin.Key = strings.Repeat("k", 32) + "\n" }, field: "ADMIN_KEY"},
 	}
 
 	for _, testCase := range tests {
@@ -231,6 +251,9 @@ func TestConfigValidateProductionSecurityPolicy(t *testing.T) {
 	require.ErrorContains(t, cfg.Validate(), "security.allowed_origins")
 
 	cfg.Security.AllowedOrigins = []string{"https://game.example"}
+	require.ErrorContains(t, cfg.Validate(), "ADMIN_KEY")
+
+	cfg.Admin.Key = strings.Repeat("k", 32)
 	require.NoError(t, cfg.Validate())
 }
 
@@ -292,12 +315,14 @@ func TestDefault(t *testing.T) {
 	require.NotNil(t, cfg)
 
 	// Verify defaults are set
-	assert.Equal(t, defaultHost, cfg.Server.Host)
+	assert.Equal(t, "127.0.0.1", cfg.Server.Host)
 	assert.Equal(t, defaultPort, cfg.Server.Port)
+	assert.Equal(t, 100, cfg.Server.MaxConnections)
 	assert.Equal(t, defaultTurnTimeout, cfg.Game.TurnTimeout)
 	assert.True(t, cfg.Observability.MetricsEnabled)
 	assert.Equal(t, "/metrics", cfg.Observability.MetricsPath)
 	assert.Equal(t, "json", cfg.Observability.LogFormat)
+	assert.Empty(t, cfg.Admin.Key)
 }
 
 func TestShippedConfigUsesJSONLogs(t *testing.T) {
@@ -367,6 +392,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("OBSERVABILITY_METRICS_ENABLED", "false")
 	t.Setenv("OBSERVABILITY_METRICS_PATH", "/internal/metrics")
 	t.Setenv("OBSERVABILITY_LOG_FORMAT", "text")
+	t.Setenv("ADMIN_KEY", strings.Repeat("a", 32))
 
 	// Create minimal config file
 	content := `
@@ -405,6 +431,7 @@ bot:
 	assert.False(t, cfg.Observability.MetricsEnabled)
 	assert.Equal(t, "/internal/metrics", cfg.Observability.MetricsPath)
 	assert.Equal(t, "text", cfg.Observability.LogFormat)
+	assert.Equal(t, strings.Repeat("a", 32), cfg.Admin.Key)
 }
 
 func validTestConfig() *Config {

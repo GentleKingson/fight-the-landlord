@@ -19,11 +19,9 @@ import (
 // handleWebSocket 处理 WebSocket 连接
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	clientIP := s.webSocketClientIP(r)
-	if s.shuttingDown.Load() || s.IsMaintenanceMode() {
-		s.recordWebSocketRejection("maintenance", clientIP)
-		log.Printf("🔧 维护模式，拒绝新连接: %s", clientIP)
-		http.Error(w, "Server is under maintenance, please try again later",
-			http.StatusServiceUnavailable)
+	if s.shuttingDown.Load() {
+		s.recordWebSocketRejection("shutdown", clientIP)
+		http.Error(w, "Server is shutting down", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -33,7 +31,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	lease, acquired := s.activeConnectionLimiter().tryAcquire()
 	if !acquired {
 		s.recordWebSocketRejection("capacity", clientIP)
-		log.Printf("🚫 达到最大连接数限制 (%d), IP: %s", s.maxConnections, clientIP)
+		log.Printf("🚫 达到最大连接数限制 (%d)", s.maxConnections)
 		http.Error(w, "Server Full", http.StatusServiceUnavailable)
 		return
 	}
@@ -58,7 +56,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	negotiated, err := s.negotiateWebSocket(conn, browser.transport)
 	if err != nil {
 		s.recordWebSocketRejection("handshake", clientIP)
-		log.Printf("协议握手失败 (IP: %s): %v", clientIP, err)
+		log.Printf("协议握手失败")
 		_ = conn.Close()
 		return
 	}
@@ -103,20 +101,20 @@ func (s *Server) webSocketClientIP(r *http.Request) string {
 func (s *Server) validateWebSocketUpgradeRequest(w http.ResponseWriter, r *http.Request, clientIP string) bool {
 	if !s.ipFilter.IsAllowed(clientIP) {
 		s.recordWebSocketRejection("ip_filter", clientIP)
-		log.Printf("🚫 IP %s 被过滤器拒绝", clientIP)
+		log.Printf("🚫 客户端地址被过滤器拒绝")
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return false
 	}
 	if !s.originChecker.Check(r) {
 		s.recordWebSocketRejection("origin", clientIP)
-		log.Printf("🚫 来源验证失败: %s (IP: %s)", r.Header.Get("Origin"), clientIP)
+		log.Printf("🚫 WebSocket 来源验证失败")
 		http.Error(w, "Origin not allowed", http.StatusForbidden)
 		return false
 	}
 	// Reject excess attempts before allocating a nonce or timer.
 	if !s.rateLimiter.Allow(clientIP) {
 		s.recordWebSocketRejection("rate_limit", clientIP)
-		log.Printf("🚫 IP %s 请求过于频繁", clientIP)
+		log.Printf("🚫 WebSocket 请求过于频繁")
 		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 		return false
 	}
@@ -322,12 +320,12 @@ func (s *Server) logAcceptedWebSocket(client *Client, playerID, playerName strin
 	log.Printf("✅ 玩家 %s (%s) 已连接", playerName, playerID)
 }
 
-func (s *Server) recordWebSocketRejection(reason, clientIP string) {
+func (s *Server) recordWebSocketRejection(reason, _ string) {
 	if s.metrics != nil {
 		s.metrics.ConnectionRejected()
 	}
 	if s.logger != nil {
-		s.logger.Warn("websocket rejected", "event", "websocket_rejected", "error_code", reason, "client_ip", clientIP)
+		s.logger.Warn("websocket rejected", "event", "websocket_rejected", "error_code", reason)
 	}
 }
 

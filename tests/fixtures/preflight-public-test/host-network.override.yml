@@ -1,0 +1,3 @@
+services:
+  redis:
+    network_mode: host

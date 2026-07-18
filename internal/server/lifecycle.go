@@ -65,65 +65,32 @@ func (s *Server) monitorStats(ctx context.Context) {
 	}
 }
 
-// EnterMaintenanceMode 进入维护模式
-func (s *Server) EnterMaintenanceMode() {
-	s.maintenanceMu.Lock()
-	s.maintenanceMode = true
-	s.maintenanceMu.Unlock()
-
-	// 通知大厅用户服务器即将关闭
-	s.BroadcastToLobby(codec.MustNewMessage(protocol.MsgError, protocol.ErrorPayload{
-		Code:    protocol.ErrCodeServerMaintenance,
-		Message: "👷🏻‍♂️ 维护模式：停止新的房间创建",
-	}))
-
-	log.Println("🔧 进入维护模式：停止新连接和房间创建")
-}
-
-// IsMaintenanceMode 检查是否在维护模式
-func (s *Server) IsMaintenanceMode() bool {
-	s.maintenanceMu.RLock()
-	defer s.maintenanceMu.RUnlock()
-	return s.maintenanceMode
-}
-
 // GracefulShutdown 优雅关闭服务器
 func (s *Server) GracefulShutdown(timeout time.Duration) {
 	s.shuttingDown.Store(true)
 	// 1. 进入维护模式
 	s.EnterMaintenanceMode()
 
-	// 2. 等待游戏结束
-	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(s.config.Game.ShutdownCheckIntervalDuration())
-	defer ticker.Stop()
+	// 2. 等待游戏、终局投递和排行榜结算全部完成。
+	quiescence := s.waitForOperationalQuiescence(
+		timeout,
+		s.config.Game.ShutdownCheckIntervalDuration(),
+	)
+	if quiescence.safeToRestart() {
+		log.Printf("✅ 所有房间和结算已结束，将在 %ds 后关闭服务器！\n", s.config.Game.RoomCleanupDelay)
 
-	lastActiveGames := 0
-	for time.Now().Before(deadline) {
-		activeGames := s.roomManager.GetActiveGamesCount()
-		if activeGames == 0 {
-			log.Printf("✅ 所有房间已结束，将在 %ds 后关闭服务器！\n", s.config.Game.RoomCleanupDelay)
-
-			// 通知大厅用户服务器即将关闭
-			s.BroadcastToLobby(codec.MustNewMessage(protocol.MsgError, protocol.ErrorPayload{
-				Code:    protocol.ErrCodeServerMaintenance,
-				Message: fmt.Sprintf("🚧 服务器将在 %d 秒后停机维护！", s.config.Game.RoomCleanupDelay),
-			}))
-
-			break
-		}
-
-		if lastActiveGames != activeGames {
-			lastActiveGames = activeGames
-			log.Printf("⏳ 等待 %d 个房间结束...", activeGames)
-		}
-
-		<-ticker.C
-	}
-
-	// 3. 超时检查
-	if activeGames := s.roomManager.GetActiveGamesCount(); activeGames > 0 {
-		log.Printf("⚠️ 超时，仍有 %d 个房间进行中，强制关闭", activeGames)
+		// 通知大厅用户服务器即将关闭
+		s.BroadcastToLobby(codec.MustNewMessage(protocol.MsgError, protocol.ErrorPayload{
+			Code:    protocol.ErrCodeServerMaintenance,
+			Message: fmt.Sprintf("🚧 服务器将在 %d 秒后停机维护！", s.config.Game.RoomCleanupDelay),
+		}))
+	} else {
+		log.Printf(
+			"⚠️ 超时，仍有 %d 个房间、%d 个启动租约（状态转换中: %t），强制关闭",
+			quiescence.activeGames,
+			quiescence.startLeases,
+			quiescence.transitioning,
+		)
 	}
 
 	// 4. 发送通知（如果配置了）
@@ -131,6 +98,44 @@ func (s *Server) GracefulShutdown(timeout time.Duration) {
 
 	// 5. 关闭服务器
 	s.Shutdown()
+}
+
+func (s *Server) waitForOperationalQuiescence(
+	timeout time.Duration,
+	checkInterval time.Duration,
+) operationalQuiescenceStatus {
+	status := s.operationalQuiescence()
+	if status.safeToRestart() || timeout <= 0 {
+		return status
+	}
+	if checkInterval <= 0 {
+		checkInterval = time.Second
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+	lastStatus := status
+	log.Printf("⏳ 等待 %d 个房间和 %d 个启动租约结束...", status.activeGames, status.startLeases)
+
+	for {
+		select {
+		case <-timer.C:
+			return s.operationalQuiescence()
+		case <-ticker.C:
+			status = s.operationalQuiescence()
+			if status.safeToRestart() {
+				return status
+			}
+			if status.activeGames != lastStatus.activeGames ||
+				status.startLeases != lastStatus.startLeases ||
+				status.transitioning != lastStatus.transitioning {
+				log.Printf("⏳ 等待 %d 个房间和 %d 个启动租约结束...", status.activeGames, status.startLeases)
+				lastStatus = status
+			}
+		}
+	}
 }
 
 // sendShutdownNotification 发送关闭通知到小米音箱

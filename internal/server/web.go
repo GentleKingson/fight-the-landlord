@@ -50,6 +50,15 @@ func (s *Server) httpHandler(assets fs.FS) http.Handler {
 	mux.HandleFunc("/session/commit", s.handleSessionCommit)
 	mux.HandleFunc("/session/refresh", s.handleSessionRefresh)
 	mux.HandleFunc("/session/revoke", s.handleSessionRevoke)
+	mux.HandleFunc("/admin/status", s.handleAdminStatus)
+	mux.HandleFunc("/admin/drain", s.handleAdminDrain)
+	mux.HandleFunc("/admin/maintenance", s.handleAdminMaintenance)
+	mux.HandleFunc("/admin/resume", s.handleAdminResume)
+	mux.HandleFunc("/admin/disconnect", s.handleAdminDisconnect)
+	mux.HandleFunc("/admin/mute", s.handleAdminMute)
+	mux.HandleFunc("/admin/unmute", s.handleAdminUnmute)
+	mux.HandleFunc("/admin/ban", s.handleAdminBan)
+	mux.HandleFunc("/admin/unban", s.handleAdminUnban)
 	if s.config != nil && s.config.Observability.MetricsPath != "" {
 		metricsHandler := http.NotFoundHandler()
 		if s.config.Observability.MetricsEnabled && s.metrics != nil {

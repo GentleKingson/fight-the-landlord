@@ -11,6 +11,7 @@ export type {
   GameSettlementDTO,
   GameStateDTO,
   LeaderboardEntry,
+  LeaderboardResultPayload,
   PlayerHand,
   PlayerInfo,
   PlayerPlayedCards,
@@ -31,3 +32,8 @@ export type OutgoingPayload = Record<string, unknown> | undefined;
 export type Phase = 'connecting' | 'lobby' | 'matching' | 'waiting' | 'bidding' | 'playing' | 'game_over';
 export type LobbyPanel = 'home' | 'leaderboard' | 'stats' | 'rules' | 'chat';
 export type UtilityDrawer = 'none' | 'chat' | 'counter' | 'history' | 'rules';
+export type LeaderboardType = 'total' | 'daily' | 'weekly';
+
+export function isLeaderboardType(value: string): value is LeaderboardType {
+  return value === 'total' || value === 'daily' || value === 'weekly';
+}

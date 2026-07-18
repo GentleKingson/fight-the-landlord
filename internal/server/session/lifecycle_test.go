@@ -2,6 +2,7 @@ package session
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,26 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
+
+func TestRetireReleasesQuiescenceLeaseExactlyOnce(t *testing.T) {
+	game := &GameSession{}
+	var releases atomic.Int32
+	game.SetQuiescenceRelease(func() { releases.Add(1) })
+
+	var wait sync.WaitGroup
+	for range 32 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			game.Retire()
+		}()
+	}
+	wait.Wait()
+	require.EqualValues(t, 1, releases.Load())
+
+	game.SetQuiescenceRelease(func() { releases.Add(1) })
+	require.EqualValues(t, 2, releases.Load(), "a lease attached after retirement must release immediately")
+}
 
 func TestStartGame_DealCards(t *testing.T) {
 	t.Parallel()
@@ -50,6 +71,27 @@ func TestStartGame_DealCards(t *testing.T) {
 		totalCards += len(p.Hand)
 	}
 	assert.Equal(t, 54, totalCards)
+}
+
+func TestQueueGameResultsUsesOneSettlementTimeForWholeGame(t *testing.T) {
+	t.Parallel()
+
+	r := room.NewMockRoom("SETTLED-AT", testutil.NewSimpleClient("p1", "Player1"))
+	r.AddPlayerForTest(testutil.NewSimpleClient("p2", "Player2"), 1, false)
+	r.AddPlayerForTest(testutil.NewSimpleClient("p3", "Player3"), 2, false)
+	r.SetPlayerOrderForTest([]string{"p1", "p2", "p3"})
+	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{})
+	gs.gameID = "boundary-game"
+	gs.players[0].IsLandlord = true
+
+	gs.queueGameResultsLocked(gs.players[0])
+
+	require.Len(t, gs.pendingResults, 3)
+	settledAt := gs.pendingResults[0].settledAt
+	require.False(t, settledAt.IsZero())
+	for _, result := range gs.pendingResults[1:] {
+		assert.Equal(t, settledAt, result.settledAt)
+	}
 }
 
 func TestRetireBeforeStartPreventsSessionActivation(t *testing.T) {
@@ -358,7 +400,7 @@ func TestEndedRoomCanReadyUpIntoFreshSession(t *testing.T) {
 	manager := room.NewRoomManager(nil, gameConfig)
 	manager.AddRoomForTest(r)
 	var replacement *GameSession
-	manager.SetOnGameStart(func(gameRoom *room.Room, players []room.PlayerSnapshot) {
+	manager.SetOnGameStart(func(gameRoom *room.Room, players []room.PlayerSnapshot, _ func()) {
 		replacement = NewGameSessionWithPlayers(gameRoom, players, storage.NewLeaderboardManager(nil), gameConfig)
 		replacement.Start()
 	})

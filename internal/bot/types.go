@@ -21,12 +21,43 @@ type DecisionEngine interface {
 	DecidePlay(ctx context.Context, botName string, gctx GameContext) []card.Card
 }
 
+type playDecisionResult struct {
+	cards            []card.Card
+	usedRuleFallback bool
+}
+
+type provenanceDecisionEngine interface {
+	decidePlayWithProvenance(ctx context.Context, botName string, gctx GameContext) playDecisionResult
+}
+
+func decidePlayWithProvenance(engine DecisionEngine, ctx context.Context, botName string, gctx GameContext) playDecisionResult {
+	if engineWithProvenance, ok := engine.(provenanceDecisionEngine); ok {
+		return engineWithProvenance.decidePlayWithProvenance(ctx, botName, gctx)
+	}
+	return playDecisionResult{cards: engine.DecidePlay(ctx, botName, gctx)}
+}
+
 // SessionInterface 避免 session↔bot 循环依赖
 type SessionInterface interface {
 	HandleBid(playerID string, bid bool) error
-	HandlePlayCards(playerID string, cardInfos []protocol.CardInfo) error
-	HandlePass(playerID string) error
+	IsCurrentPlayTurn(playerID, gameID string, turnID int64) bool
+	HandlePlayCardsAt(playerID string, cardInfos []protocol.CardInfo, gameID string, turnID int64) error
+	HandlePassAt(playerID, gameID string, turnID int64) error
 }
+
+type invalidActionReason string
+
+const (
+	invalidActionTimeout        invalidActionReason = "timeout"
+	invalidActionHTTPError      invalidActionReason = "http_error"
+	invalidActionDecodeError    invalidActionReason = "decode_error"
+	invalidActionNotOwned       invalidActionReason = "not_owned"
+	invalidActionInvalidHand    invalidActionReason = "invalid_hand"
+	invalidActionCannotBeat     invalidActionReason = "cannot_beat"
+	invalidActionMustPlayPass   invalidActionReason = "must_play_pass"
+	invalidActionStaleTurn      invalidActionReason = "stale_turn"
+	invalidActionSubmitRejected invalidActionReason = "submit_rejected"
+)
 
 // PlayRecord 一次出牌记录
 type PlayRecord struct {

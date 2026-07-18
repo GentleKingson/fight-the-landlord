@@ -1,5 +1,5 @@
 import type { CardInfo } from '../../protocol/generated';
-import type { UtilityDrawer } from '../../protocol/types';
+import type { LeaderboardType, UtilityDrawer } from '../../protocol/types';
 
 export type CommandKind =
   | 'create-room'
@@ -32,7 +32,7 @@ export type CommandRequest =
   | { kind: 'leave-room' }
   | { kind: 'chat'; content: string; scope: string; messageId: string }
   | { kind: 'stats' }
-  | { kind: 'leaderboard'; leaderboardType: string; offset: number; limit: number }
+  | { kind: 'leaderboard'; leaderboardType: LeaderboardType; offset: number; limit: number }
   | { kind: 'room-list' };
 
 export type BusinessErrorCategory = 'validation' | 'rate-limit' | 'maintenance' | 'not-in-room' | 'timeout' | 'network';

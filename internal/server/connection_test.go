@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +22,18 @@ import (
 	serverhandler "github.com/palemoky/fight-the-landlord/internal/server/handler"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 )
+
+func TestWebSocketRejectionLogOmitsRawClientIP(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	server := &Server{logger: slog.New(slog.NewJSONHandler(&output, nil))}
+
+	server.recordWebSocketRejection("origin", "203.0.113.77")
+
+	assert.Contains(t, output.String(), `"error_code":"origin"`)
+	assert.NotContains(t, output.String(), "203.0.113.77")
+	assert.NotContains(t, output.String(), "client_ip")
+}
 
 func newWebSocketLimitTestServer(t *testing.T, maxConnections int) (server *Server, websocketURL string) {
 	t.Helper()

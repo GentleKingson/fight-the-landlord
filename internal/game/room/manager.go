@@ -220,9 +220,18 @@ func (rm *RoomManager) LeaveRoom(client types.ClientInterface) bool {
 		return false
 	}
 	removed := snapshotPlayer(player)
-	empty := len(room.players) == 1
+	removeRoom := true
+	for remainingID, remaining := range room.players {
+		if remainingID == removed.ID {
+			continue
+		}
+		if remaining == nil || !remaining.IsBot {
+			removeRoom = false
+			break
+		}
+	}
 	var removal roomRemovalDispatch
-	if empty {
+	if removeRoom {
 		removal, _ = rm.removePublishedRoomLocked(room, RoomRemovalLeft)
 	} else {
 		types.CompareAndSetRoom(client, removed.ID, roomCode, "")
@@ -245,8 +254,8 @@ func (rm *RoomManager) LeaveRoom(client types.ClientInterface) bool {
 		"result", "left",
 	)
 
-	// 如果房间空了，删除房间
-	if empty {
+	// 如果房间空了或只剩机器人，删除房间
+	if removeRoom {
 		rm.dispatchRoomRemoval(removal)
 	} else {
 		rm.saveRoomAsync(room)
@@ -285,19 +294,23 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 		return apperrors.ErrGameStarted
 	}
 
+	previousReady := player.Ready
 	player.Ready = ready
 	playerID := player.ID
 	recipients := room.snapshotDeliveryRecipientsLocked("")
 	shouldStart := room.checkAllReadyLocked()
 	var startPlayers []PlayerSnapshot
+	var releaseStartLease func()
 	if shouldStart {
-		if err := room.startGameLocked(); err != nil {
+		var err error
+		startPlayers, releaseStartLease, err = rm.startReadyRoomLocked(room)
+		if err != nil {
+			player.Ready = previousReady
 			room.mu.Unlock()
 			room.publishMu.Unlock()
 			rm.mu.RUnlock()
 			return err
 		}
-		startPlayers = room.snapshotPlayersLocked()
 	}
 	callback := rm.onGameStart
 	room.mu.Unlock()
@@ -313,7 +326,9 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 		// The callback may acquire GameSession.mu and therefore must never run
 		// while Room.mu is held. This removes the room -> game-session lock edge.
 		if callback != nil {
-			callback(room, startPlayers)
+			callback(room, startPlayers, releaseStartLease)
+		} else if releaseStartLease != nil {
+			releaseStartLease()
 		}
 
 		// 保存房间状态
@@ -323,10 +338,42 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	return nil
 }
 
-func (rm *RoomManager) SetOnGameStart(callback func(*Room, []PlayerSnapshot)) {
+// startReadyRoomLocked admits and starts a fully ready room while Room.mu is held.
+func (rm *RoomManager) startReadyRoomLocked(room *Room) (
+	players []PlayerSnapshot,
+	releaseStartLease func(),
+	err error,
+) {
+	if rm.startAdmission != nil {
+		var admitted bool
+		releaseStartLease, admitted = rm.startAdmission()
+		if !admitted {
+			return nil, nil, ErrGameStartAdmissionRejected
+		}
+	}
+
+	if err := room.startGameLocked(); err != nil {
+		if releaseStartLease != nil {
+			releaseStartLease()
+		}
+		return nil, nil, err
+	}
+	return room.snapshotPlayersLocked(), releaseStartLease, nil
+}
+
+func (rm *RoomManager) SetOnGameStart(callback func(*Room, []PlayerSnapshot, func())) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 	rm.onGameStart = callback
+}
+
+// SetStartAdmission installs the authoritative lease gate used when the last
+// player readies a room. The callback is invoked while the ready transition is
+// still protected by the room lock.
+func (rm *RoomManager) SetStartAdmission(callback func() (func(), bool)) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	rm.startAdmission = callback
 }
 
 // GetRoom 获取房间

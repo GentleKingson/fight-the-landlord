@@ -134,6 +134,7 @@ curl --fail http://localhost:1780/metrics
 - [安全边界](docs/security.md)
 - [可观测性](docs/observability.md)
 - [容量与 Soak 测试](docs/performance-testing.md)
+- [Redis 备份与恢复](docs/redis-backup.md)
 - [镜像签名、SBOM 与 provenance 验证](docs/release-verification.md)
 
 生产部署应固定镜像 digest，并在拉取前验证本仓库 tag workflow 的 keyless

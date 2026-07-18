@@ -82,6 +82,10 @@ type BeginRoomFunc func(context.Context, types.ClientInterface) (RoomAssembly, e
 // BotFactory creates a matcher-owned bot that must be closed on rollback.
 type BotFactory func(bot.DecisionEngine) types.ClientInterface
 
+// StartLeaseFunc atomically admits a prospective game and returns an
+// idempotent release function owned through terminal settlement.
+type StartLeaseFunc func() (release func(), ok bool)
+
 type matchAttempt struct {
 	id         uint64
 	ctx        context.Context
@@ -110,20 +114,21 @@ func (attempt *matchAttempt) withPublicationLock(action func()) {
 
 // Matcher coordinates queued, inflight, committed, and rolled-back matches.
 type Matcher struct {
-	roomManager     *room.RoomManager
-	redisStore      *storage.RedisStore
-	leaderboard     *storage.LeaderboardManager
-	gameConfig      config.GameConfig
-	botEngine       bot.DecisionEngine
-	botCfg          config.BotConfig
-	registerSession SessionRegistrationFunc
-	resolveActive   func(string) types.ClientInterface
-	beginRoom       BeginRoomFunc
-	botFactory      BotFactory
-	queueTimeout    time.Duration
-	botFillDelay    time.Duration
-	metrics         *observability.Metrics
-	logger          *slog.Logger
+	roomManager       *room.RoomManager
+	redisStore        *storage.RedisStore
+	leaderboard       *storage.LeaderboardManager
+	gameConfig        config.GameConfig
+	botEngine         bot.DecisionEngine
+	botCfg            config.BotConfig
+	registerSession   SessionRegistrationFunc
+	resolveActive     func(string) types.ClientInterface
+	beginRoom         BeginRoomFunc
+	botFactory        BotFactory
+	acquireStartLease StartLeaseFunc
+	queueTimeout      time.Duration
+	botFillDelay      time.Duration
+	metrics           *observability.Metrics
+	logger            *slog.Logger
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -158,6 +163,7 @@ type MatcherDeps struct {
 	ResolveActiveClient func(string) types.ClientInterface
 	BeginRoom           BeginRoomFunc
 	BotFactory          BotFactory
+	AcquireStartLease   StartLeaseFunc
 	QueueTimeout        time.Duration
 	BotFillDelay        time.Duration
 	Context             context.Context
@@ -192,27 +198,28 @@ func NewMatcher(deps MatcherDeps) *Matcher {
 		logger = slog.Default()
 	}
 	m := &Matcher{
-		roomManager:     deps.RoomManager,
-		redisStore:      deps.RedisStore,
-		leaderboard:     deps.Leaderboard,
-		gameConfig:      deps.GameConfig,
-		botEngine:       deps.BotEngine,
-		botCfg:          deps.BotConfig,
-		registerSession: deps.RegisterSession,
-		resolveActive:   deps.ResolveActiveClient,
-		beginRoom:       deps.BeginRoom,
-		botFactory:      factory,
-		queueTimeout:    timeout,
-		botFillDelay:    fillDelay,
-		metrics:         deps.Metrics,
-		logger:          logger.With("component", "match"),
-		ctx:             ctx,
-		cancel:          cancel,
-		closedDone:      make(chan struct{}),
-		queue:           make([]*QueueEntry, 0),
-		entries:         make(map[string]*QueueEntry),
-		attempts:        make(map[uint64]*matchAttempt),
-		publishedRooms:  make(map[*room.Room]*matchAttempt),
+		roomManager:       deps.RoomManager,
+		redisStore:        deps.RedisStore,
+		leaderboard:       deps.Leaderboard,
+		gameConfig:        deps.GameConfig,
+		botEngine:         deps.BotEngine,
+		botCfg:            deps.BotConfig,
+		registerSession:   deps.RegisterSession,
+		resolveActive:     deps.ResolveActiveClient,
+		beginRoom:         deps.BeginRoom,
+		botFactory:        factory,
+		acquireStartLease: deps.AcquireStartLease,
+		queueTimeout:      timeout,
+		botFillDelay:      fillDelay,
+		metrics:           deps.Metrics,
+		logger:            logger.With("component", "match"),
+		ctx:               ctx,
+		cancel:            cancel,
+		closedDone:        make(chan struct{}),
+		queue:             make([]*QueueEntry, 0),
+		entries:           make(map[string]*QueueEntry),
+		attempts:          make(map[uint64]*matchAttempt),
+		publishedRooms:    make(map[*room.Room]*matchAttempt),
 	}
 	if m.beginRoom == nil && m.roomManager != nil {
 		m.beginRoom = m.beginManagedRoom
@@ -576,6 +583,18 @@ func (m *Matcher) attemptWorker(attempt *matchAttempt) {
 }
 
 func (m *Matcher) runAttempt(attempt *matchAttempt) {
+	releaseStartLease, admitted := m.acquireGameStartLease()
+	if !admitted {
+		m.failAttempt(attempt, nil, false, "server_draining", context.Canceled)
+		return
+	}
+	leaseTransferred := false
+	defer func() {
+		if !leaseTransferred {
+			releaseStartLease()
+		}
+	}()
+
 	assembly, gameRoom, clients, prepared := m.prepareAttempt(attempt)
 	if !prepared {
 		return
@@ -617,7 +636,14 @@ func (m *Matcher) runAttempt(attempt *matchAttempt) {
 	}
 	m.reportQueueCurrent()
 
-	m.publishCommittedMatch(attempt, gameRoom, clients, startingPlayers)
+	leaseTransferred = m.publishCommittedMatch(attempt, gameRoom, clients, startingPlayers, releaseStartLease)
+}
+
+func (m *Matcher) acquireGameStartLease() (func(), bool) {
+	if m.acquireStartLease == nil {
+		return func() {}, true
+	}
+	return m.acquireStartLease()
 }
 
 func (m *Matcher) prepareAttempt(
@@ -823,6 +849,7 @@ func boundedMatchReason(reason string) string {
 		"disconnected",
 		"participant_unavailable",
 		"room_removed",
+		"server_draining",
 		"shutdown",
 		"timeout":
 		return reason
@@ -933,28 +960,38 @@ func (m *Matcher) withPublishedRoom(attempt *matchAttempt, gameRoom *room.Room, 
 	return true
 }
 
-func (m *Matcher) publishCommittedMatch(attempt *matchAttempt, gameRoom *room.Room, clients []types.ClientInterface, startingPlayers []room.PlayerSnapshot) {
+func (m *Matcher) publishCommittedMatch(
+	attempt *matchAttempt,
+	gameRoom *room.Room,
+	clients []types.ClientInterface,
+	startingPlayers []room.PlayerSnapshot,
+	releaseStartLease func(),
+) bool {
 	if !m.publishRoomJoinedSnapshots(attempt, gameRoom, clients) {
 		if m.roomManager != nil {
 			m.roomManager.RemoveRoom(gameRoom, room.RoomRemovalRollback)
 		}
-		return
+		return false
 	}
 	if !m.publishStartingPlayers(attempt, gameRoom, startingPlayers) {
-		return
+		if m.roomManager != nil {
+			m.roomManager.RemoveRoom(gameRoom, room.RoomRemovalRollback)
+		}
+		return false
 	}
 
 	gs, current := m.newPublishedSession(attempt, gameRoom)
 	if !current {
-		return
+		return false
 	}
+	gs.SetQuiescenceRelease(releaseStartLease)
 	if !m.startPublishedSession(attempt, gameRoom, gs, clients) {
 		gs.Retire()
-		return
+		return true
 	}
 	if !m.persistPublishedRoom(attempt, gameRoom) {
 		gs.Retire()
-		return
+		return true
 	}
 
 	started := time.Now()
@@ -969,6 +1006,7 @@ func (m *Matcher) publishCommittedMatch(attempt *matchAttempt, gameRoom *room.Ro
 		"participant_count", len(clients),
 		"duration_ms", time.Since(started).Milliseconds(),
 	)
+	return true
 }
 
 func (m *Matcher) publishRoomJoinedSnapshots(attempt *matchAttempt, gameRoom *room.Room, clients []types.ClientInterface) bool {
@@ -1385,6 +1423,48 @@ func (m *Matcher) reportQueueCurrent() {
 	current := len(m.entries)
 	m.mu.Unlock()
 	m.metrics.SetMatchQueueCurrent(current)
+}
+
+// CancelPending retires queued players, bot-fill timers, and unpublished
+// attempts without affecting games that already own a published session. It
+// is used when operational admission closes and is safe to call repeatedly.
+func (m *Matcher) CancelPending(reason string) {
+	if m == nil {
+		return
+	}
+	if reason == "" {
+		reason = "server_draining"
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.cancelBotFillLocked()
+	queued := append([]*QueueEntry(nil), m.queue...)
+	m.queue = nil
+	for _, entry := range queued {
+		entry.State = QueueStateRolledBack
+		entry.stop()
+		if m.entries[entry.PlayerID] == entry {
+			delete(m.entries, entry.PlayerID)
+		}
+	}
+	for _, attempt := range m.attempts {
+		m.cancelAttemptLocked(attempt, reason, "")
+	}
+	m.mu.Unlock()
+	m.reportQueueCurrent()
+
+	for _, entry := range queued {
+		if entry.ownedBot {
+			entry.client.Close()
+			continue
+		}
+		entry.deliveryMu.Lock()
+		m.notifyCancelled(entry.PlayerID, entry.client, reason)
+		entry.deliveryMu.Unlock()
+	}
 }
 
 // Close cancels authoritative deadlines, bot fill, and inflight transactions,

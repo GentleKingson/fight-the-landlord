@@ -21,10 +21,10 @@ import (
 
 // 默认配置值
 const (
-	defaultHost                  = "0.0.0.0"
+	defaultHost                  = "127.0.0.1"
 	defaultEnvironment           = "development"
 	defaultPort                  = 1780
-	defaultMaxConnections        = 10000
+	defaultMaxConnections        = 100
 	defaultRedisAddr             = "localhost:6379"
 	defaultTurnTimeout           = 30
 	defaultBidTimeout            = 15
@@ -56,6 +56,14 @@ type Config struct {
 	Security      SecurityConfig      `yaml:"security"`
 	BOT           BotConfig           `yaml:"bot"`
 	Observability ObservabilityConfig `yaml:"observability"`
+	Admin         AdminConfig         `yaml:"-"`
+}
+
+// AdminConfig is environment-only so the management credential cannot be
+// checked into config.yaml by accident. An empty key disables admin access in
+// development and test; production requires an explicit strong value.
+type AdminConfig struct {
+	Key string `yaml:"-"`
 }
 
 // ObservabilityConfig controls the public Prometheus endpoint and server log
@@ -186,8 +194,8 @@ func Load(path string) (*Config, error) {
 
 	// 本地开发便利：自动加载 .env.local（仅本地，已 gitignore）。
 	// .env 是 Docker 专用（含 REDIS_ADDR=redis:6379 等容器内地址），
-	if err := godotenv.Load(".env.local"); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("load .env.local: %w", err)
+	if err := loadLocalEnv(".env.local"); err != nil {
+		return nil, err
 	}
 	if err := loadFromEnv(cfg); err != nil {
 		return nil, err
@@ -197,6 +205,16 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadLocalEnv deliberately hides parser diagnostics. Some dotenv parsers
+// include an unterminated value verbatim in their error, which can expose a
+// Redis password or management key before structured log redaction is active.
+func loadLocalEnv(filename string) error {
+	if err := godotenv.Load(filename); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("load local environment file: invalid or unreadable")
+	}
+	return nil
 }
 
 // --- 环境变量辅助函数 ---
@@ -290,6 +308,7 @@ func loadFromEnv(cfg *Config) error {
 		func() error { return getEnvBool("OBSERVABILITY_METRICS_ENABLED", &cfg.Observability.MetricsEnabled) },
 		func() error { return getEnvStr("OBSERVABILITY_METRICS_PATH", &cfg.Observability.MetricsPath, false) },
 		func() error { return getEnvStr("OBSERVABILITY_LOG_FORMAT", &cfg.Observability.LogFormat, false) },
+		func() error { return getEnvStr("ADMIN_KEY", &cfg.Admin.Key, true) },
 		func() error { return getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins, false) },
 		func() error {
 			return getEnvStrSlice("SECURITY_TRUSTED_PROXY_CIDRS", &cfg.Security.TrustedProxyCIDRs, true)
@@ -386,7 +405,30 @@ func (c *Config) Validate() error {
 	if err := validateObservabilityConfig(c.Observability); err != nil {
 		return err
 	}
+	if err := validateAdminConfig(c.Admin, environment); err != nil {
+		return err
+	}
 	return validatePositiveLimits(c.Security)
+}
+
+func validateAdminConfig(admin AdminConfig, environment string) error {
+	key := admin.Key
+	if key == "" {
+		if environment == "production" {
+			return fmt.Errorf("ADMIN_KEY must not be empty in production")
+		}
+		return nil
+	}
+	if key != strings.TrimSpace(key) || strings.ContainsAny(key, "\x00\r\n") {
+		return fmt.Errorf("ADMIN_KEY must not contain surrounding whitespace or control characters")
+	}
+	if len(key) < 32 {
+		return fmt.Errorf("ADMIN_KEY must be at least 32 bytes")
+	}
+	if len(key) > 1024 {
+		return fmt.Errorf("ADMIN_KEY must not exceed 1024 bytes")
+	}
+	return nil
 }
 
 func validateObservabilityConfig(observability ObservabilityConfig) error {
@@ -396,7 +438,9 @@ func validateObservabilityConfig(observability ObservabilityConfig) error {
 		return fmt.Errorf("observability.metrics_path must be a clean absolute HTTP path")
 	}
 	switch metricsPath {
-	case "/", "/ws", "/health", "/livez", "/readyz", "/version", "/session/commit", "/session/refresh", "/session/revoke":
+	case "/", "/ws", "/health", "/livez", "/readyz", "/version", "/session/commit", "/session/refresh", "/session/revoke",
+		"/admin/status", "/admin/drain", "/admin/maintenance", "/admin/resume", "/admin/disconnect", "/admin/mute",
+		"/admin/unmute", "/admin/ban", "/admin/unban":
 		return fmt.Errorf("observability.metrics_path conflicts with reserved route %q", metricsPath)
 	}
 	if strings.ContainsAny(metricsPath, "?#") {

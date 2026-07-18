@@ -40,7 +40,6 @@ func (gs *GameSession) Start() {
 // delivery, so a late registration callback cannot reactivate the session.
 func (gs *GameSession) Retire() {
 	gs.actionMu.Lock()
-	defer gs.actionMu.Unlock()
 	gs.mu.Lock()
 	gs.retired = true
 	if gs.metrics != nil && gs.metricStarted && !gs.metricFinished {
@@ -49,6 +48,8 @@ func (gs *GameSession) Retire() {
 	}
 	gs.mu.Unlock()
 	gs.stopTimer()
+	gs.actionMu.Unlock()
+	gs.releaseQuiescence()
 }
 
 // pauseInitialOfflineTurn closes the registration window where a player can
@@ -286,6 +287,7 @@ func (gs *GameSession) computeScores(winner *GamePlayer, mult int) []protocol.Pl
 func (gs *GameSession) queueGameResultsLocked(winner *GamePlayer) {
 	// 计算获胜方
 	landlordWins := winner.IsLandlord
+	settledAt := time.Now()
 
 	roomPlayers := gs.room.SnapshotPlayers()
 	roomNames := make(map[string]string, len(roomPlayers))
@@ -311,6 +313,8 @@ func (gs *GameSession) queueGameResultsLocked(winner *GamePlayer) {
 		}
 
 		gs.pendingResults = append(gs.pendingResults, pendingGameResult{
+			gameID:     gs.gameID,
+			settledAt:  settledAt,
 			playerID:   p.ID,
 			playerName: playerName,
 			isLandlord: p.IsLandlord,
