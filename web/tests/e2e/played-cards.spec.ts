@@ -15,7 +15,7 @@ test('played and bottom cards retain the same suit colors as the hand', async ({
       p2: { type: 'play', cards, hand_type: '出牌' }
     } });
   })`);
-  for (const zone of ['.hand', '.bottom-cards', '.played-action--self', '.seat-panel--left']) {
+  for (const zone of ['.hand', '.bottom-cards', '.played-action--self', '.played-action--left']) {
     const faces = await page.locator(`${zone} .card`).evaluateAll(elements => elements.map(card => {
       const expected = getComputedStyle(card).color;
       return { expected, colors: [...card.querySelectorAll('span, b, i')].map(part => getComputedStyle(part).color) };
@@ -55,6 +55,55 @@ for (const count of [1, 6, 20]) {
       const overlap = bubble.x < other.x + other.width && bubble.x + bubble.width > other.x
         && bubble.y < other.y + other.height && bubble.y + bubble.height > other.y;
       expect(overlap, `self play overlaps ${selector}`).toBe(false);
+    }
+  });
+}
+
+for (const viewport of ['1024x768', '667x375', 'project'] as const) {
+  test(`simultaneous seat plays occupy separate regions at ${viewport}`, async ({ page }) => {
+    if (viewport === '1024x768') await page.setViewportSize({ width: 1024, height: 768 });
+    if (viewport === '667x375') await page.setViewportSize({ width: 667, height: 375 });
+    await page.goto('/?demo=table');
+    for (const opponents of [['p2'], ['p3'], ['p2', 'p3']]) {
+      await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => {
+        const pairs = start => Array.from({ length: 6 }, (_, index) => ({
+          rank: start + Math.floor(index / 2), suit: index % 2, color: index % 2
+        }));
+        const seatActions = { p1: { type: 'play', cards: pairs(4), hand_type: '连对' } };
+        for (const id of ${JSON.stringify(opponents)}) {
+          seatActions[id] = { type: 'play', cards: pairs(3), hand_type: '连对' };
+        }
+        useAppStore.setState({ seatActions });
+      })`);
+      const bubbles = page.locator('.played-action--play');
+      await expect(bubbles).toHaveCount(opponents.length + 1);
+      const boxes = [];
+      for (const bubble of await bubbles.all()) {
+        await expect(bubble).toBeVisible();
+        const box = (await bubble.boundingBox())!;
+        boxes.push(box);
+        for (const protectedArea of await page.locator('.hand, .action-bar, .bottom-cards, .turn-banner, .seat-panel .player-badge').all()) {
+          const other = (await protectedArea.boundingBox())!;
+          const overlap = box.x < other.x + other.width && box.x + box.width > other.x
+            && box.y < other.y + other.height && box.y + box.height > other.y;
+          expect(overlap, 'a played hand covers another table control').toBe(false);
+        }
+        // Check the faces too: a constrained bubble must not hide overflowing cards.
+        for (const card of await bubble.locator('.card').all()) {
+          const face = (await card.boundingBox())!;
+          expect(face.x).toBeGreaterThanOrEqual(box.x);
+          expect(face.x + face.width).toBeLessThanOrEqual(box.x + box.width);
+          expect(face.y + face.height).toBeLessThanOrEqual(box.y + box.height);
+        }
+      }
+      for (let i = 0; i < boxes.length; i++) {
+        for (const other of boxes.slice(i + 1)) {
+          const box = boxes[i];
+          const overlap = box.x < other.x + other.width && box.x + box.width > other.x
+            && box.y < other.y + other.height && box.y + box.height > other.y;
+          expect(overlap, `overlapping plays with opponents ${opponents.join(',')}`).toBe(false);
+        }
+      }
     }
   });
 }

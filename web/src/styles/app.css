@@ -1447,6 +1447,9 @@
   display: grid;
   place-items: center;
   width: min(560px, 52vw);
+  /* Opponents share the first row; our action spans a separate second row. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
   min-height: 110px;
   border: 0;
   border-radius: 26px;
@@ -1712,16 +1715,6 @@
   display: none;
 }
 
-.seat-panel--left .played-action {
-  left: calc(100% + 14px);
-  top: 4px;
-}
-
-.seat-panel--right .played-action {
-  right: calc(100% + 14px);
-  top: 4px;
-}
-
 .played-action strong {
   color: #ffd634;
   font-size: 28px;
@@ -1758,7 +1751,12 @@
   font-weight: 900;
 }
 
-.self-action-lane {
+.self-action-lane,
+.table-center-hint {
+  grid-column: 1 / -1;
+}
+
+.table-action-lane {
   width: 100%;
   min-width: 0;
   display: grid;
@@ -1766,7 +1764,7 @@
   pointer-events: none;
 }
 
-.self-action-lane .played-action {
+.table-action-lane .played-action {
   position: static;
   grid-template-columns: minmax(0, 1fr);
   max-width: 100%;
@@ -1774,7 +1772,7 @@
 }
 
 /* Keep long combinations inside the table instead of overflowing the lane. */
-.self-action-lane .played-action__cards {
+.table-action-lane .played-action__cards {
   --action-card-width: 46px;
   display: grid;
   width: calc(var(--played-count) * (var(--action-card-width) - 7px) + 7px);
@@ -1782,7 +1780,7 @@
   min-width: 0;
 }
 
-.self-action-lane .played-action__cards .card {
+.table-action-lane .played-action__cards .card {
   margin-left: 0;
 }
 
@@ -2229,38 +2227,20 @@
     display: none;
   }
 
-  .seat-panel--left .played-action {
-    left: 0;
-    top: 48px;
-  }
-
-  .seat-panel--right .played-action {
-    right: 0;
-    top: 48px;
-  }
-
-  .seat-panel .played-action {
-    min-width: 78px;
-    max-width: 43vw;
+  .opponent-action-lane .played-action {
     padding: 5px 7px;
   }
 
-  .seat-panel .played-action strong {
+  .opponent-action-lane .played-action strong {
     font-size: 22px;
   }
 
-  .seat-panel .played-action--bid strong {
+  .opponent-action-lane .played-action--bid strong {
     font-size: 15px;
   }
 
-  .seat-panel .played-action__cards {
-    max-width: 43vw;
-  }
-
-  .seat-panel .played-action__cards .card {
-    --w: 28px;
-    --h: 40px;
-    margin-left: -8px;
+  .opponent-action-lane .played-action__cards {
+    --action-card-width: 34px;
   }
 
   .player-badge {
@@ -2416,9 +2396,18 @@
   .table-arena {
     grid-column: 1;
     grid-row: 2;
-    padding: 80px 100px 80px;
+    padding: 80px 12px 80px;
     border-width: 9px;
     border-radius: 22px;
+  }
+
+  .seat-panel {
+    top: 8px;
+    transform: none;
+  }
+
+  .seat-panel .card-back-stack {
+    display: none;
   }
 
   .seat-panel--left {
@@ -2431,7 +2420,7 @@
 
   .player-badge {
     min-width: 110px;
-    max-width: 124px;
+    max-width: 110px;
   }
 
   .player-avatar {
@@ -2509,12 +2498,11 @@
     font-size: 16px;
   }
 
-  .hand-zone {
-    position: fixed;
+  .table-screen > .hand-zone {
+    position: relative;
     z-index: 5;
-    left: 8px;
-    right: calc(34vw + 18px);
-    bottom: 8px;
+    grid-column: 1;
+    grid-row: 3;
     min-height: 82px;
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2695,21 +2683,20 @@
     transform: translateY(-18px);
   }
 
-  .seat-panel .played-action__cards .card--action {
-    --w: 34px;
+  .opponent-action-lane .played-action__cards .card--action {
+    --w: var(--action-card-width);
     --h: 48px;
-    margin-left: -5px;
   }
 
-  .seat-panel .played-action__cards .card--action .card__index {
+  .opponent-action-lane .played-action__cards .card--action .card__index {
     font-size: 9px;
   }
 
-  .seat-panel .played-action__cards .card--action .card__index i {
+  .opponent-action-lane .played-action__cards .card--action .card__index i {
     font-size: 8px;
   }
 
-  .seat-panel .played-action__cards .card--action .card__pip {
+  .opponent-action-lane .played-action__cards .card--action .card__pip {
     font-size: 17px;
   }
 }
@@ -2753,16 +2740,15 @@
   }
 
   .played-action__cards .card--action {
-    --w: 30px;
+    --w: var(--action-card-width);
     --h: 42px;
-    margin-left: -5px;
   }
 
   .played-action__cards {
     min-height: 42px;
   }
 
-  .self-action-lane .played-action__cards {
+  .table-action-lane .played-action__cards {
     --action-card-width: 30px;
   }
 }
