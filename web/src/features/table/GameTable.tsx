@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
@@ -61,13 +61,25 @@ export function GameTable({ socket }: GameTableProps) {
       </header>
 
       <section className="table-arena" aria-label="斗地主牌桌">
-        <SeatPanel player={seats.left} side="left" active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
-        <SeatPanel player={seats.right} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
+        <SeatPanel player={seats.left} side="left" active={currentTurn === seats.left?.id} />
+        <SeatPanel player={seats.right} side="right" active={currentTurn === seats.right?.id} />
 
         <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
 
         <div className="felt-table">
-          <div className="table-center-hint">{phase === 'bidding' ? '叫抢阶段' : '观察各家出牌'}</div>
+          <div className="table-action-lane opponent-action-lane" aria-label="左家出牌">
+            <PlayedActionBubble action={seats.left ? seatActions[seats.left.id] : undefined} side="left" />
+          </div>
+          <div className="table-action-lane opponent-action-lane" aria-label="右家出牌">
+            <PlayedActionBubble action={seats.right ? seatActions[seats.right.id] : undefined} side="right" />
+          </div>
+          {seats.me && seatActions[seats.me.id] ? (
+            <div className="table-action-lane self-action-lane" aria-label="我的出牌">
+              <PlayedActionBubble action={seatActions[seats.me.id]} self />
+            </div>
+          ) : (
+            <div className="table-center-hint">{phase === 'bidding' ? '叫抢阶段' : '观察各家出牌'}</div>
+          )}
           <PlayedCards cards={lastPlayed} handType={lastHandType} playerName={lastPlayedName || '上一手'} />
         </div>
 
@@ -78,9 +90,6 @@ export function GameTable({ socket }: GameTableProps) {
 
       <section className="hand-zone">
         {seats.me ? <PlayerBadge player={seats.me} active={currentTurn === playerId} me /> : null}
-        <div className="self-action-lane">
-          {seats.me ? <PlayedActionBubble action={seatActions[seats.me.id]} self /> : null}
-        </div>
         <Hand
           cards={hand}
           selected={selectedCards}
@@ -127,14 +136,13 @@ function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: str
   );
 }
 
-function SeatPanel({ player, side, active, action }: { player?: PlayerInfo; side: 'left' | 'right'; active: boolean; action?: SeatAction }) {
+function SeatPanel({ player, side, active }: { player?: PlayerInfo; side: 'left' | 'right'; active: boolean }) {
   if (!player) {
     return <aside className={`seat-panel seat-panel--${side}`} aria-hidden="true" />;
   }
   return (
     <aside className={`seat-panel seat-panel--${side} ${active ? 'is-active' : ''}`}>
       <PlayerBadge player={player} active={active} />
-      <PlayedActionBubble action={action} side={side} />
       <CardBack count={player.cards_count || 0} />
     </aside>
   );
@@ -146,13 +154,17 @@ function PlayedActionBubble({ action, side, self = false }: { action?: SeatActio
   }
 
   const label = action.label || (action.type === 'pass' ? '不出' : action.hand_type || '出牌');
-  const hasCards = action.type === 'play' && Boolean(action.cards?.length);
+  const cards = action.cards ?? [];
+  const hasCards = action.type === 'play' && cards.length > 0;
 
   return (
     <div className={`played-action played-action--${action.type} ${side ? `played-action--${side}` : ''} ${self ? 'played-action--self' : ''}`}>
       {hasCards ? (
-        <div className="played-action__cards" aria-label={label}>
-          {action.cards?.map((card, index) => (
+        <div className="played-action__cards" aria-label={label} style={{
+          '--played-count': cards.length,
+          gridTemplateColumns: `${cards.length > 1 ? `repeat(${cards.length - 1}, minmax(0, 1fr)) ` : ''}var(--action-card-width)`
+        } as CSSProperties}>
+          {cards.map((card, index) => (
             <Card key={`${card.suit}_${card.rank}_${index}`} card={card} size="action" />
           ))}
         </div>

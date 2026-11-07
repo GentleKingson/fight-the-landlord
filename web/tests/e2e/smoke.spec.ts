@@ -52,6 +52,7 @@ test('pointer jitter within one card toggles exactly once', async ({ page }) => 
   await page.goto('/?demo=table');
   const card = page.getByLabel('手牌').getByRole('button').first();
   for (const selected of ['true', 'false']) {
+    await card.scrollIntoViewIfNeeded();
     const box = (await card.boundingBox())!;
     await page.mouse.move(box.x + 8, box.y + 40);
     await page.mouse.down();
