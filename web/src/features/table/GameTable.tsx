@@ -22,9 +22,6 @@ export function GameTable({ socket }: GameTableProps) {
   const selectedCards = useAppStore((state) => state.selectedCards);
   const bottomCards = useAppStore((state) => state.bottomCards);
   const bottomCardsRevealed = useAppStore((state) => state.bottomCardsRevealed);
-  const lastPlayed = useAppStore((state) => state.lastPlayed);
-  const lastPlayedName = useAppStore((state) => state.lastPlayedName);
-  const lastHandType = useAppStore((state) => state.lastHandType);
   const seatActions = useAppStore((state) => state.seatActions);
   const multiplier = useAppStore((state) => state.multiplier);
   const roomCode = useAppStore((state) => state.roomCode);
@@ -65,8 +62,16 @@ export function GameTable({ socket }: GameTableProps) {
           <SeatPanel player={seats.right} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
         </div>
 
-        <div className="felt-table">
-          {phase === 'bidding' ? <div className="table-center-hint">等待叫抢地主</div> : <PlayedCards cards={lastPlayed} handType={lastHandType} playerName={lastPlayedName || '上一手'} />}
+        <div className={`felt-table ${phase === 'playing' ? 'felt-table--seats' : ''}`}>
+          {phase === 'bidding' ? (
+            <div className="table-center-hint">等待叫抢地主</div>
+          ) : (
+            <>
+              <SeatPlayedCards player={seats.left} action={seats.left ? seatActions[seats.left.id] : undefined} side="left" />
+              <SeatPlayedCards player={seats.me} action={seats.me ? seatActions[seats.me.id] : undefined} side="me" />
+              <SeatPlayedCards player={seats.right} action={seats.right ? seatActions[seats.right.id] : undefined} side="right" />
+            </>
+          )}
         </div>
         <TurnBanner />
       </section>
@@ -89,6 +94,15 @@ export function GameTable({ socket }: GameTableProps) {
 
       <UtilityDrawer socket={socket} drawer={drawer} onClose={() => setDrawer('none')} />
     </main>
+  );
+}
+
+function SeatPlayedCards({ player, action, side }: { player?: PlayerInfo; action?: SeatAction; side: 'left' | 'me' | 'right' }) {
+  const cards = action?.type === 'play' ? action.cards : undefined;
+  return (
+    <section className={`played-seat played-seat--${side}`} aria-label={player && cards?.length ? `${player.name}的出牌` : undefined}>
+      {cards?.length ? <PlayedCards cards={cards} handType={action?.hand_type} playerName={player?.name} /> : null}
+    </section>
   );
 }
 
