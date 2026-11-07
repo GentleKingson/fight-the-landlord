@@ -3,6 +3,7 @@
 }
 
 html {
+  height: 100%;
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
 }
@@ -10,7 +11,7 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100dvh;
+  height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   font-family: var(--font-sans);
@@ -38,5 +39,5 @@ input {
 }
 
 #root {
-  min-height: 100dvh;
+  height: 100%;
 }

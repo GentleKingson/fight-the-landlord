@@ -13,9 +13,11 @@ export function GameResult({ socket }: { socket: GameSocket }) {
   return (
     <main className="result-screen">
       <section className="result-panel">
-        <span className="result-badge">{winnerIsLandlord ? '地主获胜' : '农民获胜'}</span>
-        <h1>{winnerName || '本局'} 获胜</h1>
-        <p>最终倍数 x{finalMultiplier || 1}</p>
+        <header className="result-heading">
+          <span className="result-badge">{winnerIsLandlord ? '地主获胜' : '农民获胜'}</span>
+          <h1>{winnerName || '本局'} 获胜</h1>
+          <p>最终倍数 x{finalMultiplier || 1}</p>
+        </header>
         <div className="score-list">
           {scores.map((score) => (
             <div className="score-row" key={score.player_id}>
@@ -24,11 +26,14 @@ export function GameResult({ socket }: { socket: GameSocket }) {
             </div>
           ))}
         </div>
-        <div className="remaining-hands">
-          {playerHands.map((playerHand) => (
-            <PlayedCards key={playerHand.player_id} cards={playerHand.cards} playerName={playerHand.player_name} compact />
-          ))}
-        </div>
+        <details className="remaining-hands">
+          <summary>查看剩余手牌</summary>
+          <div className="remaining-hands__list">
+            {playerHands.map((playerHand) => (
+              <PlayedCards key={playerHand.player_id} cards={playerHand.cards} playerName={playerHand.player_name} compact />
+            ))}
+          </div>
+        </details>
         <div className="room-actions">
           <button className="primary-action" onClick={() => { const mode = useAppStore.getState().matchMode; useAppStore.getState().leaveLocalRoom(); useAppStore.setState({ phase: 'matching' }); socket.send(mode === 'practice' ? MsgType.PracticeMatch : MsgType.QuickMatch); }}>再来一局</button>
           <button className="secondary-action" onClick={() => { useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>
