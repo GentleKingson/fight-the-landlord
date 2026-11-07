@@ -351,9 +351,10 @@ function RulesPanel() {
 
 function arrangeSeats(players: PlayerInfo[], playerId: string): { me?: PlayerInfo; left?: PlayerInfo; right?: PlayerInfo } {
   const me = players.find((player) => player.id === playerId);
-  if (!me) return { left: players[1], right: players[2], me: players[0] };
-  const left = players.find((player) => player.seat === (me.seat + 1) % 3);
-  const right = players.find((player) => player.seat === (me.seat + 2) % 3);
+  if (!me) return { left: players[2], right: players[1], me: players[0] };
+  // Turns advance by seat + 1: the previous player sits left, the next sits right.
+  const left = players.find((player) => player.seat === (me.seat + 2) % 3);
+  const right = players.find((player) => player.seat === (me.seat + 1) % 3);
   return { me, left, right };
 }
 
