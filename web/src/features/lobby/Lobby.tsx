@@ -96,7 +96,7 @@ function LobbyHome({ socket }: LobbyProps) {
           <strong>创建房间</strong>
           <span>好友同玩</span>
         </button>
-        <button className="entry-tile" onClick={() => { useAppStore.setState({ matchMode: 'practice' }); socket.send(MsgType.PracticeMatch); }}>
+        <button className="entry-tile" onClick={() => { if (useAppStore.getState().phase === 'matching') return; useAppStore.setState({ phase: 'matching', matchMode: 'practice' }); socket.send(MsgType.PracticeMatch); }}>
           <Icon name="bot" />
           <strong>人机练习</strong>
           <span>随时练手</span>

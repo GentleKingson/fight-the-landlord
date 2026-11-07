@@ -29,6 +29,7 @@ type Matcher struct {
 	botCfg          config.BotConfig
 	registerSession SessionRegistrationFunc
 	queue           []types.ClientInterface
+	practicePending map[string]bool
 	botFillTimer    *time.Timer
 	mu              sync.Mutex
 }
@@ -55,6 +56,7 @@ func NewMatcher(deps MatcherDeps) *Matcher {
 		botCfg:          deps.BotConfig,
 		registerSession: deps.RegisterSession,
 		queue:           make([]types.ClientInterface, 0),
+		practicePending: make(map[string]bool),
 	}
 }
 
@@ -218,13 +220,29 @@ func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
 
 // PracticeMatch 人机练习：立即为玩家创建含 2 个机器人的房间
 func (m *Matcher) PracticeMatch(client types.ClientInterface) {
+	m.mu.Lock()
+	id := client.GetID()
+	if m.practicePending[id] || client.GetRoom() != "" {
+		m.mu.Unlock()
+		return
+	}
+	m.practicePending[id] = true
+	m.mu.Unlock()
+
 	engine := m.botEngine
 	if engine == nil {
 		engine = bot.NewHeuristicEngine()
 	}
 	bot1 := bot.NewBotClient(engine)
 	bot2 := bot.NewBotClient(engine)
-	go m.createMatchRoom([]types.ClientInterface{client, bot1, bot2})
+	go func() {
+		defer func() {
+			m.mu.Lock()
+			delete(m.practicePending, id)
+			m.mu.Unlock()
+		}()
+		m.createMatchRoom([]types.ClientInterface{client, bot1, bot2})
+	}()
 }
 
 // GetQueueLength 获取队列长度

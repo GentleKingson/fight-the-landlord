@@ -35,3 +35,12 @@ it('fits dense rank groups and 20-card hands within narrow portrait containers',
     }
   }
 });
+
+it('fits all 20 cards and 15 rank groups within a narrow single-row hand', () => {
+  const ranks = [17,16,15,14,13,12,11,10,9,8,7,7,6,6,5,5,4,4,3,3];
+  const layout = buildHandLayout(ranks.map((rank, i) => c(i % 4, rank)), 414);
+  for (const [coordinates, cardWidth] of [[layout.map(item => item.compactX), 58], [layout.map(item => item.singleX), 72]] as const) {
+    expect(Math.max(...coordinates) - Math.min(...coordinates) + cardWidth).toBeLessThanOrEqual(414);
+    expect(new Set(coordinates).size).toBe(20);
+  }
+});

@@ -115,7 +115,8 @@ func (h *Handler) handlePracticeMatch(client types.ClientInterface) {
 	}
 
 	if client.GetRoom() != "" {
-		h.roomManager.LeaveRoom(client)
+		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "已在房间中，请先离开当前房间"))
+		return
 	}
 
 	h.matcher.PracticeMatch(client)

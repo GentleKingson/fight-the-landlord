@@ -187,15 +187,12 @@ export function buildHandLayout(cards: CardInfo[], width = 280): HandCardLayout[
     if (difference < best) { best = difference; splitAt = index + 1; }
   });
   const rowGroups = [groups.slice(0, splitAt), groups.slice(splitAt)];
-  const singlePositions = buildCenteredPositions(groups, 32, 8);
-  const compactPositions = buildCenteredPositions(groups, 25, 5);
+  const singlePositions = buildFittedPositions(groups, width, 72, 32, 8);
+  const compactPositions = buildFittedPositions(groups, width, 58, 25, 5);
   const rowPositions = new Map<number, number>();
 
   rowGroups.forEach((row) => {
-    const count = row.reduce((sum, group) => sum + group.cards.length, 0);
-    // Portrait cards are 58px wide. Reserve edges and scale spacing to the measured hand container.
-    const step = Math.min(30, Math.max(0, (width - 66 - Math.max(0, row.length - 1) * 7) / Math.max(1, count - 1)));
-    for (const [index, x] of buildCenteredPositions(row, step, 7)) rowPositions.set(index, x);
+    for (const [index, x] of buildFittedPositions(row, width, 58, 30, 7)) rowPositions.set(index, x);
   });
 
   const items: HandCardLayout[] = [];
@@ -238,6 +235,15 @@ function buildGroups(cards: CardInfo[]): HandGroup[] {
     else current.cards.push(card);
   });
   return groups;
+}
+
+// Fit every layout variant to the measured container, including single-row landscape hands.
+function buildFittedPositions(groups: HandGroup[], width: number, cardWidth: number, maxStep: number, groupGap: number): Map<number, number> {
+  const count = groups.reduce((sum, group) => sum + group.cards.length, 0);
+  const available = Math.max(0, width - cardWidth - 8);
+  const gap = Math.min(groupGap, available / Math.max(1, count * 2));
+  const step = Math.min(maxStep, Math.max(0, (available - Math.max(0, groups.length - 1) * gap) / Math.max(1, count - 1)));
+  return buildCenteredPositions(groups, step, gap);
 }
 
 function buildCenteredPositions(groups: HandGroup[], cardStep: number, groupGap: number): Map<number, number> {

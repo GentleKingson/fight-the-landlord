@@ -80,3 +80,22 @@ test('all dense portrait hand cards remain visible and selectable at 320px', asy
     }
   }
 });
+
+test('narrow landscape keeps all 20 cards reachable', async ({ page, isMobile }) => {
+  await page.setViewportSize({ width: 667, height: 375 });
+  await page.goto('/?demo=table');
+  const ranks = [17,16,15,14,13,12,11,10,9,8,7,7,6,6,5,5,4,4,3,3];
+  await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => useAppStore.setState({ hand: ${JSON.stringify(ranks.map((rank, i) => ({ rank, suit: i % 4, color: i % 2 })))}, selectedCards: new Set(), currentTurn: 'p1' }))`);
+  const cards = page.getByLabel('手牌').getByRole('button');
+  await expect(cards).toHaveCount(20);
+  for (let index = 0; index < ranks.length; index++) {
+    const card = cards.nth(index);
+    await card.scrollIntoViewIfNeeded();
+    const box = (await card.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(667);
+    if (isMobile) await page.touchscreen.tap(box.x + 5, box.y + 25);
+    else await page.mouse.click(box.x + 5, box.y + 25);
+    await expect(card).toHaveAttribute('aria-pressed', 'true');
+  }
+});
