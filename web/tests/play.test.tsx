@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { GameTable } from '../src/features/table/GameTable';
 import { useAppStore } from '../src/stores/appStore';
@@ -20,4 +20,34 @@ it('allows manually selected replies regardless of the advisory can_beat flag', 
   expect(send).toHaveBeenCalledWith(MsgType.PlayCards, { cards: hand });
   fireEvent.click(screen.getByRole('button', { name: /^提示$/ }));
   expect(useAppStore.getState().tableMessage).toBe('暂无提示，请手动选牌');
+});
+
+it('keeps both opponents\' played cards visible in their own areas', () => {
+  useAppStore.setState({
+    phase: 'playing',
+    playerId: 'p1',
+    currentTurn: 'p1',
+    hand: [],
+    mustPlay: false,
+    selectedCards: new Set(),
+    seatActions: {},
+    drawer: 'none',
+    tableMessage: '',
+    players: [
+      { id: 'p1', name: '我', seat: 0, ready: true, is_landlord: false, cards_count: 17, online: true },
+      { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: true, cards_count: 20, online: true },
+      { id: 'p3', name: '松风', seat: 2, ready: true, is_landlord: false, cards_count: 17, online: true }
+    ]
+  });
+  const receive = useAppStore.getState().handleMessage;
+  receive({ type: MsgType.CardPlayed, payload: { player_id: 'p2', player_name: '山月', cards: [{ rank: 9, suit: 1, color: 1 }], cards_left: 19, hand_type: '单张' } });
+  receive({ type: MsgType.CardPlayed, payload: { player_id: 'p3', player_name: '松风', cards: [{ rank: 10, suit: 0, color: 0 }], cards_left: 16, hand_type: '单张' } });
+
+  render(<GameTable socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  const left = screen.getByRole('region', { name: '山月的出牌' });
+  const right = screen.getByRole('region', { name: '松风的出牌' });
+  expect(left.classList.contains('played-seat--left')).toBe(true);
+  expect(right.classList.contains('played-seat--right')).toBe(true);
+  expect(within(left).getByRole('button', { name: '9♥' })).toBeDefined();
+  expect(within(right).getByRole('button', { name: '10♠' })).toBeDefined();
 });
