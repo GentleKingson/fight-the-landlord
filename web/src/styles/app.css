@@ -1961,6 +1961,12 @@
 
 .felt-table .card--played { --w: var(--played-card-w); --h: var(--played-card-h); }
 
+.felt-table--seats { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 10px; }
+.played-seat { width: 100%; min-width: 0; }
+.played-seat--left .played-cards { justify-items: start; }
+.played-seat--right .played-cards { justify-items: end; }
+.played-seat--me .played-cards { justify-items: center; }
+
 .played-cards__meta { max-width: 100%; }
 
 .played-cards__meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2250,6 +2256,10 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
 }
 
 @media (max-width: 600px) and (orientation: portrait) {
+  .felt-table--seats { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) auto; gap: 4px; }
+  .played-seat--left { grid-column: 1; grid-row: 1; }
+  .played-seat--right { grid-column: 2; grid-row: 1; }
+  .played-seat--me { grid-column: 1 / -1; grid-row: 2; }
   .opponent-row { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px; }
   .player-badge .player-avatar { display: none; }
   .player-badge { padding: 4px; gap: 3px; }
