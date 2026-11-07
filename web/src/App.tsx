@@ -6,6 +6,8 @@ import { createGameSocket, type GameSocket } from './transport/wsClient';
 import { useAppStore } from './stores/appStore';
 import { seedDemoState } from './stores/demoState';
 
+const ERROR_TOAST_DURATION_MS = 5000;
+
 export function App() {
   const [collecting, setCollecting] = useState(false);
   useEffect(() => {
@@ -16,6 +18,16 @@ export function App() {
   const connected = useAppStore((state) => state.connected);
   const error = useAppStore((state) => state.error);
   const maintenance = useAppStore((state) => state.maintenance);
+
+  useEffect(() => {
+    if (!connected || !error) return;
+
+    const timeout = window.setTimeout(() => {
+      useAppStore.getState().setError('');
+    }, ERROR_TOAST_DURATION_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [connected, error]);
 
   useEffect(() => {
     const demo = new URLSearchParams(window.location.search).get('demo');
