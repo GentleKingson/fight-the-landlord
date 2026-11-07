@@ -124,3 +124,69 @@ func cardsForRanks(t *testing.T, ranks string) []card.Card {
 	}
 	return cards
 }
+
+func TestRocketTimeoutPassesAndReturnsLead(t *testing.T) {
+	gs := recordingGame(t)
+	gs.stopTimer()
+	gs.setLandlord(0)
+	gs.players[0].Hand = append([]card.Card{{Rank: card.RankBlackJoker}, {Rank: card.RankRedJoker}}, cardsForRanks(t, "34")...)
+	gs.players[1].Hand = cardsForRanks(t, "55556")
+	gs.players[2].Hand = cardsForRanks(t, "66667")
+	require.NoError(t, gs.HandlePlayCards(gs.players[0].ID, convert.CardsToInfos(gs.players[0].Hand[:2])))
+	for seat := 1; seat <= 2; seat++ {
+		before := append([]card.Card(nil), gs.players[seat].Hand...)
+		turn := gs.turnID
+		gs.handleTurnTimeout(turn, "timeout")
+		require.Equal(t, (seat+1)%3, gs.currentPlayer)
+		require.Greater(t, gs.turnID, turn)
+		require.Equal(t, before, gs.players[seat].Hand)
+		require.NotNil(t, gs.turnTimer)
+		client := gs.room.Players[gs.players[seat].ID].Client.(*testutil.SimpleClient)
+		messages := client.SentMessages()
+		require.Equal(t, protocol.MsgPlayerPass, messages[len(messages)-2].Type)
+		payload, err := codec.ParsePayload[protocol.PlayerPassPayload](messages[len(messages)-2])
+		require.NoError(t, err)
+		require.Equal(t, gs.players[seat].ID, payload.PlayerID)
+		gs.handleTurnTimeout(turn, "timeout") // Expired callbacks cannot advance twice.
+		require.Equal(t, (seat+1)%3, gs.currentPlayer)
+	}
+	require.True(t, gs.lastPlayedHand.IsEmpty())
+	gs.handleTurnTimeout(gs.turnID, "timeout")
+	require.Equal(t, 1, gs.currentPlayer)
+	require.Len(t, gs.players[0].Hand, 1)
+	require.Equal(t, rule.Single, gs.lastPlayedHand.Type)
+}
+
+func TestRejectedTimeoutPlayFallsBackAndAdvances(t *testing.T) {
+	for _, lead := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reply passes", true: "lead plays single"}[lead], func(t *testing.T) {
+			gs := recordingGame(t)
+			gs.mu.Lock()
+			defer gs.mu.Unlock()
+			gs.stopTimer()
+			gs.setLandlord(0)
+			gs.players[0].Hand = cardsForRanks(t, "33334")
+			if !lead {
+				gs.lastPlayedHand, _ = rule.ParseHand([]card.Card{{Rank: card.RankBlackJoker}, {Rank: card.RankRedJoker}})
+				gs.lastPlayerIdx = 2
+			}
+			turn, sequence := gs.turnID, gs.recording.sequence
+			candidate := gs.players[0].Hand[:4] // A bomb cannot beat a rocket.
+			if lead {
+				candidate = cardsForRanks(t, "9") // Not in the player's hand.
+			}
+			gs.applyTimeoutPlayLocked(candidate, "timeout")
+			require.Equal(t, 1, gs.currentPlayer)
+			require.Greater(t, gs.turnID, turn)
+			require.NotNil(t, gs.turnTimer)
+			require.Equal(t, sequence+1, gs.recording.sequence)
+			if lead {
+				require.Len(t, gs.players[0].Hand, 4)
+				require.Equal(t, rule.Single, gs.lastPlayedHand.Type)
+			} else {
+				require.Equal(t, cardsForRanks(t, "33334"), gs.players[0].Hand)
+				require.Equal(t, 1, gs.consecutivePasses)
+			}
+		})
+	}
+}

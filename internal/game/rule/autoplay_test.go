@@ -268,3 +268,11 @@ func TestHandType_String(t *testing.T) {
 		})
 	}
 }
+
+func TestRocketCannotBeBeatenByAutomaticPlay(t *testing.T) {
+	hand := testRuleCards(card.Rank2, card.Rank2, card.Rank2, card.Rank2)
+	rocket, err := ParseHand(testRuleCards(card.RankBlackJoker, card.RankRedJoker))
+	assert.NoError(t, err)
+	assert.Nil(t, FindSmallestBeatingCards(hand, rocket))
+	assert.Nil(t, findSmallestBomb(hand, analyzeCards(hand), rocket))
+}

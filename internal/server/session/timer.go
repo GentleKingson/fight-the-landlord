@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 )
@@ -62,12 +63,36 @@ func (gs *GameSession) handlePlayTimeout() {
 
 func (gs *GameSession) playTimeoutLocked(source string) {
 	p := gs.players[gs.currentPlayer]
-	cards := rule.FindSmallestBeatingCards(p.Hand, gs.lastPlayedHand)
-	if cards != nil {
-		_ = gs.handlePlayCardsLocked(p.ID, convert.CardsToInfos(cards), source)
-	} else {
-		_ = gs.handlePassLocked(p.ID, source)
+	opponentHand := gs.lastPlayedHand
+	if gs.lastPlayerIdx == gs.currentPlayer {
+		opponentHand = rule.ParsedHand{}
 	}
+	cards := rule.FindSmallestBeatingCards(p.Hand, opponentHand)
+	gs.applyTimeoutPlayLocked(cards, source)
+}
+
+// applyTimeoutPlayLocked falls back to a legal action if the suggested play is rejected.
+func (gs *GameSession) applyTimeoutPlayLocked(cards []card.Card, source string) {
+	p := gs.players[gs.currentPlayer]
+	if cards != nil {
+		if err := gs.handlePlayCardsLocked(p.ID, convert.CardsToInfos(cards), source); err == nil {
+			return
+		} else {
+			log.Printf("自动出牌失败，尝试兜底动作: %v", err)
+		}
+	}
+	if !gs.lastPlayedHand.IsEmpty() && gs.lastPlayerIdx != gs.currentPlayer {
+		if err := gs.handlePassLocked(p.ID, source); err == nil {
+			return
+		}
+	} else if len(p.Hand) > 0 {
+		if err := gs.handlePlayCardsLocked(p.ID, convert.CardsToInfos(p.Hand[len(p.Hand)-1:]), source); err == nil {
+			return
+		}
+	}
+	// Keep a live timer even if an unexpected invalid state prevents the fallback.
+	gs.stopTimer()
+	gs.notifyPlayTurn()
 }
 
 func (gs *GameSession) stopTimer() {

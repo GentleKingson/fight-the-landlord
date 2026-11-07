@@ -5,6 +5,9 @@ import "github.com/palemoky/fight-the-landlord/internal/game/card"
 // FindSmallestBeatingCards 找到能打过 opponentHand 的最小牌组
 // 如果找不到，返回 nil
 func FindSmallestBeatingCards(playerHand []card.Card, opponentHand ParsedHand) []card.Card {
+	if opponentHand.Type == Rocket {
+		return nil
+	}
 	// 如果是新一轮，出最小的单牌
 	if opponentHand.IsEmpty() {
 		if len(playerHand) > 0 {
@@ -96,6 +99,9 @@ func findSmallestBeatingTrio(playerHand []card.Card, analysis HandAnalysis, oppo
 
 // findSmallestBomb 找到最小的炸弹
 func findSmallestBomb(playerHand []card.Card, analysis HandAnalysis, opponentHand ParsedHand) []card.Card {
+	if opponentHand.Type == Rocket {
+		return nil
+	}
 	for _, r := range analysis.fours {
 		if opponentHand.Type != Bomb || r > opponentHand.KeyRank {
 			return findCardsWithRank(playerHand, r, 4)
