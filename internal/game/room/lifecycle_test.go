@@ -61,6 +61,10 @@ func TestNotifyPlayerOffline_PartialOffline(t *testing.T) {
 
 	// Room should still exist
 	assert.NotNil(t, rm.GetRoom(room.Code))
+	assert.True(t, room.Players[client1.ID].Offline)
+	assert.Same(t, client1, room.Players[client1.ID].Client)
+	// Game broadcasts must remain safe while a browser is refreshing.
+	assert.NotPanics(t, func() { room.GetAllPlayersInfo() })
 
 	// Verify offline notification was sent to other players
 	assert.Eventually(t, func() bool {

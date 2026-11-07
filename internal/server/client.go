@@ -94,13 +94,13 @@ func (c *Client) ReadPump() {
 		}
 
 		// 消息速率限制检查
-		allowed, warning := c.server.messageLimiter.AllowMessage(c.ID)
+		allowed, warning := c.server.messageLimiter.AllowMessage(c.GetID())
 		if !allowed {
-			log.Printf("⚠️ 客户端 %s (IP: %s) 消息过于频繁", c.Name, c.IP)
+			log.Printf("⚠️ 客户端 %s (IP: %s) 消息过于频繁", c.GetName(), c.IP)
 			c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeRateLimit, "消息发送过于频繁"))
 			// 如果警告次数过多，断开连接
-			if c.server.messageLimiter.GetWarningCount(c.ID) > 5 {
-				log.Printf("🚫 客户端 %s 因多次超速被断开连接", c.Name)
+			if c.server.messageLimiter.GetWarningCount(c.GetID()) > 5 {
+				log.Printf("🚫 客户端 %s 因多次超速被断开连接", c.GetName())
 				break
 			}
 			continue
@@ -162,36 +162,45 @@ func (c *Client) WritePump() {
 
 // SendMessage 发送消息给客户端
 func (c *Client) SendMessage(msg *protocol.Message) {
-	c.mu.RLock()
-	if c.closed {
-		c.mu.RUnlock()
-		return
-	}
-	c.mu.RUnlock()
-
 	data, err := codec.Encode(msg)
 	if err != nil {
 		log.Printf("消息编码错误: %v", err)
 		return
 	}
-
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return
+	}
 	select {
 	case c.send <- data:
+		c.mu.RUnlock()
 	default:
-		// 发送缓冲区已满，关闭连接
-		log.Printf("客户端 %s 发送缓冲区已满", c.ID)
+		c.mu.RUnlock()
 		c.Close()
 	}
 }
 
 // handleDisconnect 处理断开连接
 func (c *Client) handleDisconnect() {
-	// 标记会话为离线状态
-	c.server.sessionManager.SetOffline(c.ID)
+	c.Close()
+	// A replaced socket must not unregister or mark the recovered session offline.
+	if c.server.GetClientByID(c.GetID()) != c {
+		return
+	}
+	c.server.sessionManager.SetOffline(c.GetID())
 
 	// 如果在房间中，通知房间玩家掉线（但不移除）
-	if c.RoomID != "" {
+	if code := c.GetRoom(); code != "" {
+		if gs := c.server.handler.GetGameSession(code); gs != nil {
+			gs.PlayerOffline(c.GetID())
+		}
 		c.server.roomManager.NotifyPlayerOffline(c)
+		if c.server.roomManager.GetRoom(code) == nil {
+			if gs := c.server.handler.GetGameSession(code); gs != nil {
+				gs.StopAllTimers()
+			}
+		}
 	}
 
 	// 如果在匹配队列中，移除
@@ -215,8 +224,12 @@ func (c *Client) Close() {
 // SetRoom 设置客户端所在房间
 func (c *Client) SetRoom(roomID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.RoomID = roomID
+	id := c.ID
+	c.mu.Unlock()
+	if c.server != nil && c.server.sessionManager != nil {
+		c.server.sessionManager.SetRoom(id, roomID)
+	}
 }
 
 // GetRoom 获取客户端所在房间
@@ -227,6 +240,6 @@ func (c *Client) GetRoom() string {
 }
 
 // Interface implementations for types.ClientInterface
-func (c *Client) GetID() string   { return c.ID }
-func (c *Client) GetName() string { return c.Name }
+func (c *Client) GetID() string   { c.mu.RLock(); defer c.mu.RUnlock(); return c.ID }
+func (c *Client) GetName() string { c.mu.RLock(); defer c.mu.RUnlock(); return c.Name }
 func (c *Client) IsBot() bool     { return false }

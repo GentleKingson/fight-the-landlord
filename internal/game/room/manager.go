@@ -166,10 +166,10 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	}
 
 	room.mu.Lock()
-	defer room.mu.Unlock()
 
 	player, exists := room.Players[client.GetID()]
 	if !exists {
+		room.mu.Unlock()
 		return apperrors.ErrNotInRoom
 	}
 
@@ -185,9 +185,11 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	if room.checkAllReady() {
 		if err := room.startGameLocked(); err != nil {
 			log.Printf("开始游戏失败: %v", err)
+			room.mu.Unlock()
 			return nil
 		}
 
+		room.mu.Unlock()
 		// 创建游戏会话并开始
 		if rm.onGameStart != nil {
 			rm.onGameStart(room)
@@ -197,6 +199,8 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 		if rm.redisStore != nil && rm.redisStore.IsReady() {
 			go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
 		}
+	} else {
+		room.mu.Unlock()
 	}
 
 	return nil

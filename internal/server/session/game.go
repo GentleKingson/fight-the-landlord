@@ -69,7 +69,10 @@ type GameSession struct {
 	timerStartTime   time.Time     // 计时器开始时间
 	timerMu          sync.Mutex
 
-	mu sync.RWMutex
+	recording       *gameRecording
+	decisionStarted time.Time
+	turnID          uint64
+	mu              sync.RWMutex
 }
 
 // NewGameSession 创建游戏会话

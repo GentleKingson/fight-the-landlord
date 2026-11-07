@@ -39,7 +39,7 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	}
 
 	// 获取旧会话
-	session := h.sessionManager.GetSession(payload.PlayerID)
+	session := h.sessionManager.Snapshot(payload.PlayerID)
 	if session == nil {
 		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "会话不存在"))
 		return
@@ -70,6 +70,13 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	// 发送重连成功消息
 	client.SendMessage(codec.MustNewMessage(protocol.MsgReconnected, reconnectPayload))
 
+	if reconnectPayload.RoomCode != "" && reconnectPayload.GameState == nil {
+		if r := h.roomManager.GetRoom(reconnectPayload.RoomCode); r != nil {
+			client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
+				RoomCode: r.Code, Player: r.GetPlayerInfo(client.GetID()), Players: r.GetAllPlayersInfo(),
+			}))
+		}
+	}
 	// 快照恢复后，若正轮到该玩家，补发当前回合通知，恢复其操作提示与倒计时（快照本身不含 IsGrab / 剩余时间等回合信息）。须在 MsgReconnected 之后发送，确保客户端先应用快照、再设置回合提示。
 	if reconnectPayload.GameState != nil && reconnectPayload.GameState.CurrentTurn == session.PlayerID {
 		if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
@@ -84,17 +91,21 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *session.PlayerSession, payload *protocol.ReconnectedPayload) {
 	room := h.roomManager.GetRoom(session.RoomCode)
 	if room == nil {
+		client.SetRoom("")
 		return
 	}
 
-	oldClient := h.server.GetClientByID(session.PlayerID)
-	if oldClient == nil {
-		return
-	}
-
+	client.SetRoom(session.RoomCode)
 	// 重连到房间
-	if err := h.roomManager.ReconnectPlayer(oldClient, client); err != nil {
+	var err error
+	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
+		err = gameSession.ReconnectClient(h.roomManager, client)
+	} else {
+		err = h.roomManager.ReconnectPlayer(client, client)
+	}
+	if err != nil {
 		log.Printf("重连到房间失败: %v", err)
+		client.SetRoom("")
 		return
 	}
 
@@ -103,6 +114,7 @@ func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *ses
 
 	// 如果游戏正在进行，恢复游戏状态
 	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
+		gameSession.PlayerOnline(session.PlayerID)
 		payload.GameState = gameSession.BuildGameStateDTO(session.PlayerID, h.sessionManager)
 	}
 }

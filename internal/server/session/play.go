@@ -3,6 +3,7 @@ package session
 import (
 	"cmp"
 	"slices"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
@@ -16,7 +17,10 @@ import (
 func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.CardInfo) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	return gs.handlePlayCardsLocked(playerID, cardInfos, "")
+}
 
+func (gs *GameSession) handlePlayCardsLocked(playerID string, cardInfos []protocol.CardInfo, source string) error {
 	if gs.state != GameStatePlaying {
 		return apperrors.ErrGameNotStart
 	}
@@ -45,6 +49,8 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 	if !isNewRound && !rule.CanBeat(handToPlay, gs.lastPlayedHand) {
 		return apperrors.ErrCannotBeat
 	}
+
+	gs.recordDecision("play", currentPlayer, cards, false, source)
 
 	// 所有验证通过后才取消计时器
 	gs.stopTimer()
@@ -100,7 +106,10 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 func (gs *GameSession) HandlePass(playerID string) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	return gs.handlePassLocked(playerID, "")
+}
 
+func (gs *GameSession) handlePassLocked(playerID, source string) error {
 	if gs.state != GameStatePlaying {
 		return apperrors.ErrGameNotStart
 	}
@@ -115,6 +124,8 @@ func (gs *GameSession) HandlePass(playerID string) error {
 	if mustPlay {
 		return apperrors.ErrMustPlay
 	}
+
+	gs.recordDecision("pass", currentPlayer, nil, false, source)
 
 	// 取消超时计时器
 	gs.stopTimer()
@@ -177,6 +188,8 @@ func (gs *GameSession) GetPlayerCardsCount(playerID string) int {
 
 // notifyPlayTurn 通知当前玩家出牌
 func (gs *GameSession) notifyPlayTurn() {
+	gs.decisionStarted = time.Now()
+	gs.turnID++
 	player := gs.players[gs.currentPlayer]
 	mustPlay := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
 

@@ -4,12 +4,20 @@ import (
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
+
+// ReconnectClient serializes connection replacement with game decisions and broadcasts.
+func (gs *GameSession) ReconnectClient(manager *room.RoomManager, client types.ClientInterface) error {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	return manager.ReconnectPlayer(client, client)
+}
 
 // BuildGameStateDTO 构建游戏状态 DTO（用于重连等场景）
 func (gs *GameSession) BuildGameStateDTO(playerID string, sessionManager *SessionManager) *protocol.GameStateDTO {
@@ -55,11 +63,15 @@ func (gs *GameSession) BuildGameStateDTO(playerID string, sessionManager *Sessio
 		lastPlayed = gs.lastPlayedHand.Cards
 		lastPlayerID = gs.players[gs.lastPlayerIdx].ID
 	}
+	bottomCards := gs.bottomCards
+	if gs.state == GameStateBidding {
+		bottomCards = nil
+	}
 	return &protocol.GameStateDTO{
 		Phase:        phase,
 		Players:      players,
 		Hand:         convert.CardsToInfos(hand),
-		BottomCards:  convert.CardsToInfos(gs.bottomCards),
+		BottomCards:  convert.CardsToInfos(bottomCards),
 		CurrentTurn:  currentTurnID,
 		LastPlayed:   convert.CardsToInfos(lastPlayed),
 		LastPlayerID: lastPlayerID,

@@ -30,7 +30,7 @@ func (gs *GameSession) startBiddingRound() {
 
 	// 进入叫地主阶段
 	gs.state = GameStateBidding
-	gs.room.State = RoomStateBidding
+	gs.room.SetState(RoomStateBidding)
 
 	// 随机选择第一个叫地主的玩家
 	gs.currentBidder = rand.IntN(3)
@@ -64,11 +64,13 @@ func (gs *GameSession) dealNewRound() {
 
 	// 发牌
 	gs.deal()
+	gs.startRecording()
 }
 
 // redeal 流局（无人叫地主）重新发牌（调用方需持有 gs.mu）
 // 连续流局达到 maxRedeals 次后，重新发牌并随机强制指定地主，避免无限流局。
 func (gs *GameSession) redeal() {
+	gs.finishRecording("redeal", nil)
 	gs.redealCount++
 
 	if gs.redealCount >= maxRedeals {
@@ -115,8 +117,9 @@ func (gs *GameSession) deal() {
 
 // endGame 结束游戏
 func (gs *GameSession) endGame(winner *GamePlayer) {
+	gs.finishRecording("completed", winner)
 	gs.state = GameStateEnded
-	gs.room.State = RoomStateEnded
+	gs.room.SetState(RoomStateEnded)
 
 	// 计算最终倍数与各玩家得分
 	multiplier := gs.finalMultiplier(winner)

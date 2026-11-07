@@ -119,8 +119,8 @@ func (s *Server) unregisterClient(client *Client) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 
-	if _, ok := s.clients[client.ID]; ok {
-		delete(s.clients, client.ID)
+	if current, ok := s.clients[client.GetID()]; ok && current == client {
+		delete(s.clients, client.GetID())
 		log.Printf("❌ 玩家 %s (%s) 已断开", client.Name, client.ID)
 	}
 }
@@ -130,13 +130,27 @@ func (s *Server) unregisterClient(client *Client) {
 func (s *Server) GetClientByID(id string) types.ClientInterface {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
-	return s.clients[id]
+	if c := s.clients[id]; c != nil {
+		return c
+	}
+	return nil
 }
 
 func (s *Server) RegisterClient(id string, client types.ClientInterface) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 	if c, ok := client.(*Client); ok {
+		if previous := s.clients[id]; previous != nil && previous != c {
+			previous.Close()
+		}
+		c.mu.Lock()
+		c.ID = id
+		if s.sessionManager != nil {
+			if saved := s.sessionManager.Snapshot(id); saved != nil {
+				c.Name = saved.PlayerName
+			}
+		}
+		c.mu.Unlock()
 		s.clients[id] = c
 	}
 }

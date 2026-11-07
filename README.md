@@ -43,6 +43,18 @@
 
 ## 快速开始
 
+### 网页游玩与真人数据采集
+
+已新增基于 PR #65 的网页客户端，支持房间联机、人机练习、移动端和刷新重连。
+将 `landlord.pt`、`farmers.pt` 放入 `douzero/models/`，运行：
+
+```bash
+docker compose -f compose.web.yml up -d --build
+```
+
+浏览器打开 `http://localhost:1780`。此部署启用匿名牌局采集，并分别加载地主和农民 MARVEL v1.3
+权重。部署配置、本地开发、数据格式与训练样本导出见 [网页部署指南](docs/web-play.md)。
+
 ### 客户端安装
 
 **macOS / Linux**：
