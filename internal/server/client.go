@@ -184,6 +184,8 @@ func (c *Client) SendMessage(msg *protocol.Message) {
 // handleDisconnect 处理断开连接
 func (c *Client) handleDisconnect() {
 	c.Close()
+	c.server.connectionMu.Lock()
+	defer c.server.connectionMu.Unlock()
 	// A replaced socket must not unregister or mark the recovered session offline.
 	if c.server.GetClientByID(c.GetID()) != c {
 		return

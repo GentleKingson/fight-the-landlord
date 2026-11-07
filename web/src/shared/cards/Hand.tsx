@@ -53,6 +53,8 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
 
   function applyRange(endIndex: number) {
     if (dragStart === null || endIndex < 0) return;
+    // A click may contain pointer jitter; only crossing cards starts a range.
+    if (!dragMoved && endIndex === dragStart) return;
     lastHitIndexRef.current = endIndex;
     if (endIndex !== dragStart) setDragMoved(true);
     const min = Math.min(dragStart, endIndex);

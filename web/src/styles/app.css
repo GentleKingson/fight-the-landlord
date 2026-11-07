@@ -1038,9 +1038,6 @@
 }
 
 @media (max-width: 880px) {
-  body {
-    overflow: hidden;
-  }
 
   .app-shell {
     background: linear-gradient(180deg, #72b7e8 0 78px, #237145 79px 100%);

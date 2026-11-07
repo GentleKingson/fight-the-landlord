@@ -45,12 +45,7 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		return
 	}
 
-	// 注意：由于ClientInterface不允许修改ID/Name，我们需要通过Server层面处理
-	// 这里我们假设client已经是正确的类型，可以进行类型断言
-	oldID := client.GetID()
-
-	// 从旧 ID 注销，用新 ID 注册
-	h.server.UnregisterClient(oldID)
+	// Server atomically retires the temporary identity and replaces the connection.
 	h.server.RegisterClient(session.PlayerID, client)
 
 	// 标记会话上线

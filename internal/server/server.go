@@ -47,6 +47,7 @@ type Server struct {
 	sessionManager *session.SessionManager
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
+	connectionMu   sync.Mutex // Serializes identity replacement with all disconnect side effects.
 	handler        *handler.Handler
 
 	// 安全组件

@@ -137,22 +137,39 @@ func (s *Server) GetClientByID(id string) types.ClientInterface {
 }
 
 func (s *Server) RegisterClient(id string, client types.ClientInterface) {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
-	if c, ok := client.(*Client); ok {
-		if previous := s.clients[id]; previous != nil && previous != c {
-			previous.Close()
-		}
-		c.mu.Lock()
-		c.ID = id
-		if s.sessionManager != nil {
-			if saved := s.sessionManager.Snapshot(id); saved != nil {
-				c.Name = saved.PlayerName
-			}
-		}
-		c.mu.Unlock()
-		s.clients[id] = c
+	c, ok := client.(*Client)
+	if !ok {
+		return
 	}
+	if previous := s.clients[id]; previous != nil && previous != c {
+		if s.matcher != nil {
+			s.matcher.RemoveFromQueue(previous)
+		}
+		previous.Close()
+	}
+	oldID := c.GetID()
+	if oldID != id {
+		if s.matcher != nil {
+			s.matcher.RemoveFromQueue(c)
+		}
+		delete(s.clients, oldID)
+		if s.sessionManager != nil {
+			s.sessionManager.DeleteSession(oldID)
+		}
+	}
+	c.mu.Lock()
+	c.ID = id
+	if s.sessionManager != nil {
+		if saved := s.sessionManager.Snapshot(id); saved != nil {
+			c.Name = saved.PlayerName
+		}
+	}
+	c.mu.Unlock()
+	s.clients[id] = c
 }
 
 func (s *Server) UnregisterClient(id string) {
