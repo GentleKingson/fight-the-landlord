@@ -1,0 +1,35 @@
+name: Build MARVEL wheel
+
+on:
+  push:
+    branches: [ci/build-marvel-wheel]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Fetch pinned MARVEL source
+        run: |
+          git clone https://github.com/GentleKingson/doudizhu.git source
+          git -C source checkout --detach acdcf199cf422e2b683cb22142b8e7cb33b14460
+      - name: Build and test wheel
+        env:
+          NANOPOKERLIB_BUILD_JOBS: '2'
+        run: |
+          python -m pip install 'pybind11>=3.0,<4' 'numpy>=2.2,<3' wheel
+          export CMAKE_PREFIX_PATH="$(python -m pybind11 --cmakedir)"
+          python -m pip wheel --no-deps --wheel-dir dist source/nanopokerlib
+          python -m pip install --no-deps dist/*.whl
+          python -c 'import nanopokerlib; assert nanopokerlib.doudizhu'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nanopokerlib-linux-x86_64-cp313
+          path: dist/*.whl
+          if-no-files-found: error
