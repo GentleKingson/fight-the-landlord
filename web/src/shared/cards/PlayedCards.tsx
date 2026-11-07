@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { CardInfo } from '../../protocol/types';
 import { Card } from './Card';
 
@@ -19,7 +20,7 @@ export function PlayedCards({ cards, handType, playerName, compact = false }: Pl
         {playerName ? <span>{playerName}</span> : null}
         {handType ? <strong>{handType}</strong> : null}
       </div>
-      <div className="played-cards__row">
+      <div className="played-cards__row" style={{ '--played-count': cards.length } as CSSProperties}>
         {cards.map((card, index) => (
           <Card key={`${card.suit}_${card.rank}_${index}`} card={card} size="played" />
         ))}

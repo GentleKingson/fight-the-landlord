@@ -81,6 +81,14 @@ WEB_DIR=web/dist COLLECT_TRAINING_DATA=true go run ./cmd/server
 `web/.env.example` 中的 `VITE_WS_TARGET` 同时控制 `/ws` 和 `/api` 的开发代理。
 仅运行终端客户端时，可以不设置 `WEB_DIR`。
 
+网页大厅、牌桌和结算按当前可视窗口分配高度；手机竖屏使用两行手牌，横屏使用全宽手牌。
+中央显示当前需要跟的牌，左右保留玩家身份、余牌和叫抢／不出标记；完整动作可从“历史”查看。
+聊天、记牌器和历史按需展开，长列表与结算的“剩余手牌”在面板内滚动，主要操作保持可见。
+仅预览界面时，可在开发地址后加 `?demo=lobby`、`?demo=bidding`、`?demo=table` 或 `?demo=result`；
+演示状态不连接游戏服务，不能用来验证真实对局。
+
+![网页牌桌（1366×768，演示数据）](web-table.png)
+
 ## 两个 .pt 模型的真实适配
 
 上传文件不是 DouZero LSTM 权重，而是

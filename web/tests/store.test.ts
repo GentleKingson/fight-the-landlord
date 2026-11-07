@@ -192,6 +192,41 @@ describe('app store message flow', () => {
     expect(useAppStore.getState().cardCounter).toEqual({});
   });
 
+  it.each([
+    { scenario: 'another player played while disconnected', lastPlayerId: 'b', hasCards: true, expectedName: 'B' },
+    { scenario: 'the last player is missing', lastPlayerId: 'missing', hasCards: true, expectedName: '' },
+    { scenario: 'the snapshot has no played cards', lastPlayerId: '', hasCards: false, expectedName: '' }
+  ])('restores played-card metadata when $scenario', ({ lastPlayerId, hasCards, expectedName }) => {
+    const receive = useAppStore.getState().handleMessage;
+    receive({
+      type: MsgType.CardPlayed,
+      payload: { player_id: 'a', player_name: 'A', cards: [{ suit: 0, rank: 3, color: 0 }], cards_left: 16, hand_type: '单张' }
+    });
+    const cards = hasCards ? [{ suit: 0, rank: 4, color: 0 }, { suit: 1, rank: 4, color: 1 }] : [];
+    receive({
+      type: MsgType.Reconnected,
+      payload: {
+        player_id: 'a',
+        player_name: 'A',
+        game_state: {
+          phase: 'playing',
+          players: [{ id: 'b', name: 'B', seat: 1, ready: true, is_landlord: false, cards_count: 15, online: true }],
+          hand: [],
+          last_played: cards,
+          last_player_id: lastPlayerId,
+          must_play: false,
+          can_beat: true
+        }
+      }
+    });
+    expect(useAppStore.getState()).toMatchObject({
+      lastPlayed: cards,
+      lastPlayedBy: lastPlayerId,
+      lastPlayedName: expectedName,
+      lastHandType: ''
+    });
+  });
+
   it('updates hand and action history after playing cards', () => {
     useAppStore.setState({
       playerId: 'p1',
