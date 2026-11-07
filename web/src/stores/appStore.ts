@@ -448,6 +448,11 @@ function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
     currentTurn: dto.current_turn ?? '',
     lastPlayed: dto.last_played ?? [],
     lastPlayedBy: dto.last_player_id ?? '',
+    lastPlayedName: dto.last_played?.length
+      ? dto.players?.find((player) => player.id === dto.last_player_id)?.name ?? ''
+      : '',
+    // Snapshots do not include the server's hand type; discard the pre-reconnect label.
+    lastHandType: '',
     seatActions,
     mustPlay: dto.must_play,
     canBeat: dto.can_beat,
