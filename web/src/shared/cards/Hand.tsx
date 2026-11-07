@@ -149,7 +149,9 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
               if (!disabled) selectGroup(item.groupIndex);
             }}
           >
-            <Card card={item.card} selected={isSelected} />
+            <Card card={item.card} selected={isSelected} onClick={(event) => {
+              if (!disabled && event.detail === 0) onToggle(item.key);
+            }} />
           </div>
         );
       })}

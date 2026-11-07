@@ -238,7 +238,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({
           hand,
           bottomCards: payload.bottom_cards ?? [],
-          bottomCardsRevealed: false,
+          bottomCardsRevealed: hand.length === 20 && state.bottomCardsRevealed,
           seatActions: {},
           players: syncDealtCounts(state.players, state.playerId, hand.length),
           cardCounter: initialCounter(hand)
@@ -300,7 +300,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastHandType: payload.hand_type,
           hand: isMe ? state.hand.filter((card) => !playedKeys.has(cardKey(card))) : state.hand,
           players: state.players.map((player) => player.id === payload.player_id ? { ...player, cards_count: payload.cards_left } : player),
-          cardCounter: isMe ? state.cardCounter : deductCounter(state.cardCounter, payload.cards ?? []),
+          cardCounter: isMe || !Object.keys(state.cardCounter).length ? state.cardCounter : deductCounter(state.cardCounter, payload.cards ?? []),
           recentActions: pushAction(state.recentActions, action),
           seatActions: setSeatAction(state.mustPlay ? {} : state.seatActions, action),
           selectedCards: new Set()
@@ -419,7 +419,7 @@ function syncLandlordCounts(players: PlayerInfo[], currentPlayerId: string, land
       ...player,
       online: true,
       is_landlord: isLandlord,
-      cards_count: player.id === currentPlayerId ? currentHandCount : (player.cards_count || fallbackCount)
+      cards_count: player.id === currentPlayerId ? currentHandCount : fallbackCount
     };
   });
 }
@@ -432,7 +432,7 @@ function restoreSnapshot(dto: GameStateDTO, currentPlayerId: string): Partial<Ap
     ? { [dto.last_player_id]: { type: 'play' as const, player_id: dto.last_player_id, cards: dto.last_played } }
     : {};
   return {
-    phase: dto.phase === 'bidding' ? 'bidding' : 'playing',
+    phase: dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : 'lobby',
     players: normalizeGamePlayers(dto.players ?? [], currentPlayerId, hand.length || 17),
     hand,
     bottomCards: dto.bottom_cards ?? [],
@@ -443,7 +443,7 @@ function restoreSnapshot(dto: GameStateDTO, currentPlayerId: string): Partial<Ap
     seatActions,
     mustPlay: dto.must_play,
     canBeat: dto.can_beat,
-    cardCounter: initialCounter(dto.hand ?? []),
+    cardCounter: dto.phase === 'bidding' ? initialCounter(dto.hand ?? []) : {},
     recentActions: dto.last_played?.length ? [{ type: 'play', player_id: dto.last_player_id, cards: dto.last_played, label: '上一手' }] : []
   };
 }

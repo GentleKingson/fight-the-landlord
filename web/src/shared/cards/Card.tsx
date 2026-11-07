@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, MouseEventHandler } from 'react';
 import type { CardInfo } from '../../protocol/types';
 import { normalizeCard } from './cardModel';
 
@@ -7,7 +7,7 @@ interface CardProps {
   selected?: boolean;
   size?: 'hand' | 'played' | 'mini' | 'action';
   style?: CSSProperties;
-  onClick?: () => void;
+  onClick?: MouseEventHandler<HTMLButtonElement>;
 }
 
 export function Card({ card, selected = false, size = 'hand', style, onClick }: CardProps) {

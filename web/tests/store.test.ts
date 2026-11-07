@@ -24,6 +24,34 @@ describe('app store message flow', () => {
     });
   });
 
+  it('keeps revealed bottom cards through the landlord supplemental deal', () => {
+    const cards = Array.from({ length: 17 }, (_, i) => ({ suit: i % 4, rank: 3 + Math.floor(i / 4), color: 0 }));
+    const bottom = [{ suit: 0, rank: 14, color: 0 }, { suit: 1, rank: 14, color: 1 }, { suit: 2, rank: 14, color: 0 }];
+    useAppStore.setState({ playerId: 'p1' });
+    const receive = useAppStore.getState().handleMessage;
+    receive({ type: MsgType.DealCards, payload: { cards, bottom_cards: [] } });
+    receive({ type: MsgType.Landlord, payload: { player_id: 'p1', bottom_cards: bottom } });
+    receive({ type: MsgType.DealCards, payload: { cards: [...cards, ...bottom], bottom_cards: bottom } });
+    receive({ type: MsgType.PlayTurn, payload: { player_id: 'p1' } });
+    expect(useAppStore.getState().bottomCardsRevealed).toBe(true);
+    expect(useAppStore.getState().hand).toHaveLength(20);
+    receive({ type: MsgType.DealCards, payload: { cards, bottom_cards: [] } });
+    expect(useAppStore.getState().bottomCardsRevealed).toBe(false);
+  });
+
+  it('sets the other landlord count to 20 before their first play', () => {
+    useAppStore.setState({ playerId: 'p1', players: [{ id: 'p2', name: '地主', seat: 1, ready: true, is_landlord: false, cards_count: 17, online: true }] });
+    useAppStore.getState().handleMessage({ type: MsgType.Landlord, payload: { player_id: 'p2', bottom_cards: [] } });
+    expect(useAppStore.getState().players[0].cards_count).toBe(20);
+  });
+
+  it('keeps selected cards when the server rejects a play', () => {
+    useAppStore.setState({ connected: true, phase: 'playing', selectedCards: new Set(['selected']) });
+    useAppStore.getState().handleMessage({ type: MsgType.Error, payload: { message: '非法出牌' } });
+    expect(useAppStore.getState().error).toBe('非法出牌');
+    expect(useAppStore.getState().selectedCards.has('selected')).toBe(true);
+  });
+
   it('enters lobby after connected', () => {
     useAppStore.getState().handleMessage({
       type: MsgType.Connected,
@@ -159,6 +187,9 @@ describe('app store message flow', () => {
     });
     expect(useAppStore.getState().phase).toBe('playing');
     expect(useAppStore.getState().bottomCardsRevealed).toBe(true);
+    expect(useAppStore.getState().cardCounter).toEqual({});
+    useAppStore.getState().handleMessage({ type: MsgType.CardPlayed, payload: { player_id: 'p2', cards: [{ suit: 0, rank: 3, color: 0 }] } });
+    expect(useAppStore.getState().cardCounter).toEqual({});
   });
 
   it('updates hand and action history after playing cards', () => {

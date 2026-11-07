@@ -13,16 +13,32 @@ import (
 )
 
 // ReconnectClient serializes connection replacement with game decisions and broadcasts.
-func (gs *GameSession) ReconnectClient(manager *room.RoomManager, client types.ClientInterface) error {
+func (gs *GameSession) ReconnectClient(manager *room.RoomManager, client types.ClientInterface, sessions *SessionManager, payload *protocol.ReconnectedPayload) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
-	return manager.ReconnectPlayer(client, client)
+	if err := manager.ReconnectPlayer(client, client); err != nil {
+		return err
+	}
+	gs.playerOnlineLocked(client.GetID())
+	payload.RoomCode = gs.room.Code
+	payload.GameState = gs.buildGameStateDTOLocked(client.GetID(), sessions)
+	client.SendMessage(codec.MustNewMessage(protocol.MsgReconnected, *payload))
+	gs.resendTurnToLocked(client)
+	if gs.state == GameStateEnded && gs.lastResult != nil {
+		client.SendMessage(gs.lastResult)
+		client.SetRoom("")
+	}
+	return nil
 }
 
 // BuildGameStateDTO 构建游戏状态 DTO（用于重连等场景）
 func (gs *GameSession) BuildGameStateDTO(playerID string, sessionManager *SessionManager) *protocol.GameStateDTO {
 	gs.mu.RLock()
 	defer gs.mu.RUnlock()
+	return gs.buildGameStateDTOLocked(playerID, sessionManager)
+}
+
+func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *SessionManager) *protocol.GameStateDTO {
 	var hand []card.Card
 	for _, p := range gs.players {
 		if p.ID == playerID {
@@ -85,6 +101,10 @@ func (gs *GameSession) ResendTurnTo(client types.ClientInterface) {
 	gs.mu.RLock()
 	defer gs.mu.RUnlock()
 
+	gs.resendTurnToLocked(client)
+}
+
+func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 	switch gs.state {
 	case GameStateBidding:
 		player := gs.players[gs.currentBidder]

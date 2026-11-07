@@ -149,10 +149,17 @@ func (gs *GameSession) PlayerOnline(playerID string) {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
 
+	gs.playerOnlineLocked(playerID)
+}
+
+func (gs *GameSession) playerOnlineLocked(playerID string) {
 	// 找到玩家
 	playerIdx := -1
 	for i, p := range gs.players {
 		if p.ID == playerID {
+			if !p.IsOffline {
+				return
+			}
 			p.IsOffline = false
 			playerIdx = i
 			break
@@ -171,6 +178,10 @@ func (gs *GameSession) PlayerOnline(playerID string) {
 	isPlaying := gs.state == GameStatePlaying && gs.currentPlayer == playerIdx
 
 	if !isBidding && !isPlaying {
+		return
+	}
+
+	if gs.turnTimer != nil || gs.offlineWaitTimer == nil {
 		return
 	}
 

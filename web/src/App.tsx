@@ -34,6 +34,7 @@ export function App() {
       {!connected && !new URLSearchParams(window.location.search).get('demo') ? (
         <ConnectionState error={error} />
       ) : null}
+      {connected && error ? <div className="connection-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError('')}>关闭</button></div> : null}
       {phase === 'game_over' ? (
         <GameResult socket={socket} />
       ) : phase === 'bidding' || phase === 'playing' ? (

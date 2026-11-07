@@ -63,8 +63,8 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	}
 
 	// 如果在房间中，尝试恢复房间信息
-	if session.RoomCode != "" {
-		h.tryRestoreRoomState(client, session, &reconnectPayload)
+	if session.RoomCode != "" && h.tryRestoreRoomState(client, session, &reconnectPayload) {
+		return // Active-game snapshot and turn have already been enqueued under the game lock.
 	}
 
 	// 发送重连成功消息
@@ -77,44 +77,37 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 			}))
 		}
 	}
-	// 快照恢复后，若正轮到该玩家，补发当前回合通知，恢复其操作提示与倒计时（快照本身不含 IsGrab / 剩余时间等回合信息）。须在 MsgReconnected 之后发送，确保客户端先应用快照、再设置回合提示。
-	if reconnectPayload.GameState != nil && reconnectPayload.GameState.CurrentTurn == session.PlayerID {
-		if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
-			gameSession.ResendTurnTo(client)
-		}
-	}
 
 	log.Printf("🔄 玩家 %s (%s) 重连成功", session.PlayerName, session.PlayerID)
 }
 
 // tryRestoreRoomState 尝试恢复房间状态
-func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *session.PlayerSession, payload *protocol.ReconnectedPayload) {
+func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *session.PlayerSession, payload *protocol.ReconnectedPayload) bool {
 	room := h.roomManager.GetRoom(session.RoomCode)
 	if room == nil {
 		client.SetRoom("")
-		return
+		return false
 	}
 
 	client.SetRoom(session.RoomCode)
 	// 重连到房间
 	var err error
 	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
-		err = gameSession.ReconnectClient(h.roomManager, client)
+		err = gameSession.ReconnectClient(h.roomManager, client, h.sessionManager, payload)
+		if err == nil {
+			return true
+		}
 	} else {
 		err = h.roomManager.ReconnectPlayer(client, client)
 	}
 	if err != nil {
 		log.Printf("重连到房间失败: %v", err)
 		client.SetRoom("")
-		return
+		return false
 	}
 
 	client.SetRoom(session.RoomCode)
 	payload.RoomCode = session.RoomCode
 
-	// 如果游戏正在进行，恢复游戏状态
-	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
-		gameSession.PlayerOnline(session.PlayerID)
-		payload.GameState = gameSession.BuildGameStateDTO(session.PlayerID, h.sessionManager)
-	}
+	return false
 }

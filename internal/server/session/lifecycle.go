@@ -136,14 +136,15 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	}
 
 	// 广播游戏结束
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgGameOver, protocol.GameOverPayload{
+	gs.lastResult = codec.MustNewMessage(protocol.MsgGameOver, protocol.GameOverPayload{
 		WinnerID:    winner.ID,
 		WinnerName:  winner.Name,
 		IsLandlord:  winner.IsLandlord,
 		PlayerHands: playerHands,
 		Multiplier:  multiplier,
 		Scores:      scores,
-	}))
+	})
+	gs.room.Broadcast(gs.lastResult)
 
 	role := "农民"
 	if winner.IsLandlord {

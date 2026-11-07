@@ -233,7 +233,6 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       return;
     }
     socket.send(MsgType.PlayCards, { cards: selected });
-    clearSelection();
   }
 
   function pass() {
@@ -330,6 +329,7 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
 }
 
 function CounterPanel({ counter }: { counter: Record<number, number> }) {
+  if (!Object.keys(counter).length) return <p role="status">重连后缺少完整出牌记录，本局记牌器不可用。下一局将自动恢复。</p>;
   return (
     <div className="counter-grid">
       {Object.entries(counter).map(([rank, count]) => (

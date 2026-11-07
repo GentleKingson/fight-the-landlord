@@ -21,3 +21,15 @@ test('mobile demo table keeps controls and drawers visible', async ({ page }) =>
   await expect(page.getByRole('button', { name: '提示' })).toBeVisible();
   await expect(page.getByRole('button', { name: '聊天' })).toBeVisible();
 });
+
+test('hand supports keyboard activation without double toggling pointer clicks', async ({ page }) => {
+  await page.goto('/?demo=table');
+  const card = page.getByLabel('手牌').getByRole('button').first();
+  await card.focus();
+  await page.keyboard.press('Enter');
+  await expect(card).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Space');
+  await expect(card).toHaveAttribute('aria-pressed', 'false');
+  await card.click();
+  await expect(card).toHaveAttribute('aria-pressed', 'true');
+});
