@@ -29,6 +29,7 @@ type Room struct {
 	State       RoomState              // 房间状态
 	Players     map[string]*RoomPlayer // 玩家列表
 	PlayerOrder []string               // 玩家顺序（按座位）
+	EndedAt     time.Time              // 结算保留期从结束时开始
 	CreatedAt   time.Time              // 创建时间
 
 	mu sync.RWMutex
@@ -36,12 +37,13 @@ type Room struct {
 
 // RoomManager 房间管理器
 type RoomManager struct {
-	redisStore  *storage.RedisStore
-	roomTimeout time.Duration
-	gameConfig  config.GameConfig
-	onGameStart func(*Room)
-	rooms       map[string]*Room
-	mu          sync.RWMutex
+	redisStore    *storage.RedisStore
+	roomTimeout   time.Duration
+	gameConfig    config.GameConfig
+	onGameStart   func(*Room)
+	onRoomRemoved func(*Room)
+	rooms         map[string]*Room
+	mu            sync.RWMutex
 }
 
 // NewRoomManager 创建房间管理器

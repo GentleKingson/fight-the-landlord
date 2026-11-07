@@ -54,7 +54,7 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 			Seat:       p.Seat,
 			IsLandlord: p.IsLandlord,
 			CardsCount: len(p.Hand),
-			Online:     sessionManager.IsOnline(p.ID),
+			Online:     sessionManager.IsOnline(p.ID) || gs.room.Players[p.ID].Client.IsBot(),
 		}
 	}
 	phase := "waiting"
@@ -119,7 +119,7 @@ func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 		mustPlay := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
 		canBeat := mustPlay
 		if !mustPlay {
-			canBeat = rule.FindSmallestBeatingCards(player.Hand, gs.lastPlayedHand) != nil
+			canBeat = rule.CanBeatWithHand(player.Hand, gs.lastPlayedHand)
 		}
 		client.SendMessage(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
 			PlayerID: player.ID,

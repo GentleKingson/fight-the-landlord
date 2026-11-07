@@ -160,7 +160,7 @@ func (gs *GameSession) validateCardsInHand(player *GamePlayer, cards []card.Card
 	for _, c := range cards {
 		found := false
 		for i, h := range handCopy {
-			if h.Suit == c.Suit && h.Rank == c.Rank {
+			if h == c {
 				handCopy = append(handCopy[:i], handCopy[i+1:]...)
 				found = true
 				break
@@ -197,8 +197,7 @@ func (gs *GameSession) notifyPlayTurn() {
 	canBeat := mustPlay // 如果必须出牌，则肯定能出（新一轮）
 	if !mustPlay {
 		// 检查是否有能打过上家的牌
-		beatingCards := rule.FindSmallestBeatingCards(player.Hand, gs.lastPlayedHand)
-		canBeat = beatingCards != nil
+		canBeat = rule.CanBeatWithHand(player.Hand, gs.lastPlayedHand)
 	}
 
 	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{

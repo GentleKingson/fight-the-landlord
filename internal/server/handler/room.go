@@ -20,8 +20,8 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 	}
 
 	// 如果已在房间中，先离开
-	if client.GetRoom() != "" {
-		h.roomManager.LeaveRoom(client)
+	if !h.leaveWaitingRoom(client) {
+		return
 	}
 
 	room, err := h.roomManager.CreateRoom(client)
@@ -57,8 +57,8 @@ func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Mes
 	}
 
 	// 如果已在房间中，先离开
-	if client.GetRoom() != "" {
-		h.roomManager.LeaveRoom(client)
+	if !h.leaveWaitingRoom(client) {
+		return
 	}
 
 	room, err := h.roomManager.JoinRoom(client, payload.RoomCode)
@@ -86,7 +86,15 @@ func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Mes
 
 // handleLeaveRoom 处理离开房间
 func (h *Handler) handleLeaveRoom(client types.ClientInterface) {
-	h.roomManager.LeaveRoom(client)
+	h.leaveWaitingRoom(client)
+}
+
+func (h *Handler) leaveWaitingRoom(client types.ClientInterface) bool {
+	if err := h.roomManager.LeaveRoom(client); err != nil {
+		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeGameStarted, err.Error()))
+		return false
+	}
+	return true
 }
 
 // handleQuickMatch 处理快速匹配
@@ -99,8 +107,8 @@ func (h *Handler) handleQuickMatch(client types.ClientInterface) {
 	}
 
 	// 如果已在房间中，先离开
-	if client.GetRoom() != "" {
-		h.roomManager.LeaveRoom(client)
+	if !h.leaveWaitingRoom(client) {
+		return
 	}
 
 	h.matcher.AddToQueue(client)

@@ -20,3 +20,13 @@ it('enters matching immediately and sends only one practice request on repeated 
   expect(send).toHaveBeenCalledTimes(1);
   expect(send).toHaveBeenCalledWith(MsgType.PracticeMatch);
 });
+
+it('shows a vacant middle seat without duplicating the third player', () => {
+  useAppStore.setState({ phase: 'waiting', lobbyPanel: 'home', players: [
+    { id: 'a', name: 'A', seat: 0, ready: false, is_landlord: false, online: true, cards_count: 0 },
+    { id: 'c', name: 'C', seat: 2, ready: false, is_landlord: false, online: true, cards_count: 0 }
+  ] });
+  render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  expect(screen.getAllByText('C')).toHaveLength(1);
+  expect(screen.getAllByText('等待加入')).toHaveLength(1);
+});

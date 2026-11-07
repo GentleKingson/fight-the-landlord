@@ -219,13 +219,12 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   const selectedCards = useAppStore((state) => state.selectedCards);
   const lastPlayed = useAppStore((state) => state.lastPlayed);
   const mustPlay = useAppStore((state) => state.mustPlay);
-  const canBeat = useAppStore((state) => state.canBeat);
   const isGrabTurn = useAppStore((state) => state.isGrabTurn);
   const setSelection = useAppStore((state) => state.setSelection);
   const clearSelection = useAppStore((state) => state.clearSelection);
   const selected = hand.filter((card) => selectedCards.has(cardKey(card)));
   const summary = summarizeHand(selected);
-  const canPlay = isMyTurn && phase === 'playing' && selected.length > 0 && (mustPlay || canBeat);
+  const canPlay = isMyTurn && phase === 'playing' && selected.length > 0;
 
   function play() {
     if (!canPlay) {
@@ -247,7 +246,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   function hint() {
     const suggestions = generateSimpleSuggestions(hand, lastPlayed, mustPlay);
     if (!suggestions.length) {
-      useAppStore.setState({ tableMessage: mustPlay ? '暂无提示' : '没有可压过的牌' });
+      useAppStore.setState({ tableMessage: '暂无提示，请手动选牌' });
       return;
     }
     setSelection(suggestions[0].map(cardKey));

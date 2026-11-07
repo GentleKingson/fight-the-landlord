@@ -150,7 +150,7 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
       </div>
       <div className="seat-list">
         {Array.from({ length: 3 }, (_, index) => {
-          const player = players.find((item) => item.seat === index) ?? players[index];
+          const player = players.find((item) => item.seat === index);
           return (
             <div className={`seat-row ${player?.id === playerId ? 'is-me' : ''}`} key={index}>
               <span>{index + 1}</span>

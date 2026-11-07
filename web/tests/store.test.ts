@@ -259,3 +259,30 @@ describe('app store message flow', () => {
     expect(Object.keys(useAppStore.getState().seatActions)).toEqual(['p2']);
   });
 });
+
+it('keeps the played cards attributed to their owner when another player passes', () => {
+  const receive = useAppStore.getState().handleMessage;
+  const cards = [{ rank: 3, suit: 0, color: 0 }];
+  receive({ type: MsgType.CardPlayed, payload: { player_id: 'a', player_name: 'A', cards, cards_left: 16, hand_type: '单张' } });
+  receive({ type: MsgType.PlayerPass, payload: { player_id: 'b', player_name: 'B' } });
+  expect(useAppStore.getState().lastPlayed).toEqual(cards);
+  expect(useAppStore.getState().lastPlayedBy).toBe('a');
+  expect(useAppStore.getState().lastPlayedName).toBe('A');
+  expect(useAppStore.getState().seatActions.b.type).toBe('pass');
+});
+
+it('preserves offline flags and zero card counts in snapshots and subsequent deal messages', () => {
+  const receive = useAppStore.getState().handleMessage;
+  const players = [
+    { id: 'a', name: 'A', seat: 0, online: true, cards_count: 17 },
+    { id: 'b', name: 'B', seat: 1, online: false, cards_count: 0 }
+  ];
+  receive({ type: MsgType.Reconnected, payload: { player_id: 'a', game_state: { phase: 'playing', players, hand: [] } } });
+  expect(useAppStore.getState().players[1].online).toBe(false);
+  expect(useAppStore.getState().players[1].cards_count).toBe(0);
+  receive({ type: MsgType.Landlord, payload: { player_id: 'a', bottom_cards: [] } });
+  receive({ type: MsgType.DealCards, payload: { cards: [], bottom_cards: [] } });
+  expect(useAppStore.getState().players[1].online).toBe(false);
+  receive({ type: MsgType.PlayerOnline, payload: { player_id: 'b' } });
+  expect(useAppStore.getState().players[1].online).toBe(true);
+});

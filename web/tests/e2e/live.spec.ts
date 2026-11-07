@@ -57,12 +57,24 @@ test('three people can join, restore a waiting room and start bidding', async ({
       await page.getByRole('button', { name: '加入', exact: true }).click();
       await expect(page.locator('.room-code-panel strong')).toHaveText(roomCode);
     }
+    // Replace the middle seat and verify it is neither duplicated nor lost.
+    await pages[1].getByRole('button', { name: '离开房间', exact: true }).click();
+    await expect(pages[0].getByText('2/3 人已入座')).toBeVisible();
+    await expect(pages[0].getByText('等待加入', { exact: true })).toHaveCount(1);
+    await pages[1].getByRole('textbox', { name: '加入房间', exact: true }).fill(roomCode);
+    await pages[1].getByRole('button', { name: '加入', exact: true }).click();
+    await expect(pages[0].getByText('3/3 人已入座')).toBeVisible();
     await pages[0].reload();
     await expect(pages[0].getByText('3/3 人已入座')).toBeVisible();
     for (const page of pages) await page.getByRole('button', { name: '准备开始' }).click();
     for (const page of pages) await expect(page.getByLabel('斗地主牌桌')).toBeVisible();
     const identities = await Promise.all(pages.map(page => page.evaluate(() => JSON.parse(sessionStorage.getItem('ddz_next_reconnect')!).id)));
     expect(new Set(identities).size).toBe(3);
+    await pages[2].close();
+    await expect(pages[0].getByText('离线', { exact: true })).toHaveCount(1);
+    await pages[0].reload();
+    await expect(pages[0].getByLabel('斗地主牌桌')).toBeVisible();
+    await expect(pages[0].getByText('离线', { exact: true })).toHaveCount(1);
   } finally { await Promise.all(contexts.map(context => context.close())); }
 });
 

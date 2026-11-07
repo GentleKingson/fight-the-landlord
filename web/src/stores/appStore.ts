@@ -180,7 +180,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO };
         persistReconnect(payload.player_id, state.reconnectToken);
         if (payload.game_state) {
-          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state, payload.player_id) });
+          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
         } else {
           set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
         }
@@ -312,8 +312,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         const payload = message.payload as { player_id: string; player_name: string };
         const action = { type: 'pass' as const, player_id: payload.player_id, player_name: payload.player_name, label: '不出' };
         set({
-          lastPlayedBy: payload.player_id,
-          lastPlayedName: payload.player_name,
           recentActions: pushAction(state.recentActions, action),
           seatActions: setSeatAction(state.seatActions, action)
         });
@@ -418,7 +416,6 @@ function normalizeGamePlayers(players: PlayerInfo[], currentPlayerId: string, cu
 function syncDealtCounts(players: PlayerInfo[], currentPlayerId: string, handCount: number): PlayerInfo[] {
   return players.map((player) => ({
     ...player,
-    online: true,
     cards_count: player.id === currentPlayerId ? handCount : (player.cards_count || 17)
   }));
 }
@@ -429,14 +426,13 @@ function syncLandlordCounts(players: PlayerInfo[], currentPlayerId: string, land
     const fallbackCount = isLandlord ? 20 : 17;
     return {
       ...player,
-      online: true,
       is_landlord: isLandlord,
       cards_count: player.id === currentPlayerId ? currentHandCount : fallbackCount
     };
   });
 }
 
-function restoreSnapshot(dto: GameStateDTO, currentPlayerId: string): Partial<AppState> {
+function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
   const isPlaying = dto.phase !== 'bidding';
   const hasLandlord = (dto.players ?? []).some((player) => player.is_landlord);
   const hand = sortCards(dto.hand ?? []);
@@ -445,7 +441,7 @@ function restoreSnapshot(dto: GameStateDTO, currentPlayerId: string): Partial<Ap
     : {};
   return {
     phase: dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : 'lobby',
-    players: normalizeGamePlayers(dto.players ?? [], currentPlayerId, hand.length || 17),
+    players: [...(dto.players ?? [])].sort((a, b) => a.seat - b.seat),
     hand,
     bottomCards: dto.bottom_cards ?? [],
     bottomCardsRevealed: isPlaying || hasLandlord,

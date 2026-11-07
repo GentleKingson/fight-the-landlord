@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
@@ -18,6 +19,10 @@ func (gs *GameSession) Start() {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
 
+	// Disconnect/expiry can remove a matched room before session registration.
+	if gs.room.GetState() == RoomStateEnded {
+		return
+	}
 	gs.startBiddingRound()
 }
 
@@ -248,3 +253,7 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 		}
 	}
 }
+
+// BelongsToRoom distinguishes successive games that reuse the same room code.
+// The room pointer is immutable for the lifetime of a session.
+func (gs *GameSession) BelongsToRoom(r *room.Room) bool { return gs.room == r }

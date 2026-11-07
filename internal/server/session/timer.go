@@ -84,10 +84,11 @@ func (gs *GameSession) stopTimer() {
 	}
 }
 
-// StopAllTimers stops all timers (for cleanup when all players disconnect)
+// StopAllTimers closes the session and rejects in-flight decisions after cleanup.
 func (gs *GameSession) StopAllTimers() {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	gs.state = GameStateEnded
 	gs.turnID++
 	gs.stopTimer()
 	gs.finishRecording("aborted", nil)
