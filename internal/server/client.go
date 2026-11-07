@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	closeReplaced  = 4001                // Private WebSocket close code: identity claimed by another connection.
 	writeWait      = 10 * time.Second    // 写入超时
 	pongWait       = 60 * time.Second    // 读取超时（pong 等待时间）
 	pingPeriod     = (pongWait * 9) / 10 // ping 发送间隔（必须小于 pongWait）
@@ -55,8 +56,9 @@ type Client struct {
 	conn   *websocket.Conn
 	send   chan []byte
 
-	mu     sync.RWMutex
-	closed bool
+	mu        sync.RWMutex
+	closed    bool
+	closeCode int
 }
 
 // NewClient 创建新客户端
@@ -137,7 +139,10 @@ func (c *Client) WritePump() {
 			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// 通道已关闭
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				c.mu.RLock()
+				code := c.closeCode
+				c.mu.RUnlock()
+				_ = c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(code, ""))
 				return
 			}
 
@@ -214,10 +219,15 @@ func (c *Client) handleDisconnect() {
 
 // Close 关闭客户端连接
 func (c *Client) Close() {
+	c.closeWithCode(websocket.CloseNormalClosure)
+}
+
+func (c *Client) closeWithCode(code int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if !c.closed {
+		c.closeCode = code
 		c.closed = true
 		close(c.send)
 	}

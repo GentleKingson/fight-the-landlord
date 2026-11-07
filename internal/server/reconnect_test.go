@@ -129,3 +129,49 @@ func TestDisconnectAndReplacementSerializeOfflineEffects(t *testing.T) {
 		}
 	})
 }
+
+func TestOverlappingRestoresKeepNewestRoomClient(t *testing.T) {
+	s := newReconnectServer()
+	old := NewClient(s, nil)
+	s.registerClient(old)
+	s.sessionManager.CreateSession(old.GetID(), old.GetName())
+	r, err := s.roomManager.CreateRoom(old)
+	require.NoError(t, err)
+	a, b := NewClient(s, nil), NewClient(s, nil)
+	registered, release := make(chan struct{}), make(chan struct{})
+	doneA, doneB := make(chan struct{}), make(chan struct{})
+	// Pause A exactly between identity registration and room restoration.
+	go func() {
+		s.RestoreClient(old.GetID(), a, func() {
+			close(registered)
+			<-release
+			a.SetRoom(r.Code)
+			_ = s.roomManager.ReconnectPlayer(a, a)
+		})
+		close(doneA)
+	}()
+	<-registered
+	go func() {
+		s.RestoreClient(old.GetID(), b, func() {
+			b.SetRoom(r.Code)
+			_ = s.roomManager.ReconnectPlayer(b, b)
+		})
+		close(doneB)
+	}()
+	var overtook bool
+	select {
+	case <-doneB:
+		overtook = true
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	<-doneA
+	<-doneB
+	require.False(t, overtook, "B must not restore while A is still recovering")
+	require.Same(t, b, s.GetClientByID(old.GetID()))
+	require.Same(t, b, r.Players[old.GetID()].Client)
+	require.Equal(t, closeReplaced, a.closeCode)
+	// A request already read by the displaced socket cannot take the room back.
+	s.RestoreClient(old.GetID(), a, func() { t.Error("closed socket restored") })
+	require.Same(t, b, s.GetClientByID(old.GetID()))
+}

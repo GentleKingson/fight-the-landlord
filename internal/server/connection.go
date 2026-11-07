@@ -139,6 +139,27 @@ func (s *Server) GetClientByID(id string) types.ClientInterface {
 func (s *Server) RegisterClient(id string, client types.ClientInterface) {
 	s.connectionMu.Lock()
 	defer s.connectionMu.Unlock()
+	s.registerIdentity(id, client)
+}
+
+// RestoreClient keeps registration and room recovery ordered against other reconnects and disconnects.
+func (s *Server) RestoreClient(id string, client types.ClientInterface, restore func()) {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+	if c, ok := client.(*Client); ok {
+		c.mu.RLock()
+		closed := c.closed
+		c.mu.RUnlock()
+		if closed {
+			return
+		}
+	}
+	s.registerIdentity(id, client)
+	restore()
+}
+
+// registerIdentity requires connectionMu; release clientsMu before invoking room recovery.
+func (s *Server) registerIdentity(id string, client types.ClientInterface) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 	c, ok := client.(*Client)
@@ -149,7 +170,7 @@ func (s *Server) RegisterClient(id string, client types.ClientInterface) {
 		if s.matcher != nil {
 			s.matcher.RemoveFromQueue(previous)
 		}
-		previous.Close()
+		previous.closeWithCode(closeReplaced)
 	}
 	oldID := c.GetID()
 	if oldID != id {

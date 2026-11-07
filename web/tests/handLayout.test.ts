@@ -24,3 +24,14 @@ describe('hand layout model', () => {
     expect(layout.every((item) => Number.isFinite(item.singleX) && Number.isFinite(item.compactX) && Number.isFinite(item.rowX))).toBe(true);
   });
 });
+
+it('fits dense rank groups and 20-card hands within narrow portrait containers', () => {
+  for (const ranks of [[14,14,14,14,13,13,13,13,12,12,12,12,11,11,11,10,10], Array.from({ length: 20 }, (_, i) => 14 - Math.floor(i / 4))]) {
+    const layout = buildHandLayout(ranks.map((rank, i) => c(i % 4, rank)), 280);
+    for (const row of [0, 1]) {
+      const positions = layout.filter(item => item.row === row).map(item => item.rowX);
+      expect(Math.max(...positions) - Math.min(...positions) + 58).toBeLessThanOrEqual(280);
+      expect(new Set(positions).size).toBe(positions.length);
+    }
+  }
+});

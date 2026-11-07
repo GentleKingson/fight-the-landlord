@@ -40,6 +40,11 @@ func (m *MockServer) RegisterClient(id string, client types.ClientInterface) {
 	m.Called(id, client)
 }
 
+func (m *MockServer) RestoreClient(id string, client types.ClientInterface, restore func()) {
+	m.RegisterClient(id, client)
+	restore()
+}
+
 func (m *MockServer) UnregisterClient(id string) {
 	m.Called(id)
 }

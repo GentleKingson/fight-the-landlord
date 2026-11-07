@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { CardInfo } from '../../protocol/types';
 import { cardKey } from './cardModel';
 import { Card } from './Card';
@@ -34,11 +34,23 @@ interface HandGroup {
 
 export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelect }: HandProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const lastPointerDownIndex = useRef<number | null>(null);
+  const sameCardPointerDown = useRef(false);
   const lastHitIndexRef = useRef<number | null>(null);
   const [dragStart, setDragStart] = useState<number | null>(null);
   const [dragMoved, setDragMoved] = useState(false);
   const [dragKeys, setDragKeys] = useState<Set<string>>(new Set());
-  const layout = useMemo(() => buildHandLayout(cards), [cards]);
+  const [width, setWidth] = useState(280);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const measure = () => setWidth(root.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
+  const layout = useMemo(() => buildHandLayout(cards, width), [cards, width]);
   const keys = useMemo(() => layout.map((item) => item.key), [layout]);
 
   function indexFromPoint(clientX: number, clientY: number): number {
@@ -87,6 +99,8 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
         if (disabled) return;
         const index = indexFromTarget(event.target);
         if (index >= 0) {
+          sameCardPointerDown.current = lastPointerDownIndex.current === index;
+          lastPointerDownIndex.current = index;
           setDragStart(index);
           setDragMoved(false);
           lastHitIndexRef.current = index;
@@ -148,7 +162,7 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
             role="option"
             aria-selected={isSelected}
             onDoubleClick={() => {
-              if (!disabled) selectGroup(item.groupIndex);
+              if (!disabled && sameCardPointerDown.current) selectGroup(item.groupIndex);
             }}
           >
             <Card card={item.card} selected={isSelected} onClick={(event) => {
@@ -161,16 +175,27 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
   );
 }
 
-export function buildHandLayout(cards: CardInfo[]): HandCardLayout[] {
+export function buildHandLayout(cards: CardInfo[], width = 280): HandCardLayout[] {
   const groups = buildGroups(cards);
-  const splitAt = Math.ceil(groups.length / 2);
+  // Keep ranks together, choosing the boundary closest to half the actual cards.
+  let splitAt = 0;
+  let count = 0;
+  let best = Infinity;
+  groups.forEach((group, index) => {
+    count += group.cards.length;
+    const difference = Math.abs(cards.length - 2 * count);
+    if (difference < best) { best = difference; splitAt = index + 1; }
+  });
   const rowGroups = [groups.slice(0, splitAt), groups.slice(splitAt)];
   const singlePositions = buildCenteredPositions(groups, 32, 8);
   const compactPositions = buildCenteredPositions(groups, 25, 5);
   const rowPositions = new Map<number, number>();
 
   rowGroups.forEach((row) => {
-    for (const [index, x] of buildCenteredPositions(row, 30, 7)) rowPositions.set(index, x);
+    const count = row.reduce((sum, group) => sum + group.cards.length, 0);
+    // Portrait cards are 58px wide. Reserve edges and scale spacing to the measured hand container.
+    const step = Math.min(30, Math.max(0, (width - 66 - Math.max(0, row.length - 1) * 7) / Math.max(1, count - 1)));
+    for (const [index, x] of buildCenteredPositions(row, step, 7)) rowPositions.set(index, x);
   });
 
   const items: HandCardLayout[] = [];

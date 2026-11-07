@@ -33,6 +33,10 @@ test('human practice survives reload and finishes a recorded game', async ({ pag
   }
   await expect(page.getByRole('button', { name: '返回大厅' })).toBeVisible();
   expect(plays).toBeGreaterThan(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('ddz_match_mode'))).toBe('practice');
+  await page.getByRole('button', { name: '再来一局' }).click();
+  await expect(page.getByLabel('斗地主牌桌')).toBeVisible();
+  await expect(page.getByLabel('斗地主牌桌')).toContainText('🤖');
 });
 
 test('three people can join, restore a waiting room and start bidding', async ({ browser }) => {
@@ -60,4 +64,24 @@ test('three people can join, restore a waiting room and start bidding', async ({
     const identities = await Promise.all(pages.map(page => page.evaluate(() => JSON.parse(sessionStorage.getItem('ddz_next_reconnect')!).id)));
     expect(new Set(identities).size).toBe(3);
   } finally { await Promise.all(contexts.map(context => context.close())); }
+});
+
+
+test('duplicated credentials replace the old tab without a reconnect loop', async ({ page, context }) => {
+  test.skip(!process.env.DDZ_LIVE_URL, 'Set DDZ_LIVE_URL to the running game server');
+  await page.goto(process.env.DDZ_LIVE_URL!);
+  await expect(page.getByText('正在连接服务器...')).toHaveCount(0);
+  const identity = await page.evaluate(() => sessionStorage.getItem('ddz_next_reconnect'));
+  expect(identity).toBeTruthy();
+  const duplicate = await context.newPage();
+  await duplicate.addInitScript(value => sessionStorage.setItem('ddz_next_reconnect', value!), identity);
+  await duplicate.goto(process.env.DDZ_LIVE_URL!);
+  await expect(page.getByText('此账号已在另一个页面继续游戏，本页面已停止重连')).toBeVisible();
+  // Observe more than two retry intervals; the displaced page must stay stopped.
+  await page.waitForTimeout(6000);
+  await expect(page.getByText('此账号已在另一个页面继续游戏，本页面已停止重连')).toBeVisible();
+  await duplicate.getByRole('button', { name: /创建房间/ }).click();
+  await expect(duplicate.locator('.room-code-panel strong')).toHaveText(/^\d{6}$/);
+  expect(await duplicate.evaluate(() => sessionStorage.getItem('ddz_next_reconnect'))).toBe(identity);
+  await duplicate.close();
 });

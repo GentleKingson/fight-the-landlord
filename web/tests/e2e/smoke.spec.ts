@@ -60,3 +60,23 @@ test('pointer jitter within one card toggles exactly once', async ({ page }) => 
     await expect(card).toHaveAttribute('aria-pressed', selected);
   }
 });
+
+test('all dense portrait hand cards remain visible and selectable at 320px', async ({ page, isMobile }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto('/?demo=table');
+  for (const ranks of [[14,14,14,14,13,13,13,13,12,12,12,12,11,11,11,10,10], Array.from({ length: 20 }, (_, i) => 14 - Math.floor(i / 4))]) {
+    await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => useAppStore.setState({ hand: ${JSON.stringify(ranks.map((rank, i) => ({ rank, suit: i % 4, color: i % 2 })))}, selectedCards: new Set(), currentTurn: 'p1' }))`);
+    const cards = page.getByLabel('手牌').getByRole('button');
+    await expect(cards).toHaveCount(ranks.length);
+    for (let index = 0; index < ranks.length; index++) {
+      const card = cards.nth(index);
+      await card.scrollIntoViewIfNeeded();
+      const box = (await card.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(320);
+      if (isMobile) await page.touchscreen.tap(box.x + 5, box.y + 30);
+      else await page.mouse.click(box.x + 5, box.y + 30);
+      await expect(card).toHaveAttribute('aria-pressed', 'true');
+    }
+  }
+});

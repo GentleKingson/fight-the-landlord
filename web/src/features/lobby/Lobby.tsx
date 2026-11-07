@@ -64,6 +64,7 @@ function LobbyHome({ socket }: LobbyProps) {
       setError('请输入房间号');
       return;
     }
+    useAppStore.setState({ matchMode: 'online' });
     socket.send(MsgType.JoinRoom, { room_code: roomCode });
   }
 
@@ -73,6 +74,7 @@ function LobbyHome({ socket }: LobbyProps) {
 
   function joinListedRoom(roomCode: string) {
     setRoomCodeInput(roomCode);
+    useAppStore.setState({ matchMode: 'online' });
     socket.send(MsgType.JoinRoom, { room_code: roomCode });
   }
 
@@ -89,7 +91,7 @@ function LobbyHome({ socket }: LobbyProps) {
       </div>
 
       <div className="entry-grid">
-        <button className="entry-tile" onClick={() => socket.send(MsgType.CreateRoom)}>
+        <button className="entry-tile" onClick={() => { useAppStore.setState({ matchMode: 'online' }); socket.send(MsgType.CreateRoom); }}>
           <Icon name="room" />
           <strong>创建房间</strong>
           <span>好友同玩</span>

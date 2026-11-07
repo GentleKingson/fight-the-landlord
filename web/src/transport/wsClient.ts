@@ -64,11 +64,16 @@ export class GameSocket {
       useAppStore.getState().setError('连接失败');
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (this.socket !== socket) return;
       this.stopHeartbeat();
       this.socket = null;
       useAppStore.getState().setConnected(false);
+      if (event.code === 4001) {
+        this.intentionalClose = true;
+        useAppStore.getState().setError('此账号已在另一个页面继续游戏，本页面已停止重连');
+        return;
+      }
       if (!this.intentionalClose) {
         useAppStore.getState().setError('与服务器断开，正在重连');
         this.reconnectTimer = window.setTimeout(() => this.connect(), 2500);

@@ -1951,7 +1951,6 @@
 
 .hand__slot.is-selected {
   transform: translateY(-20px) rotate(calc(var(--offset) * .45deg));
-  z-index: 80 !important;
 }
 
 .card {
@@ -2559,7 +2558,6 @@
 
 .hand__slot.is-selected {
   transform: translateY(-22px) rotate(calc(var(--offset) * .35deg));
-  z-index: 80 !important;
 }
 
 .hand.is-dragging .card {
@@ -2627,7 +2625,6 @@
 
 .hand__slot.is-selected {
   transform: translateY(-22px);
-  z-index: 90 !important;
 }
 
 .card.is-selected {

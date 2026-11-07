@@ -128,7 +128,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: '',
   maintenance: false,
   phase: 'connecting',
-  matchMode: 'online',
+  matchMode: loadMatchMode(),
   roomCode: '',
   players: [],
   onlineCount: 0,
@@ -171,6 +171,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           phase: 'lobby',
           playerId: payload.player_id,
           playerName: payload.player_name,
+          matchMode: 'online',
           reconnectToken: payload.reconnect_token
         });
         break;
@@ -364,6 +365,17 @@ export const useChatStore = create<{ messages: ChatPayload[]; push: (message: Ch
   push: (message) => set({ messages: [...get().messages, message].slice(-80) }),
   clear: () => set({ messages: [] })
 }));
+
+export function loadMatchMode(): 'practice' | 'online' {
+  try { return sessionStorage.getItem('ddz_match_mode') === 'practice' ? 'practice' : 'online'; }
+  catch { return 'online'; }
+}
+
+useAppStore.subscribe((state, previous) => {
+  if (state.matchMode !== previous.matchMode) {
+    try { sessionStorage.setItem('ddz_match_mode', state.matchMode); } catch { /* Storage may be disabled. */ }
+  }
+});
 
 export function loadReconnect(): { id: string; token: string } | null {
   try {

@@ -38,15 +38,17 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		return
 	}
 
-	// 获取旧会话
-	session := h.sessionManager.Snapshot(payload.PlayerID)
+	h.server.RestoreClient(payload.PlayerID, client, func() {
+		h.restoreConnection(client, payload.PlayerID)
+	})
+}
+
+// restoreConnection runs inside the server connection lifecycle lock.
+func (h *Handler) restoreConnection(client types.ClientInterface, playerID string) {
+	session := h.sessionManager.Snapshot(playerID)
 	if session == nil {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "会话不存在"))
 		return
 	}
-
-	// Server atomically retires the temporary identity and replaces the connection.
-	h.server.RegisterClient(session.PlayerID, client)
 
 	// 标记会话上线
 	h.sessionManager.SetOnline(session.PlayerID)

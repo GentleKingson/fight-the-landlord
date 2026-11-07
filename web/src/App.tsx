@@ -49,7 +49,7 @@ export function App() {
 function ConnectionState({ error }: { error: string }) {
   return (
     <div className="connection-toast" role="status">
-      <span className="spinner" />
+      {!error ? <span className="spinner" /> : null}
       <span>{error || '正在连接服务器...'}</span>
     </div>
   );

@@ -4,6 +4,10 @@
 的 `ff667761eda2a0875024b5e3f8a950ebdda08e0a`（作者 anby-jp），沿用项目 GPL-3.0
 许可。在此基础上使用服务端同一份 protobuf 定义，并补齐静态托管、重连和结算后再开局。
 
+同一身份同时打开多个页面时，最后一次重连的页面接管牌局；旧页面收到 WebSocket
+关闭码 `4001` 后停止自动重连并显示提示。普通网络断线仍自动重连。
+人机/真人模式保存在当前标签页的 `sessionStorage`，刷新恢复后“再来一局”沿用该模式。
+
 ## Docker 一键部署
 
 需要 Docker Compose v2。首次构建需要访问 npm、Go、PyTorch 和 GitHub。
