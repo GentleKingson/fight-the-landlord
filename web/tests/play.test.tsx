@@ -22,7 +22,7 @@ it('allows manually selected replies regardless of the advisory can_beat flag', 
   expect(useAppStore.getState().tableMessage).toBe('暂无提示，请手动选牌');
 });
 
-it('keeps both opponents\' played cards visible in their own areas', () => {
+it.each([0, 1, 2])('keeps previous player left and next player right with their played cards (self seat %i)', (seat) => {
   useAppStore.setState({
     phase: 'playing',
     playerId: 'p1',
@@ -34,9 +34,9 @@ it('keeps both opponents\' played cards visible in their own areas', () => {
     drawer: 'none',
     tableMessage: '',
     players: [
-      { id: 'p1', name: '我', seat: 0, ready: true, is_landlord: false, cards_count: 17, online: true },
-      { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: true, cards_count: 20, online: true },
-      { id: 'p3', name: '松风', seat: 2, ready: true, is_landlord: false, cards_count: 17, online: true }
+      { id: 'p1', name: '我', seat, ready: true, is_landlord: false, cards_count: 17, online: true },
+      { id: 'p2', name: '山月', seat: (seat + 1) % 3, ready: true, is_landlord: true, cards_count: 20, online: true },
+      { id: 'p3', name: '松风', seat: (seat + 2) % 3, ready: true, is_landlord: false, cards_count: 17, online: true }
     ]
   });
   const receive = useAppStore.getState().handleMessage;
@@ -44,10 +44,10 @@ it('keeps both opponents\' played cards visible in their own areas', () => {
   receive({ type: MsgType.CardPlayed, payload: { player_id: 'p3', player_name: '松风', cards: [{ rank: 10, suit: 0, color: 0 }], cards_left: 16, hand_type: '单张' } });
 
   render(<GameTable socket={{ send: vi.fn() } as unknown as GameSocket} />);
-  const left = screen.getByRole('region', { name: '山月的出牌' });
-  const right = screen.getByRole('region', { name: '松风的出牌' });
+  const left = screen.getByRole('region', { name: '松风的出牌' });
+  const right = screen.getByRole('region', { name: '山月的出牌' });
   expect(left.classList.contains('played-seat--left')).toBe(true);
   expect(right.classList.contains('played-seat--right')).toBe(true);
-  expect(within(left).getByRole('button', { name: '9♥' })).toBeDefined();
-  expect(within(right).getByRole('button', { name: '10♠' })).toBeDefined();
+  expect(within(left).getByRole('button', { name: '10♠' })).toBeDefined();
+  expect(within(right).getByRole('button', { name: '9♥' })).toBeDefined();
 });
