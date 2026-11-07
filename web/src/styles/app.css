@@ -557,7 +557,7 @@
 }
 
 .table-title span,
-.bottom-cards span {
+.bottom-cards > span {
   color: #ffe092;
   font-weight: 800;
   font-size: 13px;
@@ -1414,7 +1414,7 @@
   min-height: 0;
   display: grid;
   place-items: center;
-  padding: 50px min(12vw, 178px) 66px;
+  padding: 116px min(12vw, 178px) 100px;
   border-radius: 28px;
   background:
     radial-gradient(ellipse at center, rgba(255,255,255,.13), transparent 46%),
@@ -1447,7 +1447,7 @@
   display: grid;
   place-items: center;
   width: min(560px, 52vw);
-  min-height: 190px;
+  min-height: 110px;
   border: 0;
   border-radius: 26px;
   background: transparent;
@@ -1752,18 +1752,15 @@
   margin-left: 0;
 }
 
-.played-action span {
+.played-action > span {
   color: rgba(255, 226, 145, .8);
   font-size: 11px;
   font-weight: 900;
 }
 
 .self-action-lane {
-  position: absolute;
-  left: 190px;
-  right: 76px;
-  top: -48px;
-  z-index: 10;
+  width: 100%;
+  min-width: 0;
   display: grid;
   justify-items: center;
   pointer-events: none;
@@ -1771,7 +1768,22 @@
 
 .self-action-lane .played-action {
   position: static;
-  max-width: min(420px, 54vw);
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Keep long combinations inside the table instead of overflowing the lane. */
+.self-action-lane .played-action__cards {
+  --action-card-width: 46px;
+  display: grid;
+  width: calc(var(--played-count) * (var(--action-card-width) - 7px) + 7px);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.self-action-lane .played-action__cards .card {
+  margin-left: 0;
 }
 
 .turn-banner {
@@ -2191,7 +2203,7 @@
   }
 
   .table-arena {
-    padding: 88px 8px 76px;
+    padding: 112px 8px 90px;
     border-width: 10px;
     border-radius: 46% / 12%;
   }
@@ -2272,7 +2284,7 @@
   }
 
   .felt-table {
-    width: 92vw;
+    width: 100%;
     min-height: 190px;
   }
 
@@ -2324,16 +2336,6 @@
     min-height: 132px;
   }
 
-  .self-action-lane {
-    left: 0;
-    right: 0;
-    top: -48px;
-  }
-
-  .self-action-lane .played-action {
-    max-width: 86vw;
-  }
-
   .hand-zone .player-badge {
     display: none;
   }
@@ -2361,6 +2363,11 @@
   .card--played {
     --w: 50px;
     --h: 72px;
+  }
+
+  .card--mini {
+    --w: 34px;
+    --h: 48px;
   }
 
   .card__pip {
@@ -2409,7 +2416,7 @@
   .table-arena {
     grid-column: 1;
     grid-row: 2;
-    padding: 40px 100px 58px;
+    padding: 80px 100px 80px;
     border-width: 9px;
     border-radius: 22px;
   }
@@ -2469,8 +2476,8 @@
   }
 
   .felt-table {
-    width: min(360px, 48vw);
-    min-height: 110px;
+    width: 100%;
+    min-height: 80px;
   }
 
   .turn-banner {
@@ -2749,6 +2756,14 @@
     --w: 30px;
     --h: 42px;
     margin-left: -5px;
+  }
+
+  .played-action__cards {
+    min-height: 42px;
+  }
+
+  .self-action-lane .played-action__cards {
+    --action-card-width: 30px;
   }
 }
 

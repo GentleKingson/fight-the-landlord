@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
@@ -67,7 +67,13 @@ export function GameTable({ socket }: GameTableProps) {
         <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
 
         <div className="felt-table">
-          <div className="table-center-hint">{phase === 'bidding' ? '叫抢阶段' : '观察各家出牌'}</div>
+          {seats.me && seatActions[seats.me.id] ? (
+            <div className="self-action-lane" aria-label="我的出牌">
+              <PlayedActionBubble action={seatActions[seats.me.id]} self />
+            </div>
+          ) : (
+            <div className="table-center-hint">{phase === 'bidding' ? '叫抢阶段' : '观察各家出牌'}</div>
+          )}
           <PlayedCards cards={lastPlayed} handType={lastHandType} playerName={lastPlayedName || '上一手'} />
         </div>
 
@@ -78,9 +84,6 @@ export function GameTable({ socket }: GameTableProps) {
 
       <section className="hand-zone">
         {seats.me ? <PlayerBadge player={seats.me} active={currentTurn === playerId} me /> : null}
-        <div className="self-action-lane">
-          {seats.me ? <PlayedActionBubble action={seatActions[seats.me.id]} self /> : null}
-        </div>
         <Hand
           cards={hand}
           selected={selectedCards}
@@ -146,13 +149,17 @@ function PlayedActionBubble({ action, side, self = false }: { action?: SeatActio
   }
 
   const label = action.label || (action.type === 'pass' ? '不出' : action.hand_type || '出牌');
-  const hasCards = action.type === 'play' && Boolean(action.cards?.length);
+  const cards = action.cards ?? [];
+  const hasCards = action.type === 'play' && cards.length > 0;
 
   return (
     <div className={`played-action played-action--${action.type} ${side ? `played-action--${side}` : ''} ${self ? 'played-action--self' : ''}`}>
       {hasCards ? (
-        <div className="played-action__cards" aria-label={label}>
-          {action.cards?.map((card, index) => (
+        <div className="played-action__cards" aria-label={label} style={self ? {
+          '--played-count': cards.length,
+          gridTemplateColumns: `${cards.length > 1 ? `repeat(${cards.length - 1}, minmax(0, 1fr)) ` : ''}var(--action-card-width)`
+        } as CSSProperties : undefined}>
+          {cards.map((card, index) => (
             <Card key={`${card.suit}_${card.rank}_${index}`} card={card} size="action" />
           ))}
         </div>
