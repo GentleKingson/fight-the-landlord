@@ -128,9 +128,17 @@ test('table fits common viewports with collection notice, long plays and an over
       await page.setViewportSize(viewport);
       await page.goto('/?demo=table');
       await expect(page.locator('.collection-notice')).toBeVisible();
-      await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => useAppStore.setState({ lastPlayed: ${JSON.stringify(airplane)}, lastPlayedBy: 'p3', lastPlayedName: '松风', lastHandType: '飞机', currentTurn: 'p1' }))`);
+      await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => {
+        for (const player of useAppStore.getState().players) {
+          useAppStore.getState().handleMessage({ type: 'card_played', payload: {
+            player_id: player.id, player_name: player.name, cards: ${JSON.stringify(airplane)}, cards_left: 2, hand_type: '飞机',
+          } });
+        }
+      })`);
       const playedCards = page.locator('.felt-table .card--played');
-      await expect(playedCards).toHaveCount(18);
+      for (const side of ['left', 'me', 'right']) {
+        await expect(page.locator(`.played-seat--${side} .card--played`)).toHaveCount(18);
+      }
       expect(await page.evaluate(() => ({
         width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
         height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
@@ -152,7 +160,7 @@ test('table fits common viewports with collection notice, long plays and an over
           return { top, right, bottom, left };
         }),
       );
-      expect(zones).toHaveLength(3);
+      expect(zones).toHaveLength(5);
       for (let first = 0; first < zones.length; first++) {
         for (let second = first + 1; second < zones.length; second++) {
           const a = zones[first];
