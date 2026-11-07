@@ -55,6 +55,7 @@ type BotConfig struct {
 
 // ServerConfig WebSocket 服务器配置
 type ServerConfig struct {
+	WebDir         string `yaml:"web_dir"` // Vite build directory; empty disables web hosting
 	Host           string `yaml:"host"`
 	Port           int    `yaml:"port"`
 	MaxConnections int    `yaml:"max_connections"` // 最大并发连接数，0 表示无限制
@@ -72,13 +73,15 @@ type RedisConfig struct {
 
 // GameConfig 游戏配置
 type GameConfig struct {
-	TurnTimeout           int `yaml:"turn_timeout"`            // 出牌超时（秒）
-	BidTimeout            int `yaml:"bid_timeout"`             // 叫地主超时（秒）
-	RoomTimeout           int `yaml:"room_timeout"`            // 房间等待超时（分钟）
-	ShutdownTimeout       int `yaml:"shutdown_timeout"`        // 优雅关闭超时（分钟）
-	ShutdownCheckInterval int `yaml:"shutdown_check_interval"` // 优雅关闭检测间隔（秒）
-	RoomCleanupDelay      int `yaml:"room_cleanup_delay"`      // 游戏结束后服务器关闭延迟（秒）
-	OfflineWaitTimeout    int `yaml:"offline_wait_timeout"`    // 玩家离线等待超时（秒）
+	CollectTrainingData   bool   `yaml:"collect_training_data"`
+	TrainingDataDir       string `yaml:"training_data_dir"`
+	TurnTimeout           int    `yaml:"turn_timeout"`            // 出牌超时（秒）
+	BidTimeout            int    `yaml:"bid_timeout"`             // 叫地主超时（秒）
+	RoomTimeout           int    `yaml:"room_timeout"`            // 房间等待超时（分钟）
+	ShutdownTimeout       int    `yaml:"shutdown_timeout"`        // 优雅关闭超时（分钟）
+	ShutdownCheckInterval int    `yaml:"shutdown_check_interval"` // 优雅关闭检测间隔（秒）
+	RoomCleanupDelay      int    `yaml:"room_cleanup_delay"`      // 游戏结束后服务器关闭延迟（秒）
+	OfflineWaitTimeout    int    `yaml:"offline_wait_timeout"`    // 玩家离线等待超时（秒）
 }
 
 // SecurityConfig 安全配置
@@ -194,6 +197,7 @@ func getEnvStrSlice(key string, target *[]string) {
 // loadFromEnv 从环境变量加载配置（覆盖文件配置）
 func loadFromEnv(cfg *Config) {
 	// Server
+	getEnvStr("WEB_DIR", &cfg.Server.WebDir)
 	getEnvStr("SERVER_HOST", &cfg.Server.Host)
 	getEnvInt("SERVER_PORT", &cfg.Server.Port)
 	getEnvInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
@@ -205,6 +209,10 @@ func loadFromEnv(cfg *Config) {
 	getEnvInt("REDIS_DB", &cfg.Redis.DB)
 
 	// Game
+	if v := os.Getenv("COLLECT_TRAINING_DATA"); v != "" {
+		cfg.Game.CollectTrainingData, _ = strconv.ParseBool(v)
+	}
+	getEnvStr("TRAINING_DATA_DIR", &cfg.Game.TrainingDataDir)
 	getEnvInt("GAME_TURN_TIMEOUT", &cfg.Game.TurnTimeout)
 	getEnvInt("GAME_BID_TIMEOUT", &cfg.Game.BidTimeout)
 	getEnvInt("GAME_ROOM_TIMEOUT", &cfg.Game.RoomTimeout)
@@ -259,6 +267,7 @@ func setDefaults(cfg *Config) {
 	setDefaultStr(&cfg.Redis.Addr, defaultRedisAddr)
 
 	// Game
+	setDefaultStr(&cfg.Game.TrainingDataDir, "data/games")
 	setDefaultInt(&cfg.Game.TurnTimeout, defaultTurnTimeout)
 	setDefaultInt(&cfg.Game.BidTimeout, defaultBidTimeout)
 	setDefaultInt(&cfg.Game.RoomTimeout, defaultRoomTimeout)

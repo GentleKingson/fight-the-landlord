@@ -11,6 +11,7 @@ type ServerInterface interface {
 	BroadcastToLobby(msg *protocol.Message)
 	GetClientByID(id string) ClientInterface
 	RegisterClient(id string, client ClientInterface)
+	RestoreClient(id string, client ClientInterface, restore func())
 	UnregisterClient(id string)
 }
 

@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
@@ -18,6 +19,10 @@ func (gs *GameSession) Start() {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
 
+	// Disconnect/expiry can remove a matched room before session registration.
+	if gs.room.GetState() == RoomStateEnded {
+		return
+	}
 	gs.startBiddingRound()
 }
 
@@ -30,7 +35,7 @@ func (gs *GameSession) startBiddingRound() {
 
 	// 进入叫地主阶段
 	gs.state = GameStateBidding
-	gs.room.State = RoomStateBidding
+	gs.room.SetState(RoomStateBidding)
 
 	// 随机选择第一个叫地主的玩家
 	gs.currentBidder = rand.IntN(3)
@@ -64,11 +69,13 @@ func (gs *GameSession) dealNewRound() {
 
 	// 发牌
 	gs.deal()
+	gs.startRecording()
 }
 
 // redeal 流局（无人叫地主）重新发牌（调用方需持有 gs.mu）
 // 连续流局达到 maxRedeals 次后，重新发牌并随机强制指定地主，避免无限流局。
 func (gs *GameSession) redeal() {
+	gs.finishRecording("redeal", nil)
 	gs.redealCount++
 
 	if gs.redealCount >= maxRedeals {
@@ -115,8 +122,9 @@ func (gs *GameSession) deal() {
 
 // endGame 结束游戏
 func (gs *GameSession) endGame(winner *GamePlayer) {
+	gs.finishRecording("completed", winner)
 	gs.state = GameStateEnded
-	gs.room.State = RoomStateEnded
+	gs.room.SetState(RoomStateEnded)
 
 	// 计算最终倍数与各玩家得分
 	multiplier := gs.finalMultiplier(winner)
@@ -133,14 +141,15 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	}
 
 	// 广播游戏结束
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgGameOver, protocol.GameOverPayload{
+	gs.lastResult = codec.MustNewMessage(protocol.MsgGameOver, protocol.GameOverPayload{
 		WinnerID:    winner.ID,
 		WinnerName:  winner.Name,
 		IsLandlord:  winner.IsLandlord,
 		PlayerHands: playerHands,
 		Multiplier:  multiplier,
 		Scores:      scores,
-	}))
+	})
+	gs.room.Broadcast(gs.lastResult)
 
 	role := "农民"
 	if winner.IsLandlord {
@@ -244,3 +253,7 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 		}
 	}
 }
+
+// BelongsToRoom distinguishes successive games that reuse the same room code.
+// The room pointer is immutable for the lifetime of a session.
+func (gs *GameSession) BelongsToRoom(r *room.Room) bool { return gs.room == r }

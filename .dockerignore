@@ -29,3 +29,15 @@ logs/
 # 测试覆盖率
 coverage.out
 coverage.html
+
+.git
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/models
+**/vendor
+data
+.env.local
+web/test-results
+web/playwright-report

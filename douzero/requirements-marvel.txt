@@ -1,0 +1,6 @@
+# CPU-only torch is installed separately: see docs/web-play.md.
+numpy>=2.2,<3
+torch>=2.6,<3
+pybind11>=3.0,<4
+tyro>=1.0,<2
+tqdm>=4.67,<5

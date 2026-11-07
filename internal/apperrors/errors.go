@@ -25,13 +25,14 @@ func newGameError(code int) *GameError {
 
 // 预定义错误
 var (
-	ErrRoomNotFound = newGameError(protocol.ErrCodeRoomNotFound)
-	ErrRoomFull     = newGameError(protocol.ErrCodeRoomFull)
-	ErrNotInRoom    = newGameError(protocol.ErrCodeNotInRoom)
-	ErrGameStarted  = newGameError(protocol.ErrCodeGameStarted)
-	ErrGameNotStart = newGameError(protocol.ErrCodeGameNotStart)
-	ErrNotYourTurn  = newGameError(protocol.ErrCodeNotYourTurn)
-	ErrInvalidCards = newGameError(protocol.ErrCodeInvalidCards)
-	ErrCannotBeat   = newGameError(protocol.ErrCodeCannotBeat)
-	ErrMustPlay     = newGameError(protocol.ErrCodeMustPlay)
+	ErrAlreadyInRoom = &GameError{Code: protocol.ErrCodeUnknown, Message: "已在房间中，请先离开当前房间"}
+	ErrRoomNotFound  = newGameError(protocol.ErrCodeRoomNotFound)
+	ErrRoomFull      = newGameError(protocol.ErrCodeRoomFull)
+	ErrNotInRoom     = newGameError(protocol.ErrCodeNotInRoom)
+	ErrGameStarted   = newGameError(protocol.ErrCodeGameStarted)
+	ErrGameNotStart  = newGameError(protocol.ErrCodeGameNotStart)
+	ErrNotYourTurn   = newGameError(protocol.ErrCodeNotYourTurn)
+	ErrInvalidCards  = newGameError(protocol.ErrCodeInvalidCards)
+	ErrCannotBeat    = newGameError(protocol.ErrCodeCannotBeat)
+	ErrMustPlay      = newGameError(protocol.ErrCodeMustPlay)
 )

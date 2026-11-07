@@ -38,20 +38,17 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		return
 	}
 
-	// 获取旧会话
-	session := h.sessionManager.GetSession(payload.PlayerID)
+	h.server.RestoreClient(payload.PlayerID, client, func() {
+		h.restoreConnection(client, payload.PlayerID)
+	})
+}
+
+// restoreConnection runs inside the server connection lifecycle lock.
+func (h *Handler) restoreConnection(client types.ClientInterface, playerID string) {
+	session := h.sessionManager.Snapshot(playerID)
 	if session == nil {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "会话不存在"))
 		return
 	}
-
-	// 注意：由于ClientInterface不允许修改ID/Name，我们需要通过Server层面处理
-	// 这里我们假设client已经是正确的类型，可以进行类型断言
-	oldID := client.GetID()
-
-	// 从旧 ID 注销，用新 ID 注册
-	h.server.UnregisterClient(oldID)
-	h.server.RegisterClient(session.PlayerID, client)
 
 	// 标记会话上线
 	h.sessionManager.SetOnline(session.PlayerID)
@@ -63,17 +60,18 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 	}
 
 	// 如果在房间中，尝试恢复房间信息
-	if session.RoomCode != "" {
-		h.tryRestoreRoomState(client, session, &reconnectPayload)
+	if session.RoomCode != "" && h.tryRestoreRoomState(client, session, &reconnectPayload) {
+		return // Active-game snapshot and turn have already been enqueued under the game lock.
 	}
 
 	// 发送重连成功消息
 	client.SendMessage(codec.MustNewMessage(protocol.MsgReconnected, reconnectPayload))
 
-	// 快照恢复后，若正轮到该玩家，补发当前回合通知，恢复其操作提示与倒计时（快照本身不含 IsGrab / 剩余时间等回合信息）。须在 MsgReconnected 之后发送，确保客户端先应用快照、再设置回合提示。
-	if reconnectPayload.GameState != nil && reconnectPayload.GameState.CurrentTurn == session.PlayerID {
-		if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
-			gameSession.ResendTurnTo(client)
+	if reconnectPayload.RoomCode != "" && reconnectPayload.GameState == nil {
+		if r := h.roomManager.GetRoom(reconnectPayload.RoomCode); r != nil {
+			client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
+				RoomCode: r.Code, Player: r.GetPlayerInfo(client.GetID()), Players: r.GetAllPlayersInfo(),
+			}))
 		}
 	}
 
@@ -81,28 +79,32 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 }
 
 // tryRestoreRoomState 尝试恢复房间状态
-func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *session.PlayerSession, payload *protocol.ReconnectedPayload) {
+func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *session.PlayerSession, payload *protocol.ReconnectedPayload) bool {
 	room := h.roomManager.GetRoom(session.RoomCode)
 	if room == nil {
-		return
+		client.SetRoom("")
+		return false
 	}
 
-	oldClient := h.server.GetClientByID(session.PlayerID)
-	if oldClient == nil {
-		return
-	}
-
+	client.SetRoom(session.RoomCode)
 	// 重连到房间
-	if err := h.roomManager.ReconnectPlayer(oldClient, client); err != nil {
+	var err error
+	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
+		err = gameSession.ReconnectClient(h.roomManager, client, h.sessionManager, payload)
+		if err == nil {
+			return true
+		}
+	} else {
+		err = h.roomManager.ReconnectPlayer(client, client)
+	}
+	if err != nil {
 		log.Printf("重连到房间失败: %v", err)
-		return
+		client.SetRoom("")
+		return false
 	}
 
 	client.SetRoom(session.RoomCode)
 	payload.RoomCode = session.RoomCode
 
-	// 如果游戏正在进行，恢复游戏状态
-	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
-		payload.GameState = gameSession.BuildGameStateDTO(session.PlayerID, h.sessionManager)
-	}
+	return false
 }

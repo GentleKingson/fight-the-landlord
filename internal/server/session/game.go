@@ -8,6 +8,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 )
 
@@ -36,6 +37,7 @@ type GameSession struct {
 	room        *room.Room
 	leaderboard *storage.LeaderboardManager
 	gameConfig  config.GameConfig
+	lastResult  *protocol.Message // Replay settlement if a reconnect races with game completion.
 	state       GameState
 	players     []*GamePlayer // 按座位顺序
 
@@ -69,7 +71,10 @@ type GameSession struct {
 	timerStartTime   time.Time     // 计时器开始时间
 	timerMu          sync.Mutex
 
-	mu sync.RWMutex
+	recording       *gameRecording
+	decisionStarted time.Time
+	turnID          uint64
+	mu              sync.RWMutex
 }
 
 // NewGameSession 创建游戏会话

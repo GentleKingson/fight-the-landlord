@@ -119,8 +119,8 @@ func (s *Server) unregisterClient(client *Client) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 
-	if _, ok := s.clients[client.ID]; ok {
-		delete(s.clients, client.ID)
+	if current, ok := s.clients[client.GetID()]; ok && current == client {
+		delete(s.clients, client.GetID())
 		log.Printf("❌ 玩家 %s (%s) 已断开", client.Name, client.ID)
 	}
 }
@@ -130,15 +130,67 @@ func (s *Server) unregisterClient(client *Client) {
 func (s *Server) GetClientByID(id string) types.ClientInterface {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
-	return s.clients[id]
+	if c := s.clients[id]; c != nil {
+		return c
+	}
+	return nil
 }
 
 func (s *Server) RegisterClient(id string, client types.ClientInterface) {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+	s.registerIdentity(id, client)
+}
+
+// RestoreClient keeps registration and room recovery ordered against other reconnects and disconnects.
+func (s *Server) RestoreClient(id string, client types.ClientInterface, restore func()) {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+	if c, ok := client.(*Client); ok {
+		c.mu.RLock()
+		closed := c.closed
+		c.mu.RUnlock()
+		if closed {
+			return
+		}
+	}
+	s.registerIdentity(id, client)
+	restore()
+}
+
+// registerIdentity requires connectionMu; release clientsMu before invoking room recovery.
+func (s *Server) registerIdentity(id string, client types.ClientInterface) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
-	if c, ok := client.(*Client); ok {
-		s.clients[id] = c
+	c, ok := client.(*Client)
+	if !ok {
+		return
 	}
+	if previous := s.clients[id]; previous != nil && previous != c {
+		if s.matcher != nil {
+			s.matcher.RemoveFromQueue(previous)
+		}
+		previous.closeWithCode(closeReplaced)
+	}
+	oldID := c.GetID()
+	if oldID != id {
+		if s.matcher != nil {
+			s.matcher.RemoveFromQueue(c)
+		}
+		delete(s.clients, oldID)
+		if s.sessionManager != nil {
+			s.sessionManager.DeleteSession(oldID)
+		}
+	}
+	c.mu.Lock()
+	c.ID = id
+	if s.sessionManager != nil {
+		if saved := s.sessionManager.Snapshot(id); saved != nil {
+			c.Name = saved.PlayerName
+		}
+	}
+	c.mu.Unlock()
+	s.clients[id] = c
 }
 
 func (s *Server) UnregisterClient(id string) {

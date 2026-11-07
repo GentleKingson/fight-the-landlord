@@ -8,6 +8,9 @@ import (
 
 // hasWinningBombOrRocket 检查是否有炸弹或王炸能压过对手的牌
 func hasWinningBombOrRocket(analysis HandAnalysis, opponentHand ParsedHand) bool {
+	if opponentHand.Type == Rocket {
+		return false
+	}
 	// 检查王炸
 	if analysis.counts[card.RankBlackJoker] >= 1 && analysis.counts[card.RankRedJoker] >= 1 {
 		// 王炸压一切
@@ -47,25 +50,16 @@ func findWinningPair(analysis HandAnalysis, opponentHand ParsedHand) bool {
 // findWinningTrio 检查是否有更大的三条（含带牌）能压过对手
 // kickerType: 0=不带, 1=带单, 2=带对
 func findWinningTrio(analysis HandAnalysis, opponentHand ParsedHand, kickerType int) bool {
-	for r, count := range analysis.counts {
-		if count >= 3 && r > opponentHand.KeyRank {
-			// 找到更大的三条，检查是否有足够的带牌
-			remainingCards := len(analysis.ones) + len(analysis.pairs)*2 + len(analysis.trios)*3 + len(analysis.fours)*4 - 3
-			switch kickerType {
-			case 0: // 不带牌
+	for rank, count := range analysis.counts {
+		if count < 3 || rank <= opponentHand.KeyRank {
+			continue
+		}
+		if kickerType == 0 {
+			return true
+		}
+		for kicker, n := range analysis.counts {
+			if kicker != rank && n >= kickerType {
 				return true
-			case 1: // 带一张单牌
-				if remainingCards >= 1 {
-					return true
-				}
-			case 2: // 带一对
-				if remainingCards < 2 {
-					continue
-				}
-				// 检查剩余牌中是否有对子（其他对/三条/四条，或当前三条来自四条）
-				if len(analysis.pairs) > 0 || len(analysis.trios) > 1 || len(analysis.fours) > 1 || (count == 4) {
-					return true
-				}
 			}
 		}
 	}
@@ -173,32 +167,14 @@ func checkKickers(analysis HandAnalysis, trioRanks []card.Rank, startIndex, leng
 		return true
 	}
 
-	totalCardsInHand := 0
-	for _, c := range analysis.counts {
-		totalCardsInHand += c
-	}
-	remainingCardCount := totalCardsInHand - (length * 3)
-
-	switch kickerType {
-	case 1: // 需要 N 张单牌
-		return remainingCardCount >= length
-	case 2: // 需要 N 对
-		if remainingCardCount < length*2 {
-			return false
+	// ParseHand requires distinct wing ranks, separate from the plane body.
+	startRank := trioRanks[startIndex]
+	endRank := trioRanks[startIndex+length-1]
+	wings := 0
+	for rank, count := range analysis.counts {
+		if (rank < startRank || rank > endRank) && count >= kickerType {
+			wings++
 		}
-
-		startRank := trioRanks[startIndex]
-		endRank := trioRanks[startIndex+length-1]
-
-		kickerPairs := 0
-		for r, count := range analysis.counts {
-			// 跳过飞机主体的点数
-			if r >= startRank && r <= endRank {
-				continue
-			}
-			kickerPairs += count / 2
-		}
-		return kickerPairs >= length
 	}
-	return false
+	return wings >= length
 }

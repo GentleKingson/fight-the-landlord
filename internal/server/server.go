@@ -47,6 +47,7 @@ type Server struct {
 	sessionManager *session.SessionManager
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
+	connectionMu   sync.Mutex // Serializes identity replacement with all disconnect side effects.
 	handler        *handler.Handler
 
 	// 安全组件
@@ -67,6 +68,9 @@ type Server struct {
 
 // NewServer 创建服务器实例
 func NewServer(cfg *config.Config) (*Server, error) {
+	if err := validateWebConfig(cfg); err != nil {
+		return nil, err
+	}
 	// 初始化 Redis 客户端
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Redis.Addr,
@@ -162,17 +166,13 @@ func NewServer(cfg *config.Config) (*Server, error) {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
 
-	http.HandleFunc("/ws", s.handleWebSocket)
-	http.HandleFunc("/health", s.handleHealth)
-	http.HandleFunc("/version", s.handleVersion)
-
 	// 启动监控 goroutine
 	go s.monitorStats()
 
 	log.Printf("🚀 服务器启动在 ws://%s/ws (CPU核心数: %d)", addr, runtime.NumCPU())
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           nil,
+		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second, // 防止 Slowloris 攻击
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

@@ -1,0 +1,52 @@
+# Standalone deployment from this checkout; does not use the old published images.
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-1780}:1780"
+    environment:
+      REDIS_ADDR: redis:6379
+      BOT_ENABLED: "true"
+      DOUZERO_ENABLED: "true"
+      DOUZERO_URL: http://ai:2021
+      NO_PROXY: localhost,127.0.0.1,ai,redis
+      COLLECT_TRAINING_DATA: "${COLLECT_TRAINING_DATA:-true}"
+      TRAINING_DATA_DIR: /app/data/games
+      SECURITY_ALLOWED_ORIGINS: "${SECURITY_ALLOWED_ORIGINS:-*}"
+    volumes:
+      - training-data:/app/data/games
+    depends_on:
+      redis:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+    stop_grace_period: 30m
+  ai:
+    build:
+      context: .
+      dockerfile: douzero/Dockerfile.marvel
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ./douzero/models
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-web:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+volumes:
+  training-data:
+  redis-web:

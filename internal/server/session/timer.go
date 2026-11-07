@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
-	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 )
 
@@ -18,11 +17,8 @@ func (gs *GameSession) startBidTimer() {
 	bidTimeout := gs.gameConfig.BidTimeoutDuration()
 	gs.timerStartTime = time.Now()
 	gs.remainingTime = bidTimeout
-	gs.turnTimer = time.AfterFunc(bidTimeout, func() {
-		// 超时自动不叫
-		currentPlayer := gs.players[gs.currentBidder]
-		_ = gs.HandleBid(currentPlayer.ID, false)
-	})
+	turnID := gs.turnID
+	gs.turnTimer = time.AfterFunc(bidTimeout, func() { gs.handleTurnTimeout(turnID, "timeout") })
 }
 
 func (gs *GameSession) startPlayTimer() {
@@ -32,37 +28,46 @@ func (gs *GameSession) startPlayTimer() {
 	turnTimeout := gs.gameConfig.TurnTimeoutDuration()
 	gs.timerStartTime = time.Now()
 	gs.remainingTime = turnTimeout
-	gs.turnTimer = time.AfterFunc(turnTimeout, func() {
-		gs.handlePlayTimeout()
-	})
+	turnID := gs.turnID
+	gs.turnTimer = time.AfterFunc(turnTimeout, func() { gs.handleTurnTimeout(turnID, "timeout") })
+}
+
+func (gs *GameSession) handleTurnTimeout(turnID uint64, source string) {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	if turnID != gs.turnID {
+		return
+	}
+	switch gs.state {
+	case GameStateBidding:
+		if gs.players[gs.currentBidder].IsOffline {
+			source = "offline"
+		}
+		_ = gs.handleBidLocked(gs.players[gs.currentBidder].ID, false, source)
+	case GameStatePlaying:
+		if gs.players[gs.currentPlayer].IsOffline {
+			source = "offline"
+		}
+		gs.playTimeoutLocked(source)
+	}
 }
 
 func (gs *GameSession) handlePlayTimeout() {
 	gs.mu.Lock()
-
-	if gs.state != GameStatePlaying {
-		gs.mu.Unlock()
-		return
+	defer gs.mu.Unlock()
+	if gs.state == GameStatePlaying {
+		gs.playTimeoutLocked("timeout")
 	}
+}
 
-	currentPlayer := gs.players[gs.currentPlayer]
-
-	// 尝试找到最小能打过的牌
-	cardsToPlay := rule.FindSmallestBeatingCards(currentPlayer.Hand, gs.lastPlayedHand)
-
-	if cardsToPlay != nil {
-		// 找到了能打的牌，出牌
-		playerID := currentPlayer.ID
-		cardInfos := convert.CardsToInfos(cardsToPlay)
-		gs.mu.Unlock()
-		_ = gs.HandlePlayCards(playerID, cardInfos)
-		return
+func (gs *GameSession) playTimeoutLocked(source string) {
+	p := gs.players[gs.currentPlayer]
+	cards := rule.FindSmallestBeatingCards(p.Hand, gs.lastPlayedHand)
+	if cards != nil {
+		_ = gs.handlePlayCardsLocked(p.ID, convert.CardsToInfos(cards), source)
+	} else {
+		_ = gs.handlePassLocked(p.ID, source)
 	}
-
-	// 没有能打的牌，自动 PASS
-	playerID := currentPlayer.ID
-	gs.mu.Unlock()
-	_ = gs.HandlePass(playerID)
 }
 
 func (gs *GameSession) stopTimer() {
@@ -79,9 +84,14 @@ func (gs *GameSession) stopTimer() {
 	}
 }
 
-// StopAllTimers stops all timers (for cleanup when all players disconnect)
+// StopAllTimers closes the session and rejects in-flight decisions after cleanup.
 func (gs *GameSession) StopAllTimers() {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	gs.state = GameStateEnded
+	gs.turnID++
 	gs.stopTimer()
+	gs.finishRecording("aborted", nil)
 }
 
 // --- 离线处理 ---
@@ -126,11 +136,11 @@ func (gs *GameSession) PlayerOffline(playerID string) {
 		gs.turnTimer = nil
 	}
 
+	gs.turnID++ // Invalidate a turn timeout that raced with pause.
 	// 启动离线等待计时器
 	offlineTimeout := gs.gameConfig.OfflineWaitTimeoutDuration()
-	gs.offlineWaitTimer = time.AfterFunc(offlineTimeout, func() {
-		gs.handleOfflineTimeout(playerID)
-	})
+	turnID := gs.turnID
+	gs.offlineWaitTimer = time.AfterFunc(offlineTimeout, func() { gs.handleTurnTimeout(turnID, "offline") })
 
 	log.Printf("⏸️ 玩家 %s 离线，暂停计时等待重连 (%v)", gs.players[playerIdx].Name, offlineTimeout)
 }
@@ -140,10 +150,17 @@ func (gs *GameSession) PlayerOnline(playerID string) {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
 
+	gs.playerOnlineLocked(playerID)
+}
+
+func (gs *GameSession) playerOnlineLocked(playerID string) {
 	// 找到玩家
 	playerIdx := -1
 	for i, p := range gs.players {
 		if p.ID == playerID {
+			if !p.IsOffline {
+				return
+			}
 			p.IsOffline = false
 			playerIdx = i
 			break
@@ -157,12 +174,6 @@ func (gs *GameSession) PlayerOnline(playerID string) {
 	gs.timerMu.Lock()
 	defer gs.timerMu.Unlock()
 
-	// 取消离线等待计时器
-	if gs.offlineWaitTimer != nil {
-		gs.offlineWaitTimer.Stop()
-		gs.offlineWaitTimer = nil
-	}
-
 	// 检查是否是当前回合玩家，如果是则恢复计时器
 	isBidding := gs.state == GameStateBidding && gs.currentBidder == playerIdx
 	isPlaying := gs.state == GameStatePlaying && gs.currentPlayer == playerIdx
@@ -171,19 +182,23 @@ func (gs *GameSession) PlayerOnline(playerID string) {
 		return
 	}
 
+	if gs.turnTimer != nil || gs.offlineWaitTimer == nil {
+		return
+	}
+
+	// 取消离线等待计时器
+	if gs.offlineWaitTimer != nil {
+		gs.offlineWaitTimer.Stop()
+		gs.offlineWaitTimer = nil
+	}
+
+	gs.turnID++ // Invalidate any callback already queued before reconnection.
+
 	// 恢复计时器
-	if gs.remainingTime > 0 {
+	if gs.remainingTime >= 0 {
 		gs.timerStartTime = time.Now()
-		if isBidding {
-			gs.turnTimer = time.AfterFunc(gs.remainingTime, func() {
-				currentPlayer := gs.players[gs.currentBidder]
-				_ = gs.HandleBid(currentPlayer.ID, false)
-			})
-		} else {
-			gs.turnTimer = time.AfterFunc(gs.remainingTime, func() {
-				gs.handlePlayTimeout()
-			})
-		}
+		turnID := gs.turnID
+		gs.turnTimer = time.AfterFunc(gs.remainingTime, func() { gs.handleTurnTimeout(turnID, "timeout") })
 		log.Printf("▶️ 玩家 %s 重连，恢复计时 (剩余 %v)", gs.players[playerIdx].Name, gs.remainingTime)
 	}
 }
@@ -191,45 +206,10 @@ func (gs *GameSession) PlayerOnline(playerID string) {
 // handleOfflineTimeout 离线超时处理
 func (gs *GameSession) handleOfflineTimeout(playerID string) {
 	gs.mu.Lock()
-
-	// 找到玩家
-	playerIdx := -1
-	for i, p := range gs.players {
-		if p.ID == playerID {
-			playerIdx = i
-			break
-		}
+	defer gs.mu.Unlock()
+	if gs.state == GameStateBidding && gs.players[gs.currentBidder].ID == playerID {
+		_ = gs.handleBidLocked(playerID, false, "offline")
+	} else if gs.state == GameStatePlaying && gs.players[gs.currentPlayer].ID == playerID {
+		gs.playTimeoutLocked("offline")
 	}
-
-	if playerIdx == -1 {
-		gs.mu.Unlock()
-		return
-	}
-
-	log.Printf("⏰ 玩家 %s 离线超时，自动执行操作", gs.players[playerIdx].Name)
-
-	// 根据当前状态执行自动操作
-	if gs.state == GameStateBidding && gs.currentBidder == playerIdx {
-		gs.mu.Unlock()
-		_ = gs.HandleBid(playerID, false)
-		return
-	}
-
-	if gs.state == GameStatePlaying && gs.currentPlayer == playerIdx {
-		currentPlayer := gs.players[playerIdx]
-		mustPlay := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
-
-		if mustPlay && len(currentPlayer.Hand) > 0 {
-			// 出最小的牌
-			minCard := currentPlayer.Hand[len(currentPlayer.Hand)-1]
-			gs.mu.Unlock()
-			_ = gs.HandlePlayCards(playerID, []protocol.CardInfo{convert.CardToInfo(minCard)})
-			return
-		}
-		gs.mu.Unlock()
-		_ = gs.HandlePass(playerID)
-		return
-	}
-
-	gs.mu.Unlock()
 }

@@ -213,3 +213,16 @@ func generateToken() string {
 	_, _ = rand.Read(bytes)
 	return hex.EncodeToString(bytes)
 }
+
+// Snapshot returns session metadata without sharing mutable fields with readers.
+func (sm *SessionManager) Snapshot(playerID string) *PlayerSession {
+	session := sm.GetSession(playerID)
+	if session == nil {
+		return nil
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	return &PlayerSession{PlayerID: session.PlayerID, PlayerName: session.PlayerName,
+		ReconnectToken: session.ReconnectToken, RoomCode: session.RoomCode,
+		IsOnline: session.IsOnline, DisconnectedAt: session.DisconnectedAt}
+}

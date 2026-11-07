@@ -372,3 +372,11 @@ func TestCanBeatWithHand(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaneReplyRequiresDistinctWingRanks(t *testing.T) {
+	hand := testRuleCards(card.Rank4, card.Rank4, card.Rank4, card.Rank5, card.Rank5, card.Rank5, card.RankA, card.RankA)
+	opponent := ParsedHand{Type: PlaneWithSingles, KeyRank: card.Rank3, Length: 2}
+	assert.False(t, CanBeatWithHand(hand, opponent), "a pair cannot supply two distinct single wings under ParseHand")
+	hand = append(hand, card.Card{Rank: card.RankK})
+	assert.True(t, CanBeatWithHand(hand, opponent))
+}

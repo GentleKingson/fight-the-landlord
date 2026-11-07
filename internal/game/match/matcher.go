@@ -9,8 +9,6 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
-	"github.com/palemoky/fight-the-landlord/internal/protocol"
-	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
@@ -29,6 +27,7 @@ type Matcher struct {
 	botCfg          config.BotConfig
 	registerSession SessionRegistrationFunc
 	queue           []types.ClientInterface
+	practicePending map[string]bool
 	botFillTimer    *time.Timer
 	mu              sync.Mutex
 }
@@ -55,6 +54,7 @@ func NewMatcher(deps MatcherDeps) *Matcher {
 		botCfg:          deps.BotConfig,
 		registerSession: deps.RegisterSession,
 		queue:           make([]types.ClientInterface, 0),
+		practicePending: make(map[string]bool),
 	}
 }
 
@@ -143,53 +143,19 @@ func (m *Matcher) tryMatch() {
 
 // createMatchRoom 创建匹配房间
 func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
-	// 创建房间（使用第一个玩家）
-	room, err := m.roomManager.CreateRoom(players[0])
+	// Reserve all seats and send the lobby/start messages in one room transaction.
+	room, err := m.roomManager.CreateMatchedRoom(players)
 	if err != nil {
 		log.Printf("匹配创建房间失败: %v", err)
-		// 将玩家放回队列
 		m.mu.Lock()
-		m.queue = append(players, m.queue...) // 先到先匹配
-		m.mu.Unlock()
-		return
-	}
-
-	// 其他玩家加入房间
-	for _, client := range players[1:] {
-		if _, err := m.roomManager.JoinRoom(client, room.Code); err != nil {
-			log.Printf("匹配加入房间失败: %v", err)
+		for _, player := range players {
+			if player.IsBot() {
+				player.Close()
+			} else if player.GetRoom() == "" {
+				m.queue = append(m.queue, player)
+			}
 		}
-	}
-
-	log.Printf("🎮 匹配成功！房间 %s，玩家: %s, %s, %s",
-		room.Code, players[0].GetName(), players[1].GetName(), players[2].GetName())
-
-	// 给所有玩家发送匹配成功消息和房间信息
-	time.Sleep(100 * time.Millisecond) // 短暂延迟确保房间状态同步
-
-	for _, client := range players {
-		// 发送加入房间成功消息
-		client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
-			RoomCode: room.Code,
-			Player:   room.GetPlayerInfo(client.GetID()),
-			Players:  room.GetAllPlayersInfo(),
-		}))
-	}
-
-	// 自动准备所有玩家
-	room.SetAllPlayersReady()
-
-	// 广播所有玩家准备状态
-	for _, player := range room.Players {
-		room.Broadcast(codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
-			PlayerID: player.Client.GetID(),
-			Ready:    true,
-		}))
-	}
-
-	// 开始游戏
-	if err := room.StartGame(); err != nil {
-		log.Printf("匹配开始游戏失败: %v", err)
+		m.mu.Unlock()
 		return
 	}
 
@@ -218,13 +184,29 @@ func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
 
 // PracticeMatch 人机练习：立即为玩家创建含 2 个机器人的房间
 func (m *Matcher) PracticeMatch(client types.ClientInterface) {
+	m.mu.Lock()
+	id := client.GetID()
+	if m.practicePending[id] || client.GetRoom() != "" {
+		m.mu.Unlock()
+		return
+	}
+	m.practicePending[id] = true
+	m.mu.Unlock()
+
 	engine := m.botEngine
 	if engine == nil {
 		engine = bot.NewHeuristicEngine()
 	}
 	bot1 := bot.NewBotClient(engine)
 	bot2 := bot.NewBotClient(engine)
-	go m.createMatchRoom([]types.ClientInterface{client, bot1, bot2})
+	go func() {
+		defer func() {
+			m.mu.Lock()
+			delete(m.practicePending, id)
+			m.mu.Unlock()
+		}()
+		m.createMatchRoom([]types.ClientInterface{client, bot1, bot2})
+	}()
 }
 
 // GetQueueLength 获取队列长度

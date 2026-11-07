@@ -14,7 +14,7 @@ from collections import Counter
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import numpy as np
-import onnxruntime as ort
+
 
 from src import move_detector as md, move_selector as ms
 from src.move_generator import MovesGener
@@ -27,7 +27,9 @@ HF_BASE = "https://huggingface.co/palemoky/douzero-baselines/resolve/main/models
 
 POSITIONS = ["landlord", "landlord_down", "landlord_up"]
 
-sessions: dict[str, ort.InferenceSession] = {}
+sessions: dict = {}
+backend = None
+BACKEND = os.environ.get("AI_BACKEND", "onnx")
 
 
 def download_models() -> None:
@@ -44,6 +46,7 @@ def download_models() -> None:
 
 
 def load_sessions() -> None:
+    import onnxruntime as ort
     providers = ["CPUExecutionProvider"]
     for pos in POSITIONS:
         path = os.path.join(MODEL_DIR, f"{pos}.onnx")
@@ -167,9 +170,8 @@ def build_infoset(data: dict) -> InfoSet:
         all_played,
     )
 
-    non_empty = [m for m in action_seq if m]
-    last_two = [non_empty[-1] if len(non_empty) >= 1 else [],
-                non_empty[-2] if len(non_empty) >= 2 else []]
+    last_two = list(reversed(action_seq[-2:]))
+    last_two += [[]] * (2 - len(last_two))
 
     rival_move = [] if must_play else last_move
     legal = get_legal_card_play_actions(hand, rival_move)
@@ -187,13 +189,13 @@ def build_infoset(data: dict) -> InfoSet:
     infoset.last_move = last_move
     infoset.last_two_moves = last_two
     infoset.num_cards_left = num_cards_left
-    infoset.bomb_num = 0
+    infoset.bomb_num = sum(m == [20, 30] or (len(m) == 4 and len(set(m)) == 1) for m in action_seq)
     infoset.last_pid = last_move_pos
     infoset.last_move_dict = {p: [] for p in POSITIONS}
     infoset.all_handcards = {position: hand}
 
-    if last_move_pos and last_move:
-        infoset.last_move_dict[last_move_pos] = last_move
+    for i, move in enumerate(action_seq):
+        infoset.last_move_dict[POSITIONS[i % 3]] = move
 
     return infoset
 
@@ -208,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json(200, {"status": "ok", "agents": list(sessions.keys())})
+            self._json(200, {"status": "ok", "backend": BACKEND, "agents": POSITIONS, "models": backend.metadata if backend else {}})
         else:
             self.send_error(404)
 
@@ -218,6 +220,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", 0))
+            if not 0 < length <= 262144:
+                self._json(400, {"error": "invalid request size"})
+                return
             body = json.loads(self.rfile.read(length))
             infoset = build_infoset(body)
             position = body["position"]
@@ -225,9 +230,11 @@ class Handler(BaseHTTPRequestHandler):
             if not infoset.legal_actions:
                 action = []
             else:
-                action = _act(position, infoset)
+                action = backend.act(body) if backend else _act(position, infoset)
                 action = list(action) if action is not None else []
 
+            if sorted(action) not in infoset.legal_actions:
+                raise ValueError("model returned an illegal action")
             self._json(200, {"action": action})
         except Exception:
             traceback.print_exc()
@@ -244,10 +251,15 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("Downloading ONNX models from HuggingFace (if needed) ...")
-    download_models()
-    print(f"\nLoading ONNX sessions ...")
-    load_sessions()
+    if BACKEND == "marvel":
+        from src.marvel_backend import MarvelBackend
+        backend = MarvelBackend(MODEL_DIR)
+        print("Loaded MARVEL landlord.pt and farmers.pt", flush=True)
+    elif BACKEND == "onnx":
+        download_models()
+        load_sessions()
+    else:
+        raise ValueError(f"Unknown AI_BACKEND: {BACKEND}")
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"\nDouZero service listening on port {PORT}")
     try:

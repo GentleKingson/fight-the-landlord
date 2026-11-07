@@ -89,3 +89,8 @@ ai:
 ONNX 模型托管在 [HuggingFace](https://huggingface.co/palemoky/douzero-baselines)。
 
 如需重新转换（从 PyTorch checkpoint → ONNX），参考 [DouZero](https://github.com/kwai/DouZero) 项目。
+# MARVEL 双权重
+
+除原有 ONNX 模式外，服务支持 `AI_BACKEND=marvel`，通过原训练仓库的编码与模型加载
+`models/landlord.pt` 和 `models/farmers.pt`。安装、Docker 部署及真人数据导出见
+[网页部署指南](../docs/web-play.md)。

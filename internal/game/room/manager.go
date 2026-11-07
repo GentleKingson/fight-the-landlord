@@ -1,8 +1,10 @@
 package room
 
 import (
+	"cmp"
 	"context"
 	"log"
+	"slices"
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
@@ -15,6 +17,10 @@ import (
 func (rm *RoomManager) CreateRoom(client types.ClientInterface) (*Room, error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
+
+	if client.GetRoom() != "" {
+		return nil, apperrors.ErrAlreadyInRoom
+	}
 
 	// 生成唯一房间号
 	code := rm.generateRoomCode()
@@ -54,6 +60,10 @@ func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Roo
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
+	if client.GetRoom() != "" {
+		return nil, apperrors.ErrAlreadyInRoom
+	}
+
 	room, exists := rm.rooms[code]
 	if !exists {
 		return nil, apperrors.ErrRoomNotFound
@@ -71,7 +81,11 @@ func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Roo
 	}
 
 	// 分配座位
-	seat := len(room.Players)
+	used := [3]bool{}
+	for _, p := range room.Players {
+		used[p.Seat] = true
+	}
+	seat := slices.Index(used[:], false)
 	player := &RoomPlayer{
 		Client: client,
 		Seat:   seat,
@@ -79,6 +93,9 @@ func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Roo
 	}
 	room.Players[client.GetID()] = player
 	room.PlayerOrder = append(room.PlayerOrder, client.GetID())
+	slices.SortFunc(room.PlayerOrder, func(a, b string) int {
+		return cmp.Compare(room.Players[a].Seat, room.Players[b].Seat)
+	})
 	client.SetRoom(code)
 
 	log.Printf("👤 玩家 %s 加入房间 %s", client.GetName(), code)
@@ -96,59 +113,48 @@ func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Roo
 	return room, nil
 }
 
-// LeaveRoom 离开房间
-func (rm *RoomManager) LeaveRoom(client types.ClientInterface) {
-	roomCode := client.GetRoom()
-	if roomCode == "" {
-		return
-	}
-
+// LeaveRoom rejects membership changes once the room has committed to starting.
+// Lock ordering is always manager -> room, also used by joins and cleanup.
+func (rm *RoomManager) LeaveRoom(client types.ClientInterface) error {
 	rm.mu.Lock()
-	room, exists := rm.rooms[roomCode]
-	if !exists {
-		rm.mu.Unlock()
-		return
-	}
+	removed, err := rm.leaveRoomLocked(client)
 	rm.mu.Unlock()
-
-	room.mu.Lock()
-	defer room.mu.Unlock()
-
-	player, exists := room.Players[client.GetID()]
-	if !exists {
-		return
+	if removed != nil {
+		rm.finishRemoval(removed)
 	}
+	return err
+}
 
-	// 通知其他玩家
-	room.BroadcastExcept(client.GetID(), codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
-		PlayerID:   client.GetID(),
-		PlayerName: client.GetName(),
+func (rm *RoomManager) leaveRoomLocked(client types.ClientInterface) (*Room, error) {
+	code := client.GetRoom()
+	r := rm.rooms[code]
+	if r == nil {
+		client.SetRoom("")
+		return nil, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.State != RoomStateWaiting {
+		return nil, apperrors.ErrGameStarted
+	}
+	player := r.Players[client.GetID()]
+	if player == nil || player.Client != client {
+		return nil, apperrors.ErrNotInRoom
+	}
+	r.BroadcastExcept(client.GetID(), codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
+		PlayerID: client.GetID(), PlayerName: client.GetName(),
 	}))
-
-	// 移除玩家
-	delete(room.Players, client.GetID())
-	// 从顺序列表中移除
-	for i, id := range room.PlayerOrder {
-		if id == client.GetID() {
-			room.PlayerOrder = append(room.PlayerOrder[:i], room.PlayerOrder[i+1:]...)
-			break
-		}
-	}
+	delete(r.Players, client.GetID())
+	r.PlayerOrder = slices.DeleteFunc(r.PlayerOrder, func(id string) bool { return id == client.GetID() })
 	client.SetRoom("")
-
-	log.Printf("👋 玩家 %s 离开房间 %s (座位 %d)", client.GetName(), roomCode, player.Seat)
-
-	// 如果房间空了，删除房间
-	if len(room.Players) == 0 {
-		rm.mu.Lock()
-		delete(rm.rooms, roomCode)
-		rm.mu.Unlock()
-		// 从 Redis 删除
-		go func() { _ = rm.redisStore.DeleteRoom(context.Background(), roomCode) }()
-		log.Printf("🏠 房间 %s 已解散", roomCode)
-	} else if rm.redisStore != nil && rm.redisStore.IsReady() {
-		go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
+	if len(r.Players) == 0 {
+		delete(rm.rooms, code)
+		return r, nil
 	}
+	if rm.redisStore != nil && rm.redisStore.IsReady() {
+		go func() { _ = rm.redisStore.SaveRoom(context.Background(), r.Code, r.ToRoomData()) }()
+	}
+	return nil, nil
 }
 
 // SetPlayerReady 设置玩家准备状态
@@ -166,10 +172,14 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	}
 
 	room.mu.Lock()
-	defer room.mu.Unlock()
+	if room.State != RoomStateWaiting {
+		room.mu.Unlock()
+		return apperrors.ErrGameStarted
+	}
 
 	player, exists := room.Players[client.GetID()]
 	if !exists {
+		room.mu.Unlock()
 		return apperrors.ErrNotInRoom
 	}
 
@@ -185,9 +195,11 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	if room.checkAllReady() {
 		if err := room.startGameLocked(); err != nil {
 			log.Printf("开始游戏失败: %v", err)
+			room.mu.Unlock()
 			return nil
 		}
 
+		room.mu.Unlock()
 		// 创建游戏会话并开始
 		if rm.onGameStart != nil {
 			rm.onGameStart(room)
@@ -197,6 +209,8 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 		if rm.redisStore != nil && rm.redisStore.IsReady() {
 			go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
 		}
+	} else {
+		room.mu.Unlock()
 	}
 
 	return nil

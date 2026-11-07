@@ -1,6 +1,8 @@
 # 斗地主服务端配置
 
 server:
+  # 构建网页后设为 web/dist；留空仅提供 WebSocket
+  web_dir: ""
   # WebSocket 监听地址
   host: "0.0.0.0"
   port: 1780
@@ -16,6 +18,9 @@ redis:
   db: 0
 
 game:
+  # 采集匿名对局，仅保存在服务器磁盘
+  collect_training_data: false
+  training_data_dir: "data/games"
   # 玩家回合超时时间（秒）
   turn_timeout: 30
   # 叫地主超时时间（秒）

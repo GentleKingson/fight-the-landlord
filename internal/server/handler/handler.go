@@ -50,6 +50,9 @@ func NewHandler(deps HandlerDeps) *Handler {
 		sessionManager: deps.SessionManager,
 		games:          make(map[string]*session.GameSession),
 	}
+	if h.roomManager != nil {
+		h.roomManager.SetOnRoomRemoved(h.removeGameSession)
+	}
 	h.initHandlers()
 	return h
 }
@@ -67,8 +70,22 @@ func (h *Handler) SetGameSession(roomCode string, gs *session.GameSession) {
 	defer h.gamesMu.Unlock()
 	if gs == nil {
 		delete(h.games, roomCode)
-	} else {
+	} else if h.roomManager == nil || gs.BelongsToRoom(h.roomManager.GetRoom(roomCode)) {
 		h.games[roomCode] = gs
+	}
+}
+
+func (h *Handler) removeGameSession(r *room.Room) {
+	h.gamesMu.Lock()
+	gs := h.games[r.Code]
+	if gs != nil && !gs.BelongsToRoom(r) {
+		h.gamesMu.Unlock()
+		return
+	}
+	delete(h.games, r.Code)
+	h.gamesMu.Unlock()
+	if gs != nil {
+		gs.StopAllTimers()
 	}
 }
 

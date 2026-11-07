@@ -3,6 +3,7 @@ package session
 import (
 	"cmp"
 	"slices"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
@@ -21,7 +22,10 @@ import (
 func (gs *GameSession) HandleBid(playerID string, bid bool) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	return gs.handleBidLocked(playerID, bid, "")
+}
 
+func (gs *GameSession) handleBidLocked(playerID string, bid bool, source string) error {
 	if gs.state != GameStateBidding {
 		return apperrors.ErrGameNotStart
 	}
@@ -30,6 +34,8 @@ func (gs *GameSession) HandleBid(playerID string, bid bool) error {
 	if currentPlayer.ID != playerID {
 		return apperrors.ErrNotYourTurn
 	}
+
+	gs.recordDecision("bid", currentPlayer, nil, bid, source)
 
 	// 取消超时计时器
 	gs.stopTimer()
@@ -154,15 +160,18 @@ func (gs *GameSession) setLandlord(idx int) {
 
 	// 开始游戏，地主先出牌
 	gs.state = GameStatePlaying
-	gs.room.State = RoomStatePlaying
+	gs.room.SetState(RoomStatePlaying)
 	gs.currentPlayer = idx
 	gs.lastPlayerIdx = idx
 
+	gs.recordEvent("landlord", map[string]any{"seat": idx, "bid_multiplier": gs.bidMultiplier})
 	gs.notifyPlayTurn()
 }
 
 // notifyBidTurn 通知当前玩家叫/抢地主
 func (gs *GameSession) notifyBidTurn() {
+	gs.decisionStarted = time.Now()
+	gs.turnID++
 	player := gs.players[gs.currentBidder]
 	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
 		PlayerID:   player.ID,

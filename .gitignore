@@ -24,3 +24,8 @@ bin/*
 .venv/
 __pycache__/
 models/
+
+# Local models, training records and pinned MARVEL checkout
+/data/
+/douzero/vendor/
+*.pt
