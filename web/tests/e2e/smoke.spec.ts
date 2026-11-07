@@ -34,13 +34,23 @@ test('hand supports keyboard activation without double toggling pointer clicks',
   await expect(card).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('small lobby scrolls to room controls and navigation', async ({ page }) => {
+test('small lobby keeps room controls and navigation visible without page scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto('/?demo=lobby');
-  await page.mouse.move(160, 280);
-  await page.mouse.wheel(0, 2000);
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-  await expect(page.getByRole('navigation', { name: '大厅导航' })).toBeInViewport();
+  for (const control of [
+    page.getByRole('navigation', { name: '大厅导航' }),
+    page.getByRole('button', { name: /快速开局/ }),
+    page.getByRole('button', { name: /创建房间/ }),
+    page.getByRole('button', { name: /人机练习/ }),
+    page.getByRole('textbox', { name: '加入房间', exact: true }),
+    page.getByRole('region', { name: '可加入房间' }).getByRole('button', { name: '刷新' }),
+  ]) await expect(control).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => ({
+    width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+    height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
+    x: window.scrollX,
+    y: window.scrollY,
+  }))).toEqual({ width: 320, height: 568, x: 0, y: 0 });
   await page.getByRole('textbox', { name: '加入房间', exact: true }).fill('123456');
   await expect(page.getByRole('textbox', { name: '加入房间', exact: true })).toHaveValue('123456');
   await page.getByRole('region', { name: '可加入房间' }).getByRole('button', { name: '刷新' }).click();
@@ -70,10 +80,11 @@ test('all dense portrait hand cards remain visible and selectable at 320px', asy
     await expect(cards).toHaveCount(ranks.length);
     for (let index = 0; index < ranks.length; index++) {
       const card = cards.nth(index);
-      await card.scrollIntoViewIfNeeded();
       const box = (await card.boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(320);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(568);
       if (isMobile) await page.touchscreen.tap(box.x + 5, box.y + 30);
       else await page.mouse.click(box.x + 5, box.y + 30);
       await expect(card).toHaveAttribute('aria-pressed', 'true');
@@ -90,12 +101,82 @@ test('narrow landscape keeps all 20 cards reachable', async ({ page, isMobile })
   await expect(cards).toHaveCount(20);
   for (let index = 0; index < ranks.length; index++) {
     const card = cards.nth(index);
-    await card.scrollIntoViewIfNeeded();
     const box = (await card.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(667);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(375);
     if (isMobile) await page.touchscreen.tap(box.x + 5, box.y + 25);
     else await page.mouse.click(box.x + 5, box.y + 25);
     await expect(card).toHaveAttribute('aria-pressed', 'true');
+  }
+});
+
+test('table fits common viewports with collection notice, long plays and an overlay drawer', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Viewport coverage runs once in the desktop project');
+  await page.route('**/api/config', (route) => route.fulfill({ json: { collect_training_data: true } }));
+  const airplane = Array.from({ length: 18 }, (_, index) => ({
+    rank: 3 + Math.floor(index / 3), suit: index % 3, color: index % 2,
+  }));
+  for (const viewport of [
+    { width: 1366, height: 768 },
+    { width: 390, height: 844 },
+    { width: 320, height: 568 },
+    { width: 667, height: 375 },
+  ]) {
+    await test.step(`${viewport.width} × ${viewport.height}`, async () => {
+      await page.setViewportSize(viewport);
+      await page.goto('/?demo=table');
+      await expect(page.locator('.collection-notice')).toBeVisible();
+      await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => {
+        for (const player of useAppStore.getState().players) {
+          useAppStore.getState().handleMessage({ type: 'card_played', payload: {
+            player_id: player.id, player_name: player.name, cards: ${JSON.stringify(airplane)}, cards_left: 2, hand_type: '飞机',
+          } });
+        }
+      })`);
+      const playedCards = page.locator('.felt-table .card--played');
+      for (const side of ['left', 'me', 'right']) {
+        await expect(page.locator(`.played-seat--${side} .card--played`)).toHaveCount(18);
+      }
+      expect(await page.evaluate(() => ({
+        width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+        height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
+        x: window.scrollX,
+        y: window.scrollY,
+      }))).toEqual({ ...viewport, x: 0, y: 0 });
+
+      const felt = (await page.locator('.felt-table').boundingBox())!;
+      for (const card of await playedCards.all()) {
+        const box = (await card.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(felt.x);
+        expect(box.x + box.width).toBeLessThanOrEqual(felt.x + felt.width + 1);
+        expect(box.y).toBeGreaterThanOrEqual(felt.y);
+        expect(box.y + box.height).toBeLessThanOrEqual(felt.y + felt.height + 1);
+      }
+      const zones = await page.locator('.opponent-row, .felt-table .played-cards, .turn-banner').evaluateAll((elements) =>
+        elements.map((element) => {
+          const { top, right, bottom, left } = element.getBoundingClientRect();
+          return { top, right, bottom, left };
+        }),
+      );
+      expect(zones).toHaveLength(5);
+      for (let first = 0; first < zones.length; first++) {
+        for (let second = first + 1; second < zones.length; second++) {
+          const a = zones[first];
+          const b = zones[second];
+          expect(a.bottom <= b.top || b.bottom <= a.top || a.right <= b.left || b.right <= a.left).toBe(true);
+        }
+      }
+
+      const tableZones = page.locator('.table-topbar, .table-arena, .action-bar, .hand-zone');
+      const before = await tableZones.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().toJSON()));
+      await expect(page.locator('.utility-drawer')).toHaveCount(0);
+      await page.getByRole('button', { name: '聊天', exact: true }).click();
+      await expect(page.locator('.utility-drawer')).toBeVisible();
+      expect(await tableZones.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().toJSON()))).toEqual(before);
+      await page.getByRole('button', { name: '关闭', exact: true }).click();
+      await expect(page.locator('.utility-drawer')).toHaveCount(0);
+    });
   }
 });

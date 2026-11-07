@@ -4,7 +4,6 @@ import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
 import { cardKey, generateSimpleSuggestions, summarizeHand } from '../../shared/cards/cardModel';
 import { Card } from '../../shared/cards/Card';
-import { CardBack } from '../../shared/cards/CardBack';
 import { Hand } from '../../shared/cards/Hand';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
 import { Icon } from '../../shared/ui/Icon';
@@ -23,9 +22,6 @@ export function GameTable({ socket }: GameTableProps) {
   const selectedCards = useAppStore((state) => state.selectedCards);
   const bottomCards = useAppStore((state) => state.bottomCards);
   const bottomCardsRevealed = useAppStore((state) => state.bottomCardsRevealed);
-  const lastPlayed = useAppStore((state) => state.lastPlayed);
-  const lastPlayedName = useAppStore((state) => state.lastPlayedName);
-  const lastHandType = useAppStore((state) => state.lastHandType);
   const seatActions = useAppStore((state) => state.seatActions);
   const multiplier = useAppStore((state) => state.multiplier);
   const roomCode = useAppStore((state) => state.roomCode);
@@ -34,7 +30,6 @@ export function GameTable({ socket }: GameTableProps) {
   const setDrawer = useAppStore((state) => state.setDrawer);
   const toggleCard = useAppStore((state) => state.toggleCard);
   const setSelection = useAppStore((state) => state.setSelection);
-  const clearSelection = useAppStore((state) => state.clearSelection);
   const isMyTurn = currentTurn === playerId;
   const seats = useMemo(() => arrangeSeats(players, playerId), [players, playerId]);
 
@@ -61,25 +56,32 @@ export function GameTable({ socket }: GameTableProps) {
       </header>
 
       <section className="table-arena" aria-label="斗地主牌桌">
-        <SeatPanel player={seats.left} side="left" active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
-        <SeatPanel player={seats.right} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
-
-        <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
-
-        <div className="felt-table">
-          <div className="table-center-hint">{phase === 'bidding' ? '叫抢阶段' : '观察各家出牌'}</div>
-          <PlayedCards cards={lastPlayed} handType={lastHandType} playerName={lastPlayedName || '上一手'} />
+        <div className="opponent-row">
+          <SeatPanel player={seats.left} side="left" active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
+          <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
+          <SeatPanel player={seats.right} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
         </div>
 
+        <div className={`felt-table ${phase === 'playing' ? 'felt-table--seats' : ''}`}>
+          {phase === 'bidding' ? (
+            <div className="table-center-hint">等待叫抢地主</div>
+          ) : (
+            <>
+              <SeatPlayedCards player={seats.left} action={seats.left ? seatActions[seats.left.id] : undefined} side="left" />
+              <SeatPlayedCards player={seats.me} action={seats.me ? seatActions[seats.me.id] : undefined} side="me" />
+              <SeatPlayedCards player={seats.right} action={seats.right ? seatActions[seats.right.id] : undefined} side="right" />
+            </>
+          )}
+        </div>
         <TurnBanner />
       </section>
 
       <ActionBar socket={socket} isMyTurn={isMyTurn} phase={phase} />
 
       <section className="hand-zone">
-        {seats.me ? <PlayerBadge player={seats.me} active={currentTurn === playerId} me /> : null}
-        <div className="self-action-lane">
-          {seats.me ? <PlayedActionBubble action={seatActions[seats.me.id]} self /> : null}
+        <div className="hand-heading">
+          <strong>{seats.me?.name || '我'} · {phase === 'bidding' ? '等待定地主' : seats.me?.is_landlord ? '地主' : '农民'}</strong>
+          <span>手牌 {hand.length} 张</span>
         </div>
         <Hand
           cards={hand}
@@ -88,13 +90,19 @@ export function GameTable({ socket }: GameTableProps) {
           onToggle={toggleCard}
           onRangeSelect={setSelection}
         />
-        {selectedCards.size ? (
-          <button className="clear-selection" onClick={clearSelection}>重选</button>
-        ) : null}
       </section>
 
       <UtilityDrawer socket={socket} drawer={drawer} onClose={() => setDrawer('none')} />
     </main>
+  );
+}
+
+function SeatPlayedCards({ player, action, side }: { player?: PlayerInfo; action?: SeatAction; side: 'left' | 'me' | 'right' }) {
+  const cards = action?.type === 'play' ? action.cards : undefined;
+  return (
+    <section className={`played-seat played-seat--${side}`} aria-label={player && cards?.length ? `${player.name}的出牌` : undefined}>
+      {cards?.length ? <PlayedCards cards={cards} handType={action?.hand_type} playerName={player?.name} /> : null}
+    </section>
   );
 }
 
@@ -119,8 +127,9 @@ function BottomCards({ cards, revealed }: { cards: CardInfo[]; revealed: boolean
 
 function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: string; icon: 'chat' | 'counter' | 'history' | 'rules' }) {
   const setDrawer = useAppStore((state) => state.setDrawer);
+  const open = useAppStore((state) => state.drawer === drawer);
   return (
-    <button className="tool-button" onClick={() => setDrawer(drawer)} title={label} aria-label={label}>
+    <button className="tool-button" onClick={() => setDrawer(open ? 'none' : drawer)} title={label} aria-label={label} aria-expanded={open}>
       <Icon name={icon} />
       <span>{label}</span>
     </button>
@@ -133,47 +142,22 @@ function SeatPanel({ player, side, active, action }: { player?: PlayerInfo; side
   }
   return (
     <aside className={`seat-panel seat-panel--${side} ${active ? 'is-active' : ''}`}>
-      <PlayerBadge player={player} active={active} />
-      <PlayedActionBubble action={action} side={side} />
-      <CardBack count={player.cards_count || 0} />
+      <PlayerBadge player={player} active={active} action={action} />
     </aside>
   );
 }
 
-function PlayedActionBubble({ action, side, self = false }: { action?: SeatAction; side?: 'left' | 'right'; self?: boolean }) {
-  if (!action) {
-    return <div className={`played-action played-action--empty ${self ? 'played-action--self' : ''}`} aria-hidden="true" />;
-  }
-
-  const label = action.label || (action.type === 'pass' ? '不出' : action.hand_type || '出牌');
-  const hasCards = action.type === 'play' && Boolean(action.cards?.length);
-
+function PlayerBadge({ player, active, action }: { player: PlayerInfo; active: boolean; action?: SeatAction }) {
+  const actionLabel = action?.type === 'bid' ? action.label : action?.type === 'pass' ? '不出' : '';
   return (
-    <div className={`played-action played-action--${action.type} ${side ? `played-action--${side}` : ''} ${self ? 'played-action--self' : ''}`}>
-      {hasCards ? (
-        <div className="played-action__cards" aria-label={label}>
-          {action.cards?.map((card, index) => (
-            <Card key={`${card.suit}_${card.rank}_${index}`} card={card} size="action" />
-          ))}
-        </div>
-      ) : (
-        <strong>{label}</strong>
-      )}
-      {hasCards && action.hand_type ? <span>{action.hand_type}</span> : null}
-    </div>
-  );
-}
-
-function PlayerBadge({ player, active, me = false }: { player: PlayerInfo; active: boolean; me?: boolean }) {
-  return (
-    <div className={`player-badge ${active ? 'is-active' : ''} ${me ? 'is-me' : ''}`}>
+    <div className={`player-badge ${active ? 'is-active' : ''}`}>
       <span className="player-avatar" aria-hidden="true">{player.name.slice(0, 1)}</span>
       <div>
-        <strong>{player.name}{me ? ' 我' : ''}</strong>
+        <strong>{player.name}</strong>
         <span>{player.is_landlord ? '地主' : '农民'} · 剩余 {player.cards_count || 0}</span>
       </div>
-      {player.is_landlord ? <em>地主</em> : null}
-      {!player.online ? <em>离线</em> : null}
+      {actionLabel ? <em className="player-action" title={actionLabel}>{actionLabel}</em> : null}
+      {!player.online ? <em className="player-offline">离线</em> : null}
     </div>
   );
 }
@@ -294,6 +278,8 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
   const actions = useAppStore((state) => state.recentActions);
   const open = drawer !== 'none';
 
+  if (!open) return null;
+
   function sendChat() {
     const content = chatInput.trim();
     if (!content) return;
@@ -302,7 +288,7 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
   }
 
   return (
-    <aside className={`utility-drawer ${open ? 'is-open' : ''}`} aria-hidden={!open}>
+    <aside className="utility-drawer is-open" aria-label={drawerTitle(drawer)}>
       <header>
         <strong>{drawerTitle(drawer)}</strong>
         <button onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
