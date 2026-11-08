@@ -32,6 +32,8 @@ func FindSmallestBeatingCards(playerHand []card.Card, opponentHand ParsedHand) [
 		result = findSmallestBeatingTrio(playerHand, analysis, opponentHand, 1)
 	case TrioWithPair:
 		result = findSmallestBeatingTrio(playerHand, analysis, opponentHand, 2)
+	case Straight, PairStraight, Plane, PlaneWithSingles, PlaneWithPairs, FourWithTwo, FourWithTwoPairs:
+		result = findSmallestBeatingGroup(playerHand, analysis, opponentHand)
 	}
 
 	// 如果找到了同类型的牌，返回
@@ -131,8 +133,9 @@ func findSmallestKickers(playerHand []card.Card, analysis HandAnalysis, excludeR
 	}
 
 	if kickerType == 1 {
-		// 带单张：优先从单牌、对子中取
-		if collectFromRanks(analysis.ones, 1) || collectFromRanks(analysis.pairs, 1) {
+		// 带单张：优先单牌、对子，必要时也能拆三张或炸弹。
+		if collectFromRanks(analysis.ones, 1) || collectFromRanks(analysis.pairs, 1) ||
+			collectFromRanks(analysis.trios, 1) || collectFromRanks(analysis.fours, 1) {
 			return kickers
 		}
 	} else {
@@ -144,6 +147,86 @@ func findSmallestKickers(playerHand []card.Card, analysis HandAnalysis, excludeR
 		}
 	}
 	return nil
+}
+
+// findSmallestBeatingGroup 按主体点数递增构造顺牌、飞机和四带二。
+// 与 ParseHand 共用最终判型，机器人与超时出牌只返回服务端接受的动作。
+func findSmallestBeatingGroup(hand []card.Card, analysis HandAnalysis, target ParsedHand) []card.Card {
+	length, repeat, wings, wingSize := groupShape(target)
+	if length < 1 {
+		return nil
+	}
+	maxRank := card.RankA
+	if repeat == 4 {
+		maxRank = card.Rank2
+	}
+	for start := max(card.Rank3, target.KeyRank+1); start+card.Rank(length)-1 <= maxRank; start++ {
+		end := start + card.Rank(length) - 1
+		var candidate []card.Card
+		for rank := start; rank <= end; rank++ {
+			if analysis.counts[rank] < repeat {
+				break
+			}
+			candidate = append(candidate, findCardsWithRank(hand, rank, repeat)...)
+		}
+		if len(candidate) != length*repeat {
+			continue
+		}
+		kickers := findGroupKickers(hand, analysis, start, end, wings, wingSize)
+		if len(kickers) != wings*wingSize {
+			continue
+		}
+		candidate = append(candidate, kickers...)
+		parsed, err := ParseHand(candidate)
+		if err == nil && CanBeat(parsed, target) {
+			return candidate
+		}
+	}
+	return nil
+}
+
+// groupShape 描述顺牌或四带二的主体长度、每点张数、带牌组数和每组张数。
+func groupShape(target ParsedHand) (length, repeat, wings, wingSize int) {
+	length, repeat, wings, wingSize = target.Length, 1, 0, 1
+	switch target.Type {
+	case PairStraight:
+		repeat = 2
+	case Plane:
+		repeat = 3
+	case PlaneWithSingles:
+		repeat, wings = 3, length
+	case PlaneWithPairs:
+		repeat, wings, wingSize = 3, length, 2
+	case FourWithTwo:
+		length, repeat, wings = 1, 4, 2
+	case FourWithTwoPairs:
+		length, repeat, wings, wingSize = 1, 4, 2, 2
+	}
+	return length, repeat, wings, wingSize
+}
+
+// findGroupKickers 从主体以外的点数取带牌；单翅每个点数最多两张，对翅每个点数一对。
+func findGroupKickers(hand []card.Card, analysis HandAnalysis, start, end card.Rank, remaining, wingSize int) []card.Card {
+	var kickers []card.Card
+	for rank := card.Rank3; rank <= card.RankRedJoker && remaining > 0; rank++ {
+		if rank >= start && rank <= end {
+			continue
+		}
+		count := analysis.counts[rank]
+		if wingSize == 2 {
+			if count >= 2 {
+				kickers = append(kickers, findCardsWithRank(hand, rank, 2)...)
+				remaining--
+			}
+		} else {
+			count = min(count, 2, remaining)
+			if count > 0 {
+				kickers = append(kickers, findCardsWithRank(hand, rank, count)...)
+				remaining -= count
+			}
+		}
+	}
+	return kickers
 }
 
 // findCardsWithRank 从手牌中找到指定点数的牌

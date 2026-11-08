@@ -12,8 +12,13 @@ def is_continuous_seq(move):
 
 # return the type of the move
 def get_move_type(move):
+    move = sorted(move)
     move_size = len(move)
     move_dict = collections.Counter(move)
+
+    if any(rank not in (*range(3, 15), 17, 20, 30) or count > (1 if rank in (20, 30) else 4)
+           for rank, count in move_dict.items()):
+        return {'type': TYPE_15_WRONG}
 
     if move_size == 0:
         return {'type': TYPE_0_PASS}
@@ -46,11 +51,11 @@ def get_move_type(move):
         else:
             return {'type': TYPE_15_WRONG}
 
-    if is_continuous_seq(move):
+    if move_size >= 5 and move[-1] <= 14 and is_continuous_seq(move):
         return {'type': TYPE_8_SERIAL_SINGLE, 'rank': move[0], 'len': len(move)}
 
     if move_size == 5:
-        if len(move_dict) == 2:
+        if sorted(move_dict.values()) == [2, 3]:
             return {'type': TYPE_7_3_2, 'rank': move[2]}
         else:
             return {'type': TYPE_15_WRONG}
@@ -64,15 +69,15 @@ def get_move_type(move):
                 (count_dict.get(2) == 1 or count_dict.get(1) == 2):
             return {'type': TYPE_13_4_2, 'rank': move[2]}
 
-    if move_size == 8 and (((len(move_dict) == 3 or len(move_dict) == 2) and
-            (count_dict.get(4) == 1 and count_dict.get(2) == 2)) or count_dict.get(4) == 2):
+    # Keep the server's conservative boundary: two distinct pairs, not another bomb.
+    if move_size == 8 and count_dict.get(4) == 1 and count_dict.get(2) == 2:
         return {'type': TYPE_14_4_22, 'rank': max([c for c, n in move_dict.items() if n == 4])}
 
     mdkeys = sorted(move_dict.keys())
-    if len(move_dict) == count_dict.get(2) and is_continuous_seq(mdkeys):
+    if len(mdkeys) >= MIN_PAIRS and mdkeys[-1] <= 14 and len(move_dict) == count_dict.get(2) and is_continuous_seq(mdkeys):
         return {'type': TYPE_9_SERIAL_PAIR, 'rank': mdkeys[0], 'len': len(mdkeys)}
 
-    if len(move_dict) == count_dict.get(3) and is_continuous_seq(mdkeys):
+    if len(mdkeys) >= MIN_TRIPLES and mdkeys[-1] <= 14 and len(move_dict) == count_dict.get(3) and is_continuous_seq(mdkeys):
         return {'type': TYPE_10_SERIAL_TRIPLE, 'rank': mdkeys[0], 'len': len(mdkeys)}
 
     # Check Type 11 (serial 3+1) and Type 12 (serial 3+2)
@@ -92,16 +97,10 @@ def get_move_type(move):
                 return {'type': TYPE_15_WRONG}
 
         serial_3.sort()
-        if is_continuous_seq(serial_3):
+        if serial_3[-1] <= 14 and is_continuous_seq(serial_3):
             if len(serial_3) == len(single)+len(pair)*2:
                 return {'type': TYPE_11_SERIAL_3_1, 'rank': serial_3[0], 'len': len(serial_3)}
             if len(serial_3) == len(pair) and len(move_dict) == len(serial_3) * 2:
                 return {'type': TYPE_12_SERIAL_3_2, 'rank': serial_3[0], 'len': len(serial_3)}
-
-        if len(serial_3) == 4:
-            if is_continuous_seq(serial_3[1:]):
-                return {'type': TYPE_11_SERIAL_3_1, 'rank': serial_3[1], 'len': len(serial_3) - 1}
-            if is_continuous_seq(serial_3[:-1]):
-                return {'type': TYPE_11_SERIAL_3_1, 'rank': serial_3[0], 'len': len(serial_3) - 1}
 
     return {'type': TYPE_15_WRONG}

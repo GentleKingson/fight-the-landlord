@@ -39,6 +39,25 @@ describe('app store message flow', () => {
     expect(useAppStore.getState().bottomCardsRevealed).toBe(false);
   });
 
+  it('clears the previous no-call history and selection when a round is redealt', () => {
+    useAppStore.setState({ playerId: 'p1', phase: 'bidding', selectedCards: new Set(['0_3']) });
+    const receive = useAppStore.getState().handleMessage;
+    for (const id of ['p1', 'p2', 'p3']) {
+      receive({ type: MsgType.BidResult, payload: { player_id: id, player_name: id, bid: false, is_grab: false, multiplier: 1 } });
+    }
+    const cards = Array.from({ length: 17 }, (_, i) => ({ suit: i % 4, rank: 3 + Math.floor(i / 4), color: 0 }));
+    receive({ type: MsgType.DealCards, payload: { cards, bottom_cards: [{}, {}, {}] } });
+    receive({ type: MsgType.BidTurn, payload: { player_id: 'p2', timeout: 15, is_grab: false, multiplier: 1 } });
+    const state = useAppStore.getState();
+    expect(state.recentActions).toEqual([]);
+    expect(state.seatActions).toEqual({});
+    expect(state.selectedCards.size).toBe(0);
+    expect(state.bottomCardsRevealed).toBe(false);
+    expect(state.currentTurn).toBe('p2');
+    expect(state.isGrabTurn).toBe(false);
+    expect(state.multiplier).toBe(1);
+  });
+
   it('sets the other landlord count to 20 before their first play', () => {
     useAppStore.setState({ playerId: 'p1', players: [{ id: 'p2', name: '地主', seat: 1, ready: true, is_landlord: false, cards_count: 17, online: true }] });
     useAppStore.getState().handleMessage({ type: MsgType.Landlord, payload: { player_id: 'p2', bottom_cards: [] } });

@@ -1,4 +1,5 @@
 from .utils import MIN_SINGLE_CARDS, MIN_PAIRS, MIN_TRIPLES, select
+from .move_detector import get_move_type, TYPE_11_SERIAL_3_1
 import collections
 import itertools
 
@@ -151,7 +152,11 @@ class MovesGener(object):
             subcards = select(new_cards, len(s3_set))
 
             for i in subcards:
-                serial_3_1_moves.append(s3 + i)
+                move = s3 + i
+                # Do not offer triple/bomb wings or a pure plane as a winged plane.
+                # See docs/classic-rules.md for the shared server rule boundary.
+                if get_move_type(move)['type'] == TYPE_11_SERIAL_3_1:
+                    serial_3_1_moves.append(move)
 
         return list(k for k, _ in itertools.groupby(serial_3_1_moves))
 

@@ -26,9 +26,6 @@ func (gs *GameSession) Start() {
 	gs.startBiddingRound()
 }
 
-// maxRedeals 最大流局次数；达到后下一局随机强制指定地主，避免无限流局
-const maxRedeals = 3
-
 // startBiddingRound 发牌并进入叫地主阶段（调用方需持有 gs.mu）
 func (gs *GameSession) startBiddingRound() {
 	gs.dealNewRound()
@@ -51,7 +48,8 @@ func (gs *GameSession) dealNewRound() {
 	gs.landlordCaller = -1
 	gs.landlordCandidate = -1
 	gs.bidPasses = 0
-	gs.grabActions = 0
+	gs.declinedCall = [3]bool{}
+	gs.grabDecided = [3]bool{}
 	gs.bidMultiplier = 1
 	gs.bombCount = 0
 	gs.landlordPlays = 0
@@ -74,18 +72,10 @@ func (gs *GameSession) dealNewRound() {
 }
 
 // redeal 流局（无人叫地主）重新发牌（调用方需持有 gs.mu）
-// 连续流局达到 maxRedeals 次后，重新发牌并随机强制指定地主，避免无限流局。
+// 经典三人场（无明牌）：无论连续流局多少次，都重新叫地主。
 func (gs *GameSession) redeal() {
 	gs.finishRecording("redeal", nil)
 	gs.redealCount++
-
-	if gs.redealCount >= maxRedeals {
-		log.Printf("🔄 房间 %s 连续 %d 次流局，重新发牌并随机强制指定地主", gs.room.Code, gs.redealCount)
-		gs.dealNewRound()
-		rng := securerand.New()
-		gs.setLandlord(rng.IntN(3))
-		return
-	}
 
 	log.Printf("🔄 房间 %s 无人叫地主，第 %d 次流局，重新发牌", gs.room.Code, gs.redealCount)
 	gs.startBiddingRound()
