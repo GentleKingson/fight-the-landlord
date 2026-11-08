@@ -158,7 +158,9 @@ func TestHandleBid_AllPass_Redeal(t *testing.T) {
 	r.PlayerOrder = []string{"p1", "p2", "p3"}
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
+	t.Cleanup(gs.StopAllTimers)
 	gs.Start()
+	assertRoundCards(t, gs, false)
 
 	// 所有玩家都不叫 → 流局重新发牌
 	for range 3 {
@@ -171,6 +173,8 @@ func TestHandleBid_AllPass_Redeal(t *testing.T) {
 	assert.Equal(t, -1, gs.landlordCaller)
 	assert.Equal(t, 0, gs.bidPasses)
 	assert.Equal(t, 1, gs.bidMultiplier)
+	assert.Equal(t, 1, gs.redealCount)
+	assertRoundCards(t, gs, false)
 	for _, p := range gs.players {
 		assert.False(t, p.IsLandlord)
 		assert.Len(t, p.Hand, 17)
@@ -485,24 +489,23 @@ func TestHandleBid_MaxRedeals_ForceLandlord(t *testing.T) {
 	r.PlayerOrder = []string{"p1", "p2", "p3"}
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
+	t.Cleanup(gs.StopAllTimers)
 	gs.Start()
 
 	// 持续无人叫地主，反复流局，直到达到上限被强制指定地主
-	for i := 0; gs.state == GameStateBidding && i < 100; i++ {
-		bidder := gs.players[gs.currentBidder]
-		require.NoError(t, gs.HandleBid(bidder.ID, false))
+	for round := range maxRedeals {
+		require.Equal(t, GameStateBidding, gs.state)
+		assert.Equal(t, round, gs.redealCount)
+		assertRoundCards(t, gs, false)
+		for range 3 {
+			bidder := gs.players[gs.currentBidder]
+			require.NoError(t, gs.HandleBid(bidder.ID, false))
+		}
 	}
 
 	// 达到流局上限后随机强制指定地主，进入出牌阶段，底倍为 1
 	assert.Equal(t, GameStatePlaying, gs.state)
 	assert.Equal(t, maxRedeals, gs.redealCount)
 	assert.Equal(t, 1, gs.bidMultiplier)
-	landlordCount := 0
-	for _, p := range gs.players {
-		if p.IsLandlord {
-			landlordCount++
-			assert.Len(t, p.Hand, 20) // 地主含 3 张底牌
-		}
-	}
-	assert.Equal(t, 1, landlordCount)
+	assertRoundCards(t, gs, true)
 }

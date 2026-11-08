@@ -4,12 +4,46 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
+
+// assertRoundCards 验证底牌归属以及整副牌的完整性，不依赖随机结果或牌力。
+func assertRoundCards(t *testing.T, gs *GameSession, landlordAssigned bool) {
+	t.Helper()
+	require.Len(t, gs.players, 3)
+	require.Len(t, gs.bottomCards, 3)
+	allCards := make([]card.Card, 0, 54)
+	landlordCount := 0
+	for i, p := range gs.players {
+		wantCards := 17
+		if p.IsLandlord {
+			landlordCount++
+			wantCards = 20
+			assert.Equal(t, i, gs.currentPlayer, "地主先出牌")
+			for _, c := range gs.bottomCards {
+				assert.Contains(t, p.Hand, c, "底牌必须归地主")
+			}
+		}
+		require.Len(t, p.Hand, wantCards)
+		allCards = append(allCards, p.Hand...)
+	}
+	if landlordAssigned {
+		assert.Equal(t, 1, landlordCount)
+	} else {
+		assert.Zero(t, landlordCount)
+		assert.GreaterOrEqual(t, gs.currentBidder, 0)
+		assert.Less(t, gs.currentBidder, 3)
+		allCards = append(allCards, gs.bottomCards...)
+	}
+	require.Len(t, allCards, 54)
+	assert.ElementsMatch(t, []card.Card(card.NewDeck()), allCards, "54 张牌不重不漏")
+}
 
 func TestStartGame_DealCards(t *testing.T) {
 	t.Parallel()
@@ -24,26 +58,14 @@ func TestStartGame_DealCards(t *testing.T) {
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 
 	// Start game
+	t.Cleanup(gs.StopAllTimers)
 	gs.Start()
 
 	// Verify state
 	assert.Equal(t, GameStateBidding, gs.state)
 	assert.Equal(t, room.RoomStateBidding, r.State)
 
-	// Verify each player has 17 cards
-	for i, p := range gs.players {
-		assert.Len(t, p.Hand, 17, "Player %d should have 17 cards", i)
-	}
-
-	// Verify bottom cards (3 cards)
-	assert.Len(t, gs.bottomCards, 3)
-
-	// Verify total cards = 54
-	totalCards := len(gs.bottomCards)
-	for _, p := range gs.players {
-		totalCards += len(p.Hand)
-	}
-	assert.Equal(t, 54, totalCards)
+	assertRoundCards(t, gs, false)
 }
 
 func TestStartGame_CardsAreSorted(t *testing.T) {
