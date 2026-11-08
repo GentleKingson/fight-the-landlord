@@ -2,6 +2,7 @@ import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore } from '../../stores/appStore';
 import { Icon } from '../../shared/ui/Icon';
+import landlordLogo from '../../assets/landlord-logo-176.webp';
 
 interface LobbyProps {
   socket: GameSocket;
@@ -20,7 +21,7 @@ export function Lobby({ socket }: LobbyProps) {
     <main className="lobby-screen">
       <header className="lobby-header">
         <div className="brand-lockup">
-          <span className="brand-mark">斗</span>
+          <img className="brand-mark" src={landlordLogo} alt="" width={44} height={44} />
           <div>
             <h1>斗地主</h1>
             <p>{playerName ? `${playerName}，准备开局` : '轻量牌桌，快速开局'}</p>

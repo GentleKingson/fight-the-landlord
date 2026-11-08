@@ -133,7 +133,6 @@
 .brand-lockup p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lobby-status { flex: none; }
 
-.brand-mark,
 .player-avatar {
   display: grid;
   place-items: center;
@@ -144,9 +143,11 @@
 }
 
 .brand-mark {
+  display: block;
+  flex-shrink: 0;
   width: 44px;
   height: 44px;
-  font-size: 24px;
+  object-fit: contain;
 }
 
 .brand-lockup h1,
@@ -1102,7 +1103,7 @@
 
 @media (max-width: 600px) and (orientation: portrait) {
   .lobby-screen { gap: 8px; padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)); }
-  .brand-mark { width: 36px; height: 36px; font-size: 20px; }
+  .brand-mark { width: 36px; height: 36px; }
   .brand-lockup { gap: 8px; }
   .brand-lockup h1 { font-size: 22px; }
   .brand-lockup p { font-size: 11px; }
@@ -2169,7 +2170,7 @@
 @media (orientation: landscape) and (max-height: 520px) {
   .lobby-screen { gap: 6px; padding: max(6px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
   .lobby-header { min-height: 34px; }
-  .brand-mark { width: 32px; height: 32px; font-size: 20px; }
+  .brand-mark { width: 32px; height: 32px; }
   .brand-lockup h1 { font-size: 22px; }
   .brand-lockup p { display: none; }
   .lobby-home { gap: 8px; padding: 8px; }
