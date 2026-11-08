@@ -4,7 +4,7 @@ import { Lobby } from '../src/features/lobby/Lobby';
 import { useAppStore } from '../src/stores/appStore';
 import { MsgType } from '../src/protocol/types';
 import type { GameSocket } from '../src/transport/wsClient';
-import landlordLogo from '../src/assets/landlord-logo.png';
+import landlordLogo from '../src/assets/landlord-logo-176.webp';
 
 afterEach(cleanup);
 

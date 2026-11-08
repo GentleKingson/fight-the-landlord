@@ -2,7 +2,7 @@ import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore } from '../../stores/appStore';
 import { Icon } from '../../shared/ui/Icon';
-import landlordLogo from '../../assets/landlord-logo.png';
+import landlordLogo from '../../assets/landlord-logo-176.webp';
 
 interface LobbyProps {
   socket: GameSocket;
