@@ -175,7 +175,7 @@ test('deals once per game and does not repeat when the landlord receives bottom 
   close();
 });
 
-test.each(['bid_turn', 'play_turn'])('%s cues only the local player and warns once at five seconds', (type) => {
+test.each(['bid_turn', 'play_turn'])('%s warns only the local player at five seconds, with a start cue only for bidding', (type) => {
   vi.useFakeTimers();
   const { audio, receive, close } = audioSession();
   receive(type, { player_id: 'opponent', timeout: 10 });
@@ -183,13 +183,15 @@ test.each(['bid_turn', 'play_turn'])('%s cues only the local player and warns on
   expect(audio.turn).not.toHaveBeenCalled();
   const deadline = Date.now() + 10000;
   receive(type, { player_id: 'me', timeout: 10 });
-  expect(audio.turn).toHaveBeenCalledExactlyOnceWith(false, deadline);
+  const startCues = type === 'bid_turn' ? 1 : 0;
+  if (startCues) expect(audio.turn).toHaveBeenCalledExactlyOnceWith(false, deadline);
+  else expect(audio.turn).not.toHaveBeenCalled();
   vi.advanceTimersByTime(4999);
-  expect(audio.turn).toHaveBeenCalledTimes(1);
+  expect(audio.turn).toHaveBeenCalledTimes(startCues);
   vi.advanceTimersByTime(1);
   expect(audio.turn).toHaveBeenLastCalledWith(true, deadline);
   vi.advanceTimersByTime(4999);
-  expect(audio.turn).toHaveBeenCalledTimes(2);
+  expect(audio.turn).toHaveBeenCalledTimes(startCues + 1);
   audio.endTurn.mockClear();
   vi.advanceTimersByTime(1);
   expect(audio.endTurn).toHaveBeenCalledOnce();
@@ -202,7 +204,7 @@ test.each(['bid_result', 'player_pass', 'card_played', 'game_over'])('%s cancels
   receive('play_turn', { player_id: 'me', timeout: 10 });
   receive(type, { player_id: 'me', cards: testCards(1), cards_left: 2 });
   vi.advanceTimersByTime(10000);
-  expect(audio.turn).toHaveBeenCalledTimes(1);
+  expect(audio.turn).not.toHaveBeenCalled();
   expect(audio.endTurn).toHaveBeenCalled();
   close();
 });
@@ -225,7 +227,7 @@ test.each(['disconnect', 'leave', 'background', 'pagehide', 'mute', 'dispose'])(
   }
   if (action === 'dispose') close();
   vi.advanceTimersByTime(10000);
-  expect(audio.turn).toHaveBeenCalledTimes(1);
+  expect(audio.turn).not.toHaveBeenCalled();
   if (action !== 'dispose') close();
   vi.restoreAllMocks();
 });
@@ -244,7 +246,11 @@ test.each(['bidding', 'playing'])('does not replay the restored %s turn or its w
   expect(audio.play).not.toHaveBeenCalled();
   receive(type, { player_id: 'opponent', timeout: 10 });
   receive(type, { player_id: 'me', timeout: 10 });
-  expect(audio.turn).toHaveBeenCalledOnce();
+  expect(audio.turn).toHaveBeenCalledTimes(phase === 'bidding' ? 1 : 0);
+  const deadline = Date.now() + 10000;
+  vi.advanceTimersByTime(5000);
+  expect(audio.turn).toHaveBeenLastCalledWith(true, deadline);
+  expect(audio.turn).toHaveBeenCalledTimes(phase === 'bidding' ? 2 : 1);
   close();
 });
 
