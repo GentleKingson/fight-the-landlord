@@ -4,8 +4,8 @@ import { GameAudio } from '../src/audio/gameAudio';
 
 const cards = (rank: number, count = 1) => Array.from({ length: count }, (_, suit) => ({ rank, suit, color: 0 }));
 
-it('includes exactly the 54 CLI assets and maps every single/pair/trio rank', () => {
-  expect(Object.keys(cardSoundUrls)).toHaveLength(54);
+it('includes exactly the 66 CLI assets and maps every single/pair/trio rank', () => {
+  expect(Object.keys(cardSoundUrls)).toHaveLength(66);
   const tokens = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2', 'joker_small', 'joker_big'];
   for (const [type, prefix, count] of [['单张', 'single', 1], ['对子', 'pair', 2], ['三张', 'trio', 3]] as const) {
     for (let rank = 3; rank <= (count === 1 ? 17 : 15); rank++) {
@@ -51,7 +51,8 @@ class FakeContext {
   sources: FakeSource[] = [];
   resume = vi.fn(async () => { this.state = 'running'; });
   createBuffer = vi.fn(() => ({}));
-  decodeAudioData = vi.fn(async () => ({}));
+  decodeAudioData = vi.fn(async (): Promise<object> => ({ duration: 2.5 }));
+  createGain = vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }));
   createBufferSource() { const source = new FakeSource(); this.sources.push(source); return source; }
   constructor() { FakeContext.latest = this; }
 }
@@ -211,4 +212,177 @@ it.each([
   await flush();
   expect(spoken()).toHaveLength(expired ? 2 : 3);
   expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.single_5, expect.anything());
+});
+
+it.each([1, 2])('announces %i remaining cards after the hand voice and effect', async (remaining) => {
+  audio.setEnabled(true);
+  audio.play('炸弹', cards(7, 4), remaining);
+  await flush();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  for (let i = 0; i < 2; i++) { spoken()[i].onended?.(); await flush(); }
+  expect(vi.mocked(fetch).mock.calls.map(call => call[0])).toEqual(
+    ['type_bomb', 'bomb', `last${remaining}`].map(name => cardSoundUrls[name]),
+  );
+});
+
+it.each([
+  [true, false, 'bid_call'], [false, false, 'bid_nocall'],
+  [true, true, 'bid_grab'], [false, true, 'bid_nograb'],
+] as const)('maps confirmed bid=%s grab=%s to %s', async (bid, grab, name) => {
+  audio.setEnabled(true);
+  audio.bid(bid, grab);
+  await flush();
+  expect(fetch).toHaveBeenCalledWith(cardSoundUrls[name], expect.anything());
+});
+
+it('serializes passing with the following announcement', async () => {
+  audio.setEnabled(true);
+  audio.pass();
+  audio.play('单张', cards(3), 3);
+  await flush();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.pass_buyao, expect.anything());
+  spoken()[0].onended?.();
+  await flush();
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.single_3, expect.anything());
+});
+
+it('cancels an active turn cue and keeps the confirmed action behind it', async () => {
+  audio.setEnabled(true);
+  audio.turn(true);
+  await flush();
+  audio.play('单张', cards(3), 2);
+  audio.endTurn();
+  await flush();
+  expect(spoken()[0].stop).toHaveBeenCalledOnce();
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.single_3, expect.anything());
+  expect(FakeContext.latest.createGain.mock.results[0].value.gain.value).toBe(0.3);
+});
+
+it('drops queued turn cues without interrupting the current voice', async () => {
+  audio.setEnabled(true);
+  audio.play('单张', cards(3));
+  await flush();
+  audio.turn();
+  audio.turn(true);
+  audio.endTurn();
+  expect(spoken()[0].stop).not.toHaveBeenCalled();
+  spoken()[0].onended?.();
+  await flush();
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('cannot revive a cancelled turn cue after a delayed decode', async () => {
+  audio.setEnabled(true);
+  let decode!: (value: object) => void;
+  FakeContext.latest.decodeAudioData.mockImplementationOnce(() => new Promise(resolve => { decode = resolve; }));
+  audio.turn(true);
+  await flush();
+  audio.endTurn();
+  audio.pass();
+  await flush();
+  decode({ duration: 1 });
+  await flush();
+  expect(spoken()).toHaveLength(1);
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.pass_buyao, expect.anything());
+});
+
+it('preserves the winning hand before settlement and discards older pending actions', async () => {
+  audio.setEnabled(true);
+  audio.pass();
+  await flush();
+  audio.bid(true, true);
+  audio.play('王炸', cards(16, 2), 0);
+  audio.result(true);
+  await flush();
+  expect(spoken()[0].stop).toHaveBeenCalledOnce();
+  for (let i = 1; i <= 2; i++) { spoken()[i].onended?.(); await flush(); }
+  expect(vi.mocked(fetch).mock.calls.map(call => call[0])).toEqual(
+    ['pass_buyao', 'type_rocket', 'bomb', 'win'].map(name => cardSoundUrls[name]),
+  );
+});
+
+it('waits for an already playing final hand before playing the loss clip', async () => {
+  audio.setEnabled(true);
+  audio.play('单张', cards(3), 0);
+  await flush();
+  audio.result(false);
+  expect(spoken()[0].stop).not.toHaveBeenCalled();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  spoken()[0].onended?.();
+  await flush();
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.lose, expect.anything());
+});
+
+it.each(['deal', 'win', 'lose'])('allows the long %s clip to finish beyond three seconds', async (name) => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 6 });
+  if (name === 'deal') audio.deal();
+  else audio.result(name === 'win');
+  await flush();
+  await vi.advanceTimersByTimeAsync(5500);
+  expect(spoken()[0].stop).not.toHaveBeenCalled();
+  spoken()[0].onended?.();
+  await flush();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(spoken()[0].stop).not.toHaveBeenCalled();
+});
+
+it('does not play a remaining-card alert for a hand that expired while loading', async () => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  audio.pass();
+  await flush();
+  audio.play('单张', cards(3), 1);
+  await vi.advanceTimersByTimeAsync(2800);
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
+    window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), 1000);
+  }));
+  spoken()[0].onended?.();
+  await flush();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(spoken()).toHaveLength(1);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the first turn cue after a 3.87-second deal while the server turn is still active', async () => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 3.87 });
+  audio.deal();
+  audio.turn(false, Date.now() + 15000);
+  await flush();
+  await vi.advanceTimersByTimeAsync(3870);
+  spoken()[0].onended?.();
+  await flush();
+  expect(spoken()).toHaveLength(2);
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.turn, expect.anything());
+});
+
+it('drops the first turn cue if the turn ends before dealing finishes', async () => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 3.87 });
+  audio.deal();
+  audio.turn(false, Date.now() + 15000);
+  await flush();
+  await vi.advanceTimersByTimeAsync(1000);
+  audio.endTurn();
+  await vi.advanceTimersByTimeAsync(2870);
+  spoken()[0].onended?.();
+  await flush();
+  expect(spoken()).toHaveLength(1);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('does not start a turn cue whose server deadline passed during loading', async () => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
+    window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), 1000);
+  }));
+  audio.turn(true, Date.now() + 500);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(spoken()).toHaveLength(0);
 });
