@@ -96,6 +96,7 @@ func (gs *GameSession) applyTimeoutPlayLocked(cards []card.Card, source string) 
 }
 
 func (gs *GameSession) stopTimer() {
+	gs.cancelBotTurn()
 	gs.timerMu.Lock()
 	defer gs.timerMu.Unlock()
 
@@ -162,6 +163,7 @@ func (gs *GameSession) PlayerOffline(playerID string) {
 	}
 
 	gs.turnID++ // Invalidate a turn timeout that raced with pause.
+	gs.cancelBotTurn()
 	// 启动离线等待计时器
 	offlineTimeout := gs.gameConfig.OfflineWaitTimeoutDuration()
 	turnID := gs.turnID
@@ -218,6 +220,7 @@ func (gs *GameSession) playerOnlineLocked(playerID string) {
 	}
 
 	gs.turnID++ // Invalidate any callback already queued before reconnection.
+	gs.cancelBotTurn()
 
 	// 恢复计时器
 	if gs.remainingTime >= 0 {

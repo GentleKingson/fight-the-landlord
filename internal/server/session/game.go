@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -75,6 +76,7 @@ type GameSession struct {
 	recording       *gameRecording
 	decisionStarted time.Time
 	turnID          uint64
+	botTurnCancel   context.CancelFunc // protected by mu; never wait for bot work under this lock
 	mu              sync.RWMutex
 }
 

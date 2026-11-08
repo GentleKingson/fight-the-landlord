@@ -200,7 +200,7 @@ func (gs *GameSession) notifyPlayTurn() {
 		canBeat = rule.CanBeatWithHand(player.Hand, gs.lastPlayedHand)
 	}
 
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+	gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
 		PlayerID: player.ID,
 		Timeout:  gs.gameConfig.TurnTimeout,
 		MustPlay: mustPlay,

@@ -35,8 +35,9 @@ type BotClient struct {
 	sessionMu sync.RWMutex
 	session   SessionInterface
 
-	closedMu sync.RWMutex
-	closed   bool
+	closedMu       sync.RWMutex
+	closed         bool
+	decisionCancel context.CancelFunc // protected by closedMu
 
 	state botState
 }
@@ -104,6 +105,10 @@ func (b *BotClient) Close() {
 	b.closedMu.Lock()
 	defer b.closedMu.Unlock()
 	b.closed = true
+	if b.decisionCancel != nil {
+		b.decisionCancel()
+		b.decisionCancel = nil
+	}
 }
 
 func (b *BotClient) IsBot() bool { return true }
@@ -127,12 +132,8 @@ func (b *BotClient) SendMessage(msg *protocol.Message) {
 		b.handleLandlord(msg)
 	case protocol.MsgCardPlayed:
 		b.handleCardPlayed(msg)
-	case protocol.MsgBidTurn:
-		go b.handleBidTurn(msg)
 	case protocol.MsgPlayerPass:
 		b.handlePlayerPass(msg)
-	case protocol.MsgPlayTurn:
-		go b.handlePlayTurn(msg)
 	}
 }
 
@@ -343,82 +344,105 @@ func (b *BotClient) handlePlayerPass(msg *protocol.Message) {
 	}
 }
 
-func (b *BotClient) handleBidTurn(msg *protocol.Message) {
-	payload, err := codec.ParsePayload[protocol.BidTurnPayload](msg)
-	if err != nil {
-		log.Printf("🤖 handleBidTurn decode error: %v", err)
+// SendTurn receives an in-process turn token; ordinary wire messages cannot start
+// decisions. Capture the session and hand before launching work so delayed goroutines
+// can never attach an old notification to a newer turn.
+func (b *BotClient) SendTurn(parent context.Context, turnID uint64, msg *protocol.Message) {
+	b.closedMu.Lock()
+	defer b.closedMu.Unlock()
+	if b.decisionCancel != nil {
+		b.decisionCancel()
+		b.decisionCancel = nil
+	}
+	if b.closed || parent.Err() != nil {
 		return
 	}
-	if payload.PlayerID != b.id {
-		return
-	}
-
-	time.Sleep(thinkDelay())
-
-	b.state.mu.RLock()
-	hand := make([]card.Card, len(b.state.hand))
-	copy(hand, b.state.hand)
-	prevBid := b.state.prevBid
-	b.state.mu.RUnlock()
-
-	bid := b.engine.DecideBid(context.Background(), b.name, hand, prevBid)
-
 	b.sessionMu.RLock()
 	sess := b.session
 	b.sessionMu.RUnlock()
-
 	if sess == nil {
-		log.Printf("🤖 %s: session 未就绪，跳过叫地主", b.name)
 		return
 	}
 
-	action := "叫地主"
-	if payload.IsGrab {
-		action = "抢地主"
-	}
-	log.Printf("🤖 %s 决定%s: %v（当前倍数 %d）", b.name, action, bid, payload.Multiplier)
-
-	if err := sess.HandleBid(b.id, bid); err != nil {
-		log.Printf("🤖 %s HandleBid 失败: %v", b.name, err)
+	ctx, cancel := context.WithCancel(parent)
+	b.decisionCancel = cancel
+	switch msg.Type {
+	case protocol.MsgBidTurn:
+		b.handleBidTurn(ctx, turnID, sess, msg)
+	case protocol.MsgPlayTurn:
+		b.handlePlayTurn(ctx, turnID, sess, msg)
 	}
 }
 
-func (b *BotClient) handlePlayTurn(msg *protocol.Message) {
+func (b *BotClient) handleBidTurn(ctx context.Context, turnID uint64, sess SessionInterface, msg *protocol.Message) {
+	payload, err := codec.ParsePayload[protocol.BidTurnPayload](msg)
+	if err != nil || payload.PlayerID != b.id {
+		return
+	}
+	b.state.mu.RLock()
+	hand := append([]card.Card(nil), b.state.hand...)
+	prevBid := b.state.prevBid
+	b.state.mu.RUnlock()
+
+	go func() {
+		// Preserve the existing bidding rhythm: wait first, then decide.
+		if !waitForDecision(ctx, thinkDelay()) {
+			return
+		}
+		bid := b.engine.DecideBid(ctx, b.name, hand, prevBid)
+		if ctx.Err() != nil {
+			return
+		}
+		if err := sess.HandleBotBid(ctx, b.id, turnID, bid); err != nil {
+			log.Printf("🤖 %s HandleBotBid 失败: %v", b.name, err)
+		}
+	}()
+}
+
+func (b *BotClient) handlePlayTurn(ctx context.Context, turnID uint64, sess SessionInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.PlayTurnPayload](msg)
-	if err != nil {
-		log.Printf("🤖 handlePlayTurn decode error: %v", err)
+	if err != nil || payload.PlayerID != b.id {
 		return
 	}
-	if payload.PlayerID != b.id {
-		return
-	}
-
-	time.Sleep(thinkDelay())
-
+	// The target includes scheduling and inference time, not just artificial waiting.
+	readyAt := time.Now().Add(playThinkDelay())
 	b.state.mu.RLock()
 	gctx := b.buildGameContext(payload.MustPlay, payload.CanBeat)
 	b.state.mu.RUnlock()
 
-	b.sessionMu.RLock()
-	sess := b.session
-	b.sessionMu.RUnlock()
+	go func() {
+		if ctx.Err() != nil {
+			return
+		}
+		cards := b.engine.DecidePlay(ctx, b.name, gctx)
+		if !waitForDecision(ctx, time.Until(readyAt)) {
+			return
+		}
+		var infos []protocol.CardInfo // nil preserves pass semantics
+		if cards != nil {
+			infos = convert.CardsToInfos(cards)
+		}
+		if err := sess.HandleBotPlay(ctx, b.id, turnID, infos); err != nil {
+			log.Printf("🤖 %s 出牌失败: %v", b.name, err)
+		}
+	}()
+}
 
-	if sess == nil {
-		log.Printf("🤖 %s: session 未就绪，跳过出牌", b.name)
-		return
+// waitForDecision is cancellable and adds no delay when inference used the budget.
+func waitForDecision(ctx context.Context, remaining time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
 	}
-
-	cards := b.engine.DecidePlay(context.Background(), b.name, gctx)
-
-	var playErr error
-	if cards == nil {
-		playErr = sess.HandlePass(b.id)
-	} else {
-		playErr = sess.HandlePlayCards(b.id, convert.CardsToInfos(cards))
+	if remaining <= 0 {
+		return true
 	}
-
-	if playErr != nil {
-		log.Printf("🤖 %s 出牌失败: %v", b.name, playErr)
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return ctx.Err() == nil
 	}
 }
 
@@ -489,9 +513,14 @@ func (b *BotClient) buildNumCardsLeft() map[string]int {
 	return m
 }
 
-// thinkDelay 模拟思考时间（300–900ms）
+// thinkDelay 保持叫地主／抢地主的原等待时间（300–900ms）
 func thinkDelay() time.Duration {
 	return time.Duration(300+rand.IntN(600)) * time.Millisecond
+}
+
+// playThinkDelay is the target total thinking time for both play and pass (1–2s).
+func playThinkDelay() time.Duration {
+	return time.Second + time.Duration(rand.IntN(1001))*time.Millisecond
 }
 
 // removeCards 从 hand 中移除 played 中的牌（按 Rank+Suit 精确匹配）
