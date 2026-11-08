@@ -121,7 +121,7 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 	req := e.buildRequest(gctx)
 	action, err := e.callService(ctx, req)
 	if ctx.Err() != nil {
-		return nil // A cancelled turn must not trigger a fallback decision.
+		return nil // A canceled turn must not trigger a fallback decision.
 	}
 	if err != nil {
 		log.Printf("🎮 [DouZero] %s: 服务错误: %v，回退规则出牌", botName, err)

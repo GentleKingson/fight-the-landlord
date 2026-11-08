@@ -204,7 +204,7 @@ func TestDouZeroTimeoutAndFallbackRespectTarget(t *testing.T) {
 					if scenario == "must play" {
 						body = `{"action":[]}`
 					}
-					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 				})
 				b, sess := testBot(e)
 				defer b.Close()
