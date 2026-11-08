@@ -304,32 +304,9 @@ func (m *OnlineModel) dispatchMessage(msg tea.Msg) (cmds []tea.Cmd, earlyReturn 
 		if handled, keyCmd := m.processKeyMsg(msg); handled {
 			return nil, true, keyCmd
 		}
-
-	case timer.TickMsg, timer.TimeoutMsg:
-		// 出牌倒计时进入最后 10 秒时播放一次提醒音
-		m.checkPlayReminder()
 	}
 
 	return cmds, false, nil
-}
-
-// checkPlayReminder plays the "出牌提醒" sound once when the local player's
-// play countdown enters its final 10 seconds.
-func (m *OnlineModel) checkPlayReminder() {
-	if m.phase != PhasePlaying || m.game.BellPlayed() {
-		return
-	}
-	if m.game.State().CurrentTurn != m.playerID {
-		return
-	}
-	start := m.game.TimerStartTime()
-	if start.IsZero() {
-		return
-	}
-	if m.game.TimerDuration()-time.Since(start) <= 10*time.Second {
-		m.PlaySound("turn")
-		m.game.SetBellPlayed(true)
-	}
 }
 
 // Update handles tea messages.
