@@ -5,6 +5,7 @@ import { Card } from './Card';
 
 interface HandProps {
   cards: CardInfo[];
+  visibleCount?: number;
   selected: Set<string>;
   disabled?: boolean;
   onToggle: (key: string) => void;
@@ -32,7 +33,7 @@ interface HandGroup {
   startIndex: number;
 }
 
-export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelect }: HandProps) {
+export function Hand({ cards, visibleCount = cards.length, selected, disabled = false, onToggle, onRangeSelect }: HandProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastPointerDownIndex = useRef<number | null>(null);
   const sameCardPointerDown = useRef(false);
@@ -95,6 +96,7 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
       style={{ '--hand-count': cards.length } as CSSProperties}
       role="listbox"
       aria-label="手牌"
+      aria-disabled={disabled}
       onPointerDown={(event) => {
         if (disabled) return;
         const index = indexFromTarget(event.target);
@@ -137,11 +139,12 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
       }}
     >
       {layout.map((item) => {
+        const pending = item.index >= visibleCount;
         const isSelected = selected.has(item.key) || dragKeys.has(item.key);
         return (
           <div
             key={`${item.key}_${item.index}`}
-            className={`hand__slot ${isSelected ? 'is-selected' : ''}`}
+            className={`hand__slot ${pending ? 'is-pending' : ''} ${isSelected ? 'is-selected' : ''}`}
             data-card-index={item.index}
             data-group-index={item.groupIndex}
             data-row={item.row}
@@ -160,12 +163,14 @@ export function Hand({ cards, selected, disabled = false, onToggle, onRangeSelec
               zIndex: item.index + (item.row === 1 ? 40 : 0)
             } as CSSProperties}
             role="option"
+            aria-hidden={pending || undefined}
+            inert={pending}
             aria-selected={isSelected}
             onDoubleClick={() => {
               if (!disabled && sameCardPointerDown.current) selectGroup(item.groupIndex);
             }}
           >
-            <Card card={item.card} selected={isSelected} onClick={(event) => {
+            <Card card={item.card} selected={isSelected} disabled={disabled || pending} onClick={(event) => {
               if (!disabled && event.detail === 0) onToggle(item.key);
             }} />
           </div>

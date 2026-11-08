@@ -5,12 +5,13 @@ import { normalizeCard } from './cardModel';
 interface CardProps {
   card: CardInfo;
   selected?: boolean;
+  disabled?: boolean;
   size?: 'hand' | 'played' | 'mini' | 'action';
   style?: CSSProperties;
   onClick?: MouseEventHandler<HTMLButtonElement>;
 }
 
-export function Card({ card, selected = false, size = 'hand', style, onClick }: CardProps) {
+export function Card({ card, selected = false, disabled = false, size = 'hand', style, onClick }: CardProps) {
   const face = normalizeCard(card);
 
   return (
@@ -24,6 +25,7 @@ export function Card({ card, selected = false, size = 'hand', style, onClick }: 
         face.isJoker ? 'is-joker' : ''
       ].filter(Boolean).join(' ')}
       type="button"
+      disabled={disabled}
       style={style}
       onClick={onClick}
       aria-pressed={selected}

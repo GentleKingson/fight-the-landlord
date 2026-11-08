@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DealAnimation } from './DealAnimation';
+import { useDealPresentation } from './useDealPresentation';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
@@ -21,6 +22,8 @@ export function GameTable({ socket }: GameTableProps) {
   const phase = useAppStore((state) => state.phase);
   const currentTurn = useAppStore((state) => state.currentTurn);
   const hand = useAppStore((state) => state.hand);
+  const deal = useAppStore((state) => state.deal);
+  const presentation = useDealPresentation(phase === 'dealing' ? deal : null, hand.length);
   const selectedCards = useAppStore((state) => state.selectedCards);
   const bottomCards = useAppStore((state) => state.bottomCards);
   const bottomCardsRevealed = useAppStore((state) => state.bottomCardsRevealed);
@@ -66,7 +69,11 @@ export function GameTable({ socket }: GameTableProps) {
         </div>
 
         <div className={`felt-table ${phase === 'playing' ? 'felt-table--seats' : ''}`}>
-          {phase === 'dealing' ? <DealAnimation /> : phase === 'bidding' ? (
+          {phase === 'dealing' ? (
+            <div className="deal-origin">
+              <span className="deal-animation__label">{presentation.finished ? '等待叫地主通知…' : '正在发牌…'}</span>
+            </div>
+          ) : phase === 'bidding' ? (
             <div className="table-center-hint">等待叫抢地主</div>
           ) : (
             <>
@@ -84,10 +91,11 @@ export function GameTable({ socket }: GameTableProps) {
       <section className="hand-zone">
         <div className="hand-heading">
           <strong>{seats.me?.name || '我'} · {phase === 'dealing' || phase === 'bidding' ? '等待定地主' : seats.me?.is_landlord ? '地主' : '农民'}</strong>
-          <span>手牌 {hand.length} 张</span>
+          <span>手牌 {presentation.visibleCount} 张</span>
         </div>
         <Hand
           cards={hand}
+          visibleCount={presentation.visibleCount}
           selected={selectedCards}
           disabled={phase !== 'playing'}
           onToggle={toggleCard}
@@ -95,6 +103,7 @@ export function GameTable({ socket }: GameTableProps) {
         />
       </section>
 
+      {phase === 'dealing' && <DealAnimation deal={deal} count={hand.length} {...presentation} />}
       <UtilityDrawer socket={socket} drawer={drawer} onClose={() => setDrawer('none')} />
     </main>
   );

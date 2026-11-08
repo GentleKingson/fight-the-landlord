@@ -58,9 +58,17 @@ test('deal cards travel to three seats, then wait for server authorization', asy
   expect(layout.height).toBeGreaterThanOrEqual(72);
   expect(layout.left).toBeGreaterThanOrEqual(0);
   expect(layout.right).toBeLessThanOrEqual(layout.viewport);
-  expect(layout.targets).toHaveLength(3);
+  expect(layout.targets.length).toBeGreaterThan(3);
+  await expect(page.getByRole('option')).toHaveCount(0);
+  await expect(page.getByText('手牌 0 张')).toBeVisible();
+  // Each count lasts only ~206ms. Browser polling may skip a particular number;
+  // exact per-card boundaries are covered with the fake clock in deal.test.tsx.
+  await expect(page.getByText(/^手牌 [1-9] 张$/)).toBeVisible();
+  await expectLandingTargets(page);
   await page.screenshot({ path: `/tmp/deal-${test.info().project.name}.png` });
   await expect(page.getByText('等待叫地主通知…')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByRole('option')).toHaveCount(17);
+  await expect(page.getByText('手牌 17 张')).toBeVisible();
   await expect(page.getByRole('button', { name: '叫地主', exact: true })).toHaveCount(0);
   await bid(page);
   await expect(page.locator('.deal-animation')).toHaveCount(0);
@@ -78,12 +86,61 @@ for (const mode of ['muted', 'locked', 'failed', 'reduced']) {
     if (mode === 'failed') await page.route('**/*.mp3*', route => route.request().resourceType() === 'fetch' ? route.abort() : route.continue());
     await deal(page, 'reconnected', 2500);
     if (mode === 'reduced') {
-      await expect(page.locator('.deal-card--left').first()).toBeHidden();
+      await expect(page.locator('.deal-card--left')).toHaveCount(0);
+      await expect(page.getByRole('option')).toHaveCount(17);
       await expect(page.locator('.deal-card--deck')).toBeVisible();
     }
     await expect(page.getByText('等待叫地主通知…')).toBeVisible({ timeout: 2500 });
+    await expect(page.getByRole('option')).toHaveCount(17);
     await expect(page.locator('.turn-banner time')).toHaveCount(0);
     await bid(page);
     await expect(page.getByRole('button', { name: '叫地主', exact: true })).toBeVisible();
   });
 }
+
+// Validate computed endpoints against real slots, including the second portrait row.
+async function expectLandingTargets(page: Page) {
+  await expect(page.locator('.deal-card--me')).toHaveCount(17);
+  await expect.poll(() => page.locator('.deal-animation').evaluate(root => {
+    const bounds = root.getBoundingClientRect();
+    const style = getComputedStyle(root);
+    const originX = bounds.left + parseFloat(style.getPropertyValue('--deal-origin-x')) + 15;
+    const originY = bounds.top + parseFloat(style.getPropertyValue('--deal-origin-y')) + 21;
+    const slots = [...document.querySelectorAll('.hand__slot')];
+    return [...root.querySelectorAll('.deal-card--me')].map((card, index) => {
+      const css = getComputedStyle(card);
+      const target = slots[index].getBoundingClientRect();
+      return Math.max(
+        Math.abs(originX + parseFloat(css.getPropertyValue('--deal-x')) - target.left - target.width / 2),
+        Math.abs(originY + parseFloat(css.getPropertyValue('--deal-y')) - target.top - target.height / 2)
+      );
+    }).reduce((a, b) => Math.max(a, b), 0);
+  })).toBeLessThan(1);
+}
+
+test('flights reach actual card bounds across an orientation change without restarting', async ({ page }) => {
+  await setup(page, 'muted');
+  await deal(page);
+  await expect(page.getByText(/^手牌 [1-9] 张$/)).toBeVisible();
+  const viewport = page.viewportSize()!;
+  await page.setViewportSize({ width: viewport.height, height: viewport.width });
+  await expectLandingTargets(page);
+  const endpoints = await page.locator('.deal-card--me').evaluateAll(cards => cards.map((card, index) => {
+    // Seek each real CSS animation to just before landing and inspect rendered bounds.
+    const animation = card.getAnimations()[0];
+    const timing = animation.effect!.getTiming();
+    animation.pause();
+    animation.currentTime = Number(timing.delay) + Number(timing.duration) - 0.01;
+    const flight = card.getBoundingClientRect();
+    const slot = document.querySelectorAll('.hand__slot')[index].getBoundingClientRect();
+    return Math.max(Math.abs(flight.left - slot.left), Math.abs(flight.top - slot.top),
+      Math.abs(flight.width - slot.width), Math.abs(flight.height - slot.height));
+  }));
+  expect(endpoints).toHaveLength(17);
+  expect(Math.max(...endpoints)).toBeLessThan(1);
+  await page.screenshot({ path: `/tmp/deal-landing-${test.info().project.name}.png` });
+  await bid(page); // An official early turn must finish immediately, even with paused CSS.
+  await expect(page.locator('.deal-animation')).toHaveCount(0);
+  await expect(page.getByRole('option')).toHaveCount(17);
+  await expect(page.getByRole('button', { name: '叫地主', exact: true })).toBeVisible();
+});
