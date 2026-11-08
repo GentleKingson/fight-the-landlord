@@ -19,7 +19,7 @@ it('allows manually selected replies regardless of the advisory can_beat flag', 
   fireEvent.click(screen.getByRole('button', { name: /^出牌$/ }));
   expect(send).toHaveBeenCalledWith(MsgType.PlayCards, { cards: hand });
   fireEvent.click(screen.getByRole('button', { name: /^提示$/ }));
-  expect(useAppStore.getState().tableMessage).toBe('暂无提示，请手动选牌');
+  expect(useAppStore.getState().tableMessage).toBe('提示：顺子');
 });
 
 it.each([0, 1, 2])('keeps previous player left and next player right with their played cards (self seat %i)', (seat) => {

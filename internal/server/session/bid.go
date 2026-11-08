@@ -17,8 +17,9 @@ import (
 // 叫抢流程：
 //   - 叫地主阶段（尚无人叫）：依次询问每位玩家「叫 / 不叫」。第一个叫地主的人成为暂定地主，
 //     底倍为 1，随后进入抢地主阶段。若一圈无人叫则流局重新发牌。
-//   - 抢地主阶段：除暂定地主外的玩家依次「抢 / 不抢」，每次抢翻一倍并接管暂定地主身份
-//     （原叫地主者可「反抢」）。当连续两人放弃后，暂定地主成为地主，底倍即叫抢累计的倍数。
+//   - 抢地主阶段：从原叫者下家开始，跳过本轮“不叫”的玩家，每人仅一次「抢 / 不抢」。
+//     有人抢后，原叫者最后有一次反抢机会；无人抢则原叫者直接成为地主。
+//     每次抢翻一倍，所有有资格的玩家决策后，最后叫/抢者成为地主。
 func (gs *GameSession) HandleBid(playerID string, bid bool) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
@@ -58,16 +59,15 @@ func (gs *GameSession) handleCall(player *GamePlayer, bid bool) {
 		gs.landlordCandidate = gs.currentBidder
 		gs.bidMultiplier = 1
 		gs.bidPasses = 0
-		gs.grabActions = 0
 
 		gs.broadcastBidResult(player, true, false)
 
-		gs.currentBidder = gs.nextGrabber(gs.currentBidder)
-		gs.notifyBidTurn()
+		gs.advanceGrabTurn()
 		return
 	}
 
 	// 不叫
+	gs.declinedCall[gs.currentBidder] = true
 	gs.bidPasses++
 	gs.broadcastBidResult(player, false, false)
 
@@ -87,34 +87,34 @@ func (gs *GameSession) handleGrab(player *GamePlayer, bid bool) {
 		// 抢地主：翻倍并接管暂定地主身份
 		gs.bidMultiplier *= 2
 		gs.landlordCandidate = gs.currentBidder
-		gs.bidPasses = 0
-	} else {
-		gs.bidPasses++
 	}
-	gs.grabActions++
+	gs.grabDecided[gs.currentBidder] = true
 
 	gs.broadcastBidResult(player, bid, true)
 
-	// 抢地主结束条件（满足其一）：
-	//   1. 除暂定地主外的两名玩家连续放弃；
-	//   2. 每名玩家都已抢过一次（叫地主者 A 之后 B、C、A 依次决策，最多 3 次），
-	//      防止互相反抢导致倍数无限翻倍。
-	if gs.bidPasses >= 2 || gs.grabActions >= 3 {
+	gs.advanceGrabTurn()
+}
+
+func (gs *GameSession) advanceGrabTurn() {
+	next := gs.nextGrabber(gs.currentBidder)
+	if next == -1 {
 		gs.setLandlord(gs.landlordCandidate)
 		return
 	}
-
-	gs.currentBidder = gs.nextGrabber(gs.currentBidder)
+	gs.currentBidder = next
 	gs.notifyBidTurn()
 }
 
-// nextGrabber 返回下一个可抢地主的玩家索引（跳过当前暂定地主）
+// nextGrabber 按座位顺序查找剩余资格；-1 表示叫抢结束。
+// 原叫者只有在地主被抢走时才参与，且只在其余座位决策后轮到。
 func (gs *GameSession) nextGrabber(from int) int {
-	next := (from + 1) % 3
-	if next == gs.landlordCandidate {
-		next = (next + 1) % 3
+	for step := 1; step <= 3; step++ {
+		next := (from + step) % 3
+		if !gs.declinedCall[next] && !gs.grabDecided[next] && next != gs.landlordCandidate {
+			return next
+		}
 	}
-	return next
+	return -1
 }
 
 // broadcastBidResult 广播叫/抢地主结果

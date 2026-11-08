@@ -155,6 +155,11 @@ func ParseHand(cards []card.Card) (ParsedHand, error) {
 	}
 
 	analysis := analyzeCards(cards)
+	for rank, count := range analysis.counts {
+		if rank < card.Rank3 || rank > card.RankRedJoker || count > 4 || (rank >= card.RankBlackJoker && count > 1) {
+			return ParsedHand{}, fmt.Errorf("无效的牌点或数量")
+		}
+	}
 
 	// 按优先级检查各种牌型
 	checks := []func(HandAnalysis, []card.Card) (ParsedHand, bool){
@@ -179,12 +184,15 @@ func ParseHand(cards []card.Card) (ParsedHand, error) {
 
 // CanBeat 判断 newHand 是否能大过 lastHand
 func CanBeat(newHand, lastHand ParsedHand) bool {
-	// 王炸最大
-	if newHand.Type == Rocket {
-		return true
+	if newHand.IsEmpty() || lastHand.IsEmpty() {
+		return false
 	}
+	// 王炸最大
 	if lastHand.Type == Rocket {
 		return false
+	}
+	if newHand.Type == Rocket {
+		return true
 	}
 
 	// 炸弹可以大过任何非炸弹和非王炸的牌

@@ -45,13 +45,14 @@ type GameSession struct {
 	bottomCards []card.Card
 
 	// 叫抢地主相关
-	currentBidder     int // 当前叫/抢地主的玩家索引
-	landlordCaller    int // 第一个叫地主的玩家索引，-1 表示尚无人叫
-	landlordCandidate int // 当前暂定地主索引，-1 表示尚无
-	bidPasses         int // 连续"不叫/不抢"次数（用于流局与结束判断）
-	grabActions       int // 抢地主阶段已进行的决策次数（每人最多一次，最多 3 次后强制结束）
-	bidMultiplier     int // 叫抢阶段产生的底倍
-	redealCount       int // 已发生的流局次数（达到上限后随机强制指定地主）
+	currentBidder     int     // 当前叫/抢地主的玩家索引
+	landlordCaller    int     // 第一个叫地主的玩家索引，-1 表示尚无人叫
+	landlordCandidate int     // 当前暂定地主索引，-1 表示尚无
+	bidPasses         int     // 本轮叫地主阶段的“不叫”次数
+	declinedCall      [3]bool // 按座位记录“不叫”；本轮不可再抢
+	grabDecided       [3]bool // 按座位记录是否已使用唯一一次抢/不抢机会
+	bidMultiplier     int     // 叫抢阶段产生的底倍
+	redealCount       int     // 已发生的流局次数，仅用于日志与采集，不强制指定地主
 
 	// 倍数相关（出牌阶段累计）
 	bombCount     int // 已打出的炸弹+王炸数量，每个翻一倍

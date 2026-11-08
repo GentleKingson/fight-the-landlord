@@ -1,4 +1,5 @@
 import type { CardInfo } from '../../protocol/types';
+import { parseHand, suggestPlays } from './rules';
 
 export type CardSuit = 'spade' | 'heart' | 'club' | 'diamond' | 'joker';
 export type CardColor = 'red' | 'black';
@@ -87,39 +88,11 @@ export function sortCards(cards: CardInfo[]): CardInfo[] {
 
 export function summarizeHand(cards: CardInfo[]): string {
   if (cards.length === 0) return '';
-  const counts = new Map<number, number>();
-  for (const card of cards) counts.set(card.rank, (counts.get(card.rank) ?? 0) + 1);
-  const groups = [...counts.values()].sort((a, b) => b - a);
-  if (cards.length === 1) return '单张';
-  if (cards.length === 2 && counts.has(16) && counts.has(17)) return '王炸';
-  if (cards.length === 2 && groups[0] === 2) return '对子';
-  if (cards.length === 3 && groups[0] === 3) return '三张';
-  if (cards.length === 4 && groups[0] === 4) return '炸弹';
-  if (cards.length === 4 && groups[0] === 3) return '三带一';
-  if (cards.length === 5 && groups[0] === 3 && groups[1] === 2) return '三带二';
-  if (isStraight([...counts.keys()], cards.length, 1)) return '顺子';
-  if (cards.length >= 6 && cards.length % 2 === 0 && isStraight([...counts.keys()], cards.length / 2, 2)) return '连对';
-  return `${cards.length} 张`;
+  return parseHand(cards)?.type ?? '无效牌型';
 }
 
 export function generateSimpleSuggestions(hand: CardInfo[], lastPlayed: CardInfo[], mustPlay: boolean): CardInfo[][] {
-  const sorted = sortCards(hand);
-  if (mustPlay || lastPlayed.length === 0) return sorted.length ? [[sorted[sorted.length - 1]]] : [];
-
-  const targetLength = lastPlayed.length;
-  const targetRank = Math.max(...lastPlayed.map((card) => card.rank));
-  const byRank = new Map<number, CardInfo[]>();
-  for (const card of sorted) {
-    const group = byRank.get(card.rank) ?? [];
-    group.push(card);
-    byRank.set(card.rank, group);
-  }
-
-  return [...byRank.entries()]
-    .filter(([rank, cards]) => rank > targetRank && cards.length >= targetLength)
-    .sort(([a], [b]) => a - b)
-    .slice(0, 8)
-    .map(([, cards]) => cards.slice(0, targetLength));
+  return suggestPlays(hand, lastPlayed, mustPlay);
 }
 
 export function initialCounter(myCards: CardInfo[]): Record<number, number> {
@@ -135,14 +108,4 @@ export function deductCounter(counter: Record<number, number>, cards: CardInfo[]
   const next = { ...counter };
   for (const card of cards) next[card.rank] = Math.max(0, (next[card.rank] ?? 0) - 1);
   return next;
-}
-
-function isStraight(ranks: number[], expectedLength: number, groupSize: number): boolean {
-  if (ranks.length !== expectedLength) return false;
-  if (ranks.some((rank) => rank >= 15)) return false;
-  const sorted = [...ranks].sort((a, b) => a - b);
-  for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index] !== sorted[index - 1] + 1) return false;
-  }
-  return groupSize > 0;
 }

@@ -30,7 +30,7 @@ func isFourWithKickers(analysis HandAnalysis, cards []card.Card) (ParsedHand, bo
 			hand.Type = FourWithTwo
 			return hand, true
 		}
-		if cardLen == 8 && len(analysis.pairs) == 2 { // AAAABBCC、AAAABBBB
+		if cardLen == 8 && len(analysis.pairs) == 2 { // AAAABBCC；不把另一组四张当成两对
 			hand.Type = FourWithTwoPairs
 			return hand, true
 		}
@@ -66,7 +66,7 @@ func isPlane(analysis HandAnalysis, cards []card.Card) (ParsedHand, bool) {
 			return hand, true
 		}
 		// 飞机带单
-		if planeLen*4 == cardLen && len(analysis.ones) == planeLen { // AAABBBCD+、AAABBAC+、AAABBBCC+
+		if planeLen*4 == cardLen && len(analysis.ones)+2*len(analysis.pairs) == planeLen { // 单翅可由对子拆成，如33344455
 			hand.Type = PlaneWithSingles
 			return hand, true
 		}

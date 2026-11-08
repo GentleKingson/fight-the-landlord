@@ -167,13 +167,17 @@ func checkKickers(analysis HandAnalysis, trioRanks []card.Rank, startIndex, leng
 		return true
 	}
 
-	// ParseHand requires distinct wing ranks, separate from the plane body.
+	// 翅膀不能使用机身点数；单翅可拆对子，对翅必须是不同点数的对子。
 	startRank := trioRanks[startIndex]
 	endRank := trioRanks[startIndex+length-1]
 	wings := 0
 	for rank, count := range analysis.counts {
 		if (rank < startRank || rank > endRank) && count >= kickerType {
-			wings++
+			if kickerType == 1 {
+				wings += min(count, 2)
+			} else {
+				wings++
+			}
 		}
 	}
 	return wings >= length

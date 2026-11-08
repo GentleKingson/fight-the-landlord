@@ -136,6 +136,11 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 		log.Printf("🎮 [DouZero] %s: 牌面转换失败，回退规则出牌", botName)
 		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
 	}
+	parsed, parseErr := rule.ParseHand(cards)
+	if parseErr != nil || (!gctx.MustPlay && !gctx.RecentPlays[0].Played.IsEmpty() && !rule.CanBeat(parsed, gctx.RecentPlays[0].Played)) {
+		log.Printf("🎮 [DouZero] %s: 返回非法牌型或无法压过上家，回退规则出牌", botName)
+		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+	}
 
 	log.Printf("🎮 [DouZero] %s 出牌: %s", botName, cardsToStr(cards))
 	return cards

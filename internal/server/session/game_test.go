@@ -480,7 +480,7 @@ func TestFinalMultiplierAndScores(t *testing.T) {
 	})
 }
 
-func TestHandleBid_MaxRedeals_ForceLandlord(t *testing.T) {
+func TestHandleBid_RepeatedRedealsNeverForceLandlord(t *testing.T) {
 	t.Parallel()
 
 	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
@@ -492,8 +492,8 @@ func TestHandleBid_MaxRedeals_ForceLandlord(t *testing.T) {
 	t.Cleanup(gs.StopAllTimers)
 	gs.Start()
 
-	// 持续无人叫地主，反复流局，直到达到上限被强制指定地主
-	for round := range maxRedeals {
+	// 超过旧的三次流局阈值，仍必须每次重新发牌和叫地主。
+	for round := range 6 {
 		require.Equal(t, GameStateBidding, gs.state)
 		assert.Equal(t, round, gs.redealCount)
 		assertRoundCards(t, gs, false)
@@ -501,11 +501,27 @@ func TestHandleBid_MaxRedeals_ForceLandlord(t *testing.T) {
 			bidder := gs.players[gs.currentBidder]
 			require.NoError(t, gs.HandleBid(bidder.ID, false))
 		}
+		assert.Equal(t, [3]bool{}, gs.declinedCall)
+		assert.Equal(t, [3]bool{}, gs.grabDecided)
+		assert.Equal(t, -1, gs.landlordCaller)
+		assert.Equal(t, -1, gs.landlordCandidate)
+		assert.Zero(t, gs.bidPasses)
+		assert.Equal(t, 1, gs.bidMultiplier)
+		for _, p := range gs.players {
+			assert.False(t, gs.room.Players[p.ID].IsLandlord)
+			assert.Empty(t, gs.BuildGameStateDTO(p.ID, NewSessionManager()).BottomCards)
+		}
 	}
 
-	// 达到流局上限后随机强制指定地主，进入出牌阶段，底倍为 1
-	assert.Equal(t, GameStatePlaying, gs.state)
-	assert.Equal(t, maxRedeals, gs.redealCount)
+	assert.Equal(t, GameStateBidding, gs.state)
+	assert.Equal(t, 6, gs.redealCount)
 	assert.Equal(t, 1, gs.bidMultiplier)
+	assertRoundCards(t, gs, false)
+	// 上一副牌“不叫”不影响新一副牌的叫抢资格。
+	for range 4 {
+		require.NoError(t, gs.HandleBid(gs.players[gs.currentBidder].ID, true))
+	}
+	assert.Equal(t, GameStatePlaying, gs.state)
+	assert.Equal(t, 8, gs.bidMultiplier)
 	assertRoundCards(t, gs, true)
 }

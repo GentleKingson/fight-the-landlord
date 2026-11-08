@@ -241,6 +241,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           bottomCards: payload.bottom_cards ?? [],
           bottomCardsRevealed: hand.length === 20 && state.bottomCardsRevealed,
           seatActions: {},
+          selectedCards: new Set(),
+          recentActions: hand.length === 17 ? [] : state.recentActions,
           players: syncDealtCounts(state.players, state.playerId, hand.length),
           cardCounter: initialCounter(hand)
         });
