@@ -66,7 +66,6 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
         replayTurn = null;
         if (restored || payload.player_id !== state.playerId || payload.timeout <= 0 || document.hidden || !audio.getEnabled()) break;
         const deadline = Date.now() + payload.timeout * 1000;
-        if (message.type === MsgType.BidTurn) audio.turn(false, deadline);
         warningTimer = window.setTimeout(() => {
           // A throttled background timer must never announce an expired turn.
           if (Date.now() < deadline) audio.turn(true, deadline);

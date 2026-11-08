@@ -263,7 +263,6 @@ it('drops queued turn cues without interrupting the current voice', async () => 
   audio.setEnabled(true);
   audio.play('单张', cards(3));
   await flush();
-  audio.turn();
   audio.turn(true);
   audio.endTurn();
   expect(spoken()[0].stop).not.toHaveBeenCalled();
@@ -346,26 +345,26 @@ it('does not play a remaining-card alert for a hand that expired while loading',
   expect(fetch).toHaveBeenCalledTimes(2);
 });
 
-it('keeps the first turn cue after a 3.87-second deal while the server turn is still active', async () => {
+it('keeps a queued warning after a 3.87-second deal while the server turn is still active', async () => {
   vi.useFakeTimers();
   audio.setEnabled(true);
   FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 3.87 });
   audio.deal();
-  audio.turn(false, Date.now() + 15000);
+  audio.turn(true, Date.now() + 5000);
   await flush();
   await vi.advanceTimersByTimeAsync(3870);
   spoken()[0].onended?.();
   await flush();
   expect(spoken()).toHaveLength(2);
-  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.turn, expect.anything());
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.warning, expect.anything());
 });
 
-it('drops the first turn cue if the turn ends before dealing finishes', async () => {
+it('drops a queued warning if the turn ends before dealing finishes', async () => {
   vi.useFakeTimers();
   audio.setEnabled(true);
   FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 3.87 });
   audio.deal();
-  audio.turn(false, Date.now() + 15000);
+  audio.turn(true, Date.now() + 5000);
   await flush();
   await vi.advanceTimersByTimeAsync(1000);
   audio.endTurn();
