@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
-      fs: { allow: [process.cwd(), resolve(process.cwd(), '../internal/protocol/proto')] },
+      fs: { allow: [process.cwd(), resolve(process.cwd(), '../internal/protocol/proto'), resolve(process.cwd(), '../internal/sound/gaming')] },
       host: '0.0.0.0',
       port: 5174,
       proxy: {

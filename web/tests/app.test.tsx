@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
 import { useAppStore } from '../src/stores/appStore';
 
-vi.mock('../src/transport/wsClient', () => ({ createGameSocket: () => ({ connect() {}, close() {}, send() {} }) }));
+vi.mock('../src/transport/wsClient', () => ({ createGameSocket: () => ({ connect() {}, close() {}, send() {}, subscribe: () => () => {} }) }));
 vi.mock('../src/features/lobby/Lobby', () => ({ Lobby: () => <div>大厅</div> }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 

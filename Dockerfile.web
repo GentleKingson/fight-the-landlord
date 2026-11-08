@@ -6,6 +6,7 @@ RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; npm ci
 COPY web/ ./
 COPY internal/protocol/proto/ /src/internal/protocol/proto/
+COPY internal/sound/gaming/ /src/internal/sound/gaming/
 RUN npm run build
 
 FROM golang:1.26-bookworm AS server
