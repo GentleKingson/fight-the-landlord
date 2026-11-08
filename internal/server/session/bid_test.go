@@ -21,6 +21,7 @@ func classicBidGame(t *testing.T, start int) *GameSession {
 	r.PlayerOrder = []string{"a", "b", "c"}
 	gs := NewGameSession(r, nil, config.GameConfig{BidTimeout: 600, TurnTimeout: 600})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 	t.Cleanup(gs.StopAllTimers)
 	// 控制首叫座位，避免测试依赖随机抽样。
 	gs.currentBidder = start

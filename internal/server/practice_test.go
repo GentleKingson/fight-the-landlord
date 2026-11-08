@@ -67,7 +67,7 @@ func TestRepeatedPracticeRequestsCreateOnlyOneGame(t *testing.T) {
 	}
 	select {
 	case <-c.started:
-	case <-time.After(2 * time.Second):
+	case <-time.After(session.DealDuration + 2*time.Second):
 		t.Fatal("practice game did not start")
 	}
 	gs := <-games

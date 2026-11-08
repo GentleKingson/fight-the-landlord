@@ -27,7 +27,9 @@ type GameState struct {
 	LastHandType   string
 
 	// 叫抢地主 / 倍数
-	Multiplier int  // 当前倍数（叫抢阶段为底倍，出牌阶段含炸弹等累计）
+	Multiplier int // 当前倍数（叫抢阶段为底倍，出牌阶段含炸弹等累计）
+	BidToken   string
+	DealID     string
 	IsGrabTurn bool // 当前叫地主轮是否处于抢地主阶段
 
 	// 游戏结果
@@ -68,6 +70,8 @@ func (gs *GameState) Reset() {
 	gs.IsLandlord = false
 	gs.Multiplier = 0
 	gs.IsGrabTurn = false
+	gs.BidToken = ""
+	gs.DealID = ""
 	gs.Winner = ""
 	gs.WinnerIsLandlord = false
 	gs.FinalMultiplier = 0

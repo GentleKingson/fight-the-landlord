@@ -62,9 +62,18 @@ func handleMsgReconnected(m model.Model, msg *protocol.Message) tea.Cmd {
 
 	// 用服务器快照覆盖本地状态，避免显示掉线前的过期数据
 	restoreGameState(m, payload.GameState)
-	if payload.GameState.Phase == "bidding" {
+	switch payload.GameState.Phase {
+	case "dealing":
 		m.SetPhase(model.PhaseBidding)
-	} else {
+		m.Game().SetBidTurn("")
+		m.Game().State().BidToken = ""
+		m.Game().State().DealID = payload.GameState.DealID
+		m.Game().SetTimerDuration(0)
+		m.Input().Placeholder = "正在发牌，等待叫地主..."
+		m.Input().Blur()
+	case "bidding":
+		m.SetPhase(model.PhaseBidding)
+	default:
 		m.SetPhase(model.PhasePlaying)
 	}
 	return nil

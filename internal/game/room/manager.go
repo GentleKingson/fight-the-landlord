@@ -277,7 +277,7 @@ func (rm *RoomManager) GetActiveGamesCount() int {
 		// 只统计正在游戏中的房间（叫地主、出牌）
 		// RoomStateEnded 不计入，因为游戏已结束只是等待清理
 		switch room.State {
-		case RoomStateBidding, RoomStatePlaying:
+		case RoomStateDealing, RoomStateBidding, RoomStatePlaying:
 			count++
 		}
 		room.mu.RUnlock()

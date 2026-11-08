@@ -2,6 +2,7 @@ package session
 
 import (
 	"cmp"
+	"crypto/rand"
 	"slices"
 	"time"
 
@@ -23,6 +24,16 @@ import (
 func (gs *GameSession) HandleBid(playerID string, bid bool) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	return gs.handleBidLocked(playerID, bid, "")
+}
+
+// HandleBidTurn validates the wire token under the same lock as the decision.
+func (gs *GameSession) HandleBidTurn(playerID string, bid bool, token string) error {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	if token == "" || token != gs.bidToken {
+		return apperrors.ErrNotYourTurn
+	}
 	return gs.handleBidLocked(playerID, bid, "")
 }
 
@@ -170,10 +181,12 @@ func (gs *GameSession) setLandlord(idx int) {
 
 // notifyBidTurn 通知当前玩家叫/抢地主
 func (gs *GameSession) notifyBidTurn() {
+	gs.bidToken = rand.Text()
 	gs.decisionStarted = time.Now()
 	gs.turnID++
 	player := gs.players[gs.currentBidder]
 	gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
+		BidToken:   gs.bidToken,
 		PlayerID:   player.ID,
 		Timeout:    gs.gameConfig.BidTimeout,
 		IsGrab:     gs.landlordCaller != -1,

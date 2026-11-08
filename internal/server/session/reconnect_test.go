@@ -67,6 +67,7 @@ func TestReconnectSnapshotPrecedesConcurrentGameOver(t *testing.T) {
 	}
 	gs := NewGameSession(r, nil, cfg)
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 	t.Cleanup(gs.StopAllTimers)
 	client := &reconnectClient{SimpleClient: testutil.NewSimpleClient("p1", "P1"), snapshot: make(chan struct{}), release: make(chan struct{})}
 	client.SetRoom(r.Code)

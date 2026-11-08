@@ -42,9 +42,10 @@ func (c *Client) CancelReady() error {
 }
 
 // Bid 叫地主
-func (c *Client) Bid(bid bool) error {
+func (c *Client) Bid(bid bool, token string) error {
 	return c.SendMessage(codec.MustNewMessage(protocol.MsgBid, protocol.BidPayload{
-		Bid: bid,
+		BidToken: token,
+		Bid:      bid,
 	}))
 }
 

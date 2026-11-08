@@ -65,7 +65,8 @@ func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Mess
 	case protocol.MsgBid:
 		p := payload.(protocol.BidPayload)
 		return &pb.BidPayload{
-			Bid: p.Bid,
+			BidToken: p.BidToken,
+			Bid:      p.Bid,
 		}, true
 	case protocol.MsgPlayCards:
 		p := payload.(protocol.PlayCardsPayload)
@@ -229,12 +230,17 @@ func encodeServerGameMessages(msgType protocol.MessageType, payload any) (proto.
 	case protocol.MsgDealCards:
 		p := payload.(protocol.DealCardsPayload)
 		return &pb.DealCardsPayload{
+			DealId:      p.DealID,
+			DealStartAt: p.DealStartAt,
+			DealEndAt:   p.DealEndAt,
+			ServerTime:  p.ServerTime,
 			Cards:       convert.CardsToProto(p.Cards),
 			BottomCards: convert.CardsToProto(p.BottomCards),
 		}, true
 	case protocol.MsgBidTurn:
 		p := payload.(protocol.BidTurnPayload)
 		return &pb.BidTurnPayload{
+			BidToken:   p.BidToken,
 			PlayerId:   p.PlayerID,
 			Timeout:    int64(p.Timeout),
 			IsGrab:     p.IsGrab,

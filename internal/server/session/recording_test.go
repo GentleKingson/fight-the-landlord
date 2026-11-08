@@ -24,6 +24,7 @@ func recordingGame(t *testing.T) *GameSession {
 	r.PlayerOrder = []string{"private-p1", "p2", "p3"}
 	gs := NewGameSession(r, nil, config.GameConfig{TurnTimeout: 600, BidTimeout: 600, CollectTrainingData: true, TrainingDataDir: t.TempDir()})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 	t.Cleanup(gs.StopAllTimers)
 	return gs
 }
@@ -102,6 +103,7 @@ func TestRecordingRedealAbortAndDisabled(t *testing.T) {
 	require.Len(t, paths, 2)
 	gs.gameConfig.CollectTrainingData = false
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 	require.Nil(t, gs.recording)
 }
 

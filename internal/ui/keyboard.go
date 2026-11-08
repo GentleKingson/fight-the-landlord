@@ -417,9 +417,9 @@ func handleBiddingEnter(m model.Model, input string) tea.Cmd {
 	if m.Game().BidTurn() == m.PlayerID() {
 		switch strings.ToLower(input) {
 		case "y", "yes", "1":
-			_ = m.Client().Bid(true)
+			_ = m.Client().Bid(true, m.Game().State().BidToken)
 		case "n", "no", "0":
-			_ = m.Client().Bid(false)
+			_ = m.Client().Bid(false, m.Game().State().BidToken)
 		}
 	}
 	return nil

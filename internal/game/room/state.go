@@ -11,6 +11,7 @@ const (
 	RoomStateBidding
 	RoomStatePlaying
 	RoomStateEnded
+	RoomStateDealing
 )
 
 // SetState synchronizes game-session transitions with room cleanup and listing.

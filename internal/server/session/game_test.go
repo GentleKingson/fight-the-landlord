@@ -28,6 +28,7 @@ func TestHandleBid_Success(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// 叫地主的玩家
 	caller := gs.players[gs.currentBidder]
@@ -60,6 +61,7 @@ func TestHandleBid_Grab_DoublesMultiplier(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// 叫地主
 	caller := gs.players[gs.currentBidder]
@@ -92,6 +94,7 @@ func TestHandleBid_AllGrab_EndsAfterOneRound(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// A 叫地主，随后 B、C、A 依次抢（每人最多一次），抢地主必须结束，倍数不会无限翻倍
 	caller := gs.players[gs.currentBidder]
@@ -125,6 +128,7 @@ func TestHandleBid_NotYourTurn(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// Try to bid with wrong player
 	wrongPlayer := gs.players[(gs.currentBidder+1)%3]
@@ -160,6 +164,7 @@ func TestHandleBid_AllPass_Redeal(t *testing.T) {
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	t.Cleanup(gs.StopAllTimers)
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 	assertRoundCards(t, gs, false)
 
 	// 所有玩家都不叫 → 流局重新发牌
@@ -168,7 +173,9 @@ func TestHandleBid_AllPass_Redeal(t *testing.T) {
 		require.NoError(t, gs.HandleBid(currentBidder.ID, false))
 	}
 
-	// 重新发牌后仍处于叫地主阶段，无人成为地主，状态被重置
+	require.Equal(t, GameStateDealing, gs.state)
+	gs.finishDeal(gs.dealID)
+	// 重新发牌后进入叫地主阶段，无人成为地主，状态被重置
 	assert.Equal(t, GameStateBidding, gs.state)
 	assert.Equal(t, -1, gs.landlordCaller)
 	assert.Equal(t, 0, gs.bidPasses)
@@ -192,6 +199,7 @@ func TestHandlePlayCards_Success(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// Set landlord and start playing
 	gs.mu.Lock()
@@ -231,6 +239,7 @@ func TestHandlePlayCards_NotYourTurn(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	gs.mu.Lock()
 	gs.state = GameStatePlaying
@@ -253,6 +262,7 @@ func TestHandlePlayCards_InvalidCards(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	gs.mu.Lock()
 	gs.state = GameStatePlaying
@@ -282,6 +292,7 @@ func TestHandlePass_Success(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	gs.mu.Lock()
 	gs.state = GameStatePlaying
@@ -309,6 +320,7 @@ func TestHandlePass_MustPlay(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	gs.mu.Lock()
 	gs.state = GameStatePlaying
@@ -332,6 +344,7 @@ func TestHandlePass_TwoPassesNewRound(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	gs.mu.Lock()
 	gs.state = GameStatePlaying
@@ -491,9 +504,11 @@ func TestHandleBid_RepeatedRedealsNeverForceLandlord(t *testing.T) {
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	t.Cleanup(gs.StopAllTimers)
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// 超过旧的三次流局阈值，仍必须每次重新发牌和叫地主。
 	for round := range 6 {
+		gs.finishDeal(gs.dealID)
 		require.Equal(t, GameStateBidding, gs.state)
 		assert.Equal(t, round, gs.redealCount)
 		assertRoundCards(t, gs, false)
@@ -513,6 +528,8 @@ func TestHandleBid_RepeatedRedealsNeverForceLandlord(t *testing.T) {
 		}
 	}
 
+	require.Equal(t, GameStateDealing, gs.state)
+	gs.finishDeal(gs.dealID)
 	assert.Equal(t, GameStateBidding, gs.state)
 	assert.Equal(t, 6, gs.redealCount)
 	assert.Equal(t, 1, gs.bidMultiplier)

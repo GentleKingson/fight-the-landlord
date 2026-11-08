@@ -45,12 +45,18 @@ message GameStartPayload {
 
 // DealCardsPayload 发牌通知
 message DealCardsPayload {
+  string deal_id = 3;
+  int64 deal_start_at = 4;
+  int64 deal_end_at = 5;
+  int64 server_time = 6;
+
   repeated CardInfo cards = 1;
   repeated CardInfo bottom_cards = 2;
 }
 
 // BidTurnPayload 轮到叫地主通知
 message BidTurnPayload {
+  string bid_token = 5;
   string player_id = 1;
   int64 timeout = 2;
   bool is_grab = 3;     // true=抢地主阶段, false=叫地主阶段

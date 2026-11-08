@@ -53,6 +53,7 @@ func TestRejectedLeaveKeepsRedealAndRecordingUsable(t *testing.T) {
 	}
 	gs := NewGameSession(r, nil, cfg)
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 	t.Cleanup(gs.StopAllTimers)
 	require.ErrorIs(t, rm.LeaveRoom(clients[gs.currentBidder]), apperrors.ErrGameStarted)
 	for range 3 {

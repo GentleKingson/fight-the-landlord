@@ -44,7 +44,7 @@ func (h *Handler) handleBid(client types.ClientInterface, msg *protocol.Message)
 		return
 	}
 
-	if err := gameSession.HandleBid(client.GetID(), payload.Bid); err != nil {
+	if err := gameSession.HandleBidTurn(client.GetID(), payload.Bid, payload.BidToken); err != nil {
 		sendGameError(client, err)
 	}
 }

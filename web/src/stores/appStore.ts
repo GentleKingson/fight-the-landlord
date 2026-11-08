@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { MsgType, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
+import { MsgType, type DealTiming, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
 
 interface ConnectionSlice {
@@ -26,7 +26,11 @@ interface LobbySlice {
   roomList: RoomListItem[];
 }
 
+export interface DealStage { id: string; startAt: number; endAt: number }
+
 interface TableSlice {
+  deal: DealStage | null;
+  bidToken: string;
   hand: CardInfo[];
   bottomCards: CardInfo[];
   bottomCardsRevealed: boolean;
@@ -94,6 +98,8 @@ interface AppActions {
 export type AppState = ConnectionSlice & LobbySlice & TableSlice & UiSlice & AppActions;
 
 const initialTable: TableSlice = {
+  deal: null,
+  bidToken: '',
   hand: [],
   bottomCards: [],
   bottomCardsRevealed: false,
@@ -180,7 +186,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO };
         persistReconnect(payload.player_id, state.reconnectToken);
         if (payload.game_state) {
-          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
+          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state, state.multiplier) });
         } else {
           set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
         }
@@ -230,27 +236,30 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.GameStart: {
         const payload = message.payload as { players: PlayerInfo[] };
-        set({ ...initialTable, players: normalizeGamePlayers(payload.players ?? [], state.playerId), phase: 'bidding', selectedCards: new Set() });
+        set({ ...initialTable, players: normalizeGamePlayers(payload.players ?? [], state.playerId), phase: 'dealing', selectedCards: new Set() });
         break;
       }
       case MsgType.DealCards: {
-        const payload = message.payload as { cards: CardInfo[]; bottom_cards: CardInfo[] };
+        const payload = message.payload as DealTiming & { cards: CardInfo[]; bottom_cards: CardInfo[] };
         const hand = sortCards(payload.cards ?? []);
+        const deal = restoreDeal(payload);
+        if (deal && state.deal?.id === deal.id) break;
         set({
+          ...(deal ? { ...initialTable, deal, phase: 'dealing' as const, selectedCards: new Set<string>(), tableMessage: '' } : {}),
           hand,
           bottomCards: payload.bottom_cards ?? [],
           bottomCardsRevealed: hand.length === 20 && state.bottomCardsRevealed,
           seatActions: {},
           selectedCards: new Set(),
           recentActions: hand.length === 17 ? [] : state.recentActions,
-          players: syncDealtCounts(state.players, state.playerId, hand.length),
+          players: syncDealtCounts(deal ? state.players.map(player => ({ ...player, is_landlord: false, cards_count: 17 })) : state.players, state.playerId, hand.length),
           cardCounter: initialCounter(hand)
         });
         break;
       }
       case MsgType.BidTurn: {
-        const payload = message.payload as { player_id: string; timeout: number; is_grab: boolean; multiplier: number };
-        set({ phase: 'bidding', currentTurn: payload.player_id, timeout: payload.timeout, isGrabTurn: payload.is_grab, multiplier: payload.multiplier || 1, timerStart: Date.now(), tableMessage: '' });
+        const payload = message.payload as { bid_token?: string; player_id: string; timeout: number; is_grab: boolean; multiplier: number };
+        set({ deal: null, bidToken: payload.bid_token ?? '', phase: 'bidding', currentTurn: payload.player_id, timeout: payload.timeout, isGrabTurn: payload.is_grab, multiplier: payload.multiplier || 1, timerStart: Date.now(), tableMessage: '' });
         break;
       }
       case MsgType.BidResult: {
@@ -282,7 +291,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayTurn: {
         const payload = message.payload as { player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
-        set({ phase: 'playing', currentTurn: payload.player_id, timeout: payload.timeout, mustPlay: payload.must_play, canBeat: payload.can_beat, timerStart: Date.now(), tableMessage: '' });
+        set({ deal: null, bidToken: '', phase: 'playing', currentTurn: payload.player_id, timeout: payload.timeout, mustPlay: payload.must_play, canBeat: payload.can_beat, timerStart: Date.now(), tableMessage: '' });
         break;
       }
       case MsgType.CardPlayed: {
@@ -321,7 +330,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.GameOver: {
         const payload = message.payload as { winner_id: string; winner_name: string; is_landlord: boolean; multiplier: number; scores: PlayerScore[]; player_hands: PlayerHand[] };
-        set({ phase: 'game_over', winnerId: payload.winner_id, winnerName: payload.winner_name, winnerIsLandlord: payload.is_landlord, finalMultiplier: payload.multiplier, scores: payload.scores ?? [], playerHands: payload.player_hands ?? [], drawer: 'none' });
+        set({ deal: null, bidToken: '', phase: 'game_over', winnerId: payload.winner_id, winnerName: payload.winner_name, winnerIsLandlord: payload.is_landlord, finalMultiplier: payload.multiplier, scores: payload.scores ?? [], playerHands: payload.player_hands ?? [], drawer: 'none' });
         break;
       }
       case MsgType.StatsResult:
@@ -434,15 +443,20 @@ function syncLandlordCounts(players: PlayerInfo[], currentPlayerId: string, land
   });
 }
 
-function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
-  const isPlaying = dto.phase !== 'bidding';
+function restoreSnapshot(dto: GameStateDTO, knownMultiplier: number): Partial<AppState> {
+  const isPlaying = dto.phase === 'playing' || dto.phase === 'ended';
   const hasLandlord = (dto.players ?? []).some((player) => player.is_landlord);
   const hand = sortCards(dto.hand ?? []);
   const seatActions = dto.last_played?.length && dto.last_player_id
     ? { [dto.last_player_id]: { type: 'play' as const, player_id: dto.last_player_id, cards: dto.last_played } }
     : {};
   return {
-    phase: dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : 'lobby',
+    ...initialTable,
+    // Playing snapshots and turn replays omit the multiplier; retain the known value.
+    multiplier: isPlaying ? knownMultiplier : initialTable.multiplier,
+    deal: dto.phase === 'dealing' ? restoreDeal(dto) : null,
+    selectedCards: new Set(),
+    phase: dto.phase === 'dealing' ? 'dealing' : dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : 'lobby',
     players: [...(dto.players ?? [])].sort((a, b) => a.seat - b.seat),
     hand,
     bottomCards: dto.bottom_cards ?? [],
@@ -458,9 +472,16 @@ function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
     seatActions,
     mustPlay: dto.must_play,
     canBeat: dto.can_beat,
-    cardCounter: dto.phase === 'bidding' ? initialCounter(dto.hand ?? []) : {},
+    cardCounter: dto.phase === 'dealing' || dto.phase === 'bidding' ? initialCounter(hand) : {},
     recentActions: dto.last_played?.length ? [{ type: 'play', player_id: dto.last_player_id, cards: dto.last_played, label: '上一手' }] : []
   };
+}
+
+// Translate server times once on receipt; wall-clock differences do not restart deals.
+export function restoreDeal(timing: DealTiming): DealStage | null {
+  if (!timing.deal_id || !timing.deal_start_at || !timing.deal_end_at || !timing.server_time) return null;
+  const offset = Date.now() - timing.server_time;
+  return { id: timing.deal_id, startAt: timing.deal_start_at + offset, endAt: timing.deal_end_at + offset };
 }
 
 function pushAction(actions: TableAction[], action: TableAction): TableAction[] {

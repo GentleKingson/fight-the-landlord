@@ -59,6 +59,8 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 	}
 	phase := "waiting"
 	switch gs.state {
+	case GameStateDealing:
+		phase = "dealing"
 	case GameStateBidding:
 		phase = "bidding"
 	case GameStatePlaying:
@@ -80,10 +82,14 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 		lastPlayerID = gs.players[gs.lastPlayerIdx].ID
 	}
 	bottomCards := gs.bottomCards
-	if gs.state == GameStateBidding {
+	if gs.state == GameStateBidding || gs.state == GameStateDealing {
 		bottomCards = nil
 	}
 	return &protocol.GameStateDTO{
+		DealID:       gs.dealID,
+		DealStartAt:  gs.dealStartAt.UnixMilli(),
+		DealEndAt:    gs.dealEndAt.UnixMilli(),
+		ServerTime:   time.Now().UnixMilli(),
 		Phase:        phase,
 		Players:      players,
 		Hand:         convert.CardsToInfos(hand),
@@ -109,6 +115,7 @@ func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 	case GameStateBidding:
 		player := gs.players[gs.currentBidder]
 		client.SendMessage(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
+			BidToken:   gs.bidToken,
 			PlayerID:   player.ID,
 			Timeout:    gs.remainingTurnSeconds(gs.gameConfig.BidTimeout),
 			IsGrab:     gs.landlordCaller != -1,

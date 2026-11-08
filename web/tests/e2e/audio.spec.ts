@@ -47,7 +47,7 @@ test('the final hand completes before the full settlement clip in a real AudioCo
   expect(clips[2].end - clips[2].start).toBeGreaterThan(3900);
 });
 
-test('a live deal followed immediately by the local bid turn plays both clips', async ({ page }) => {
+test('a live deal completes before the authoritative bid turn plays its cue', async ({ page }) => {
   await page.goto('/?demo=table');
   await page.getByRole('button', { name: '聊天', exact: true }).click();
   await page.evaluate(`(async () => {
@@ -73,7 +73,7 @@ test('a live deal followed immediately by the local bid turn plays both clips', 
     } });
     receive('game_start', { players: useAppStore.getState().players });
     receive('deal_cards', { cards: Array.from({ length: 17 }, (_, i) => ({ rank: i % 13 + 3, suit: 0, color: 0 })) });
-    receive('bid_turn', { player_id: useAppStore.getState().playerId, timeout: 15, is_grab: false, multiplier: 1 });
+    setTimeout(() => receive('bid_turn', { player_id: useAppStore.getState().playerId, timeout: 15, is_grab: false, multiplier: 1 }), 4200);
   })()`);
   await page.waitForFunction('window.audioProbe.length === 2 && window.audioProbe.every(clip => clip.end !== null)');
   const clips = await page.evaluate<{ start: number; end: number; duration: number }[]>('window.audioProbe');
