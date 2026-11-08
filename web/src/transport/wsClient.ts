@@ -7,6 +7,7 @@ type Listener = (message: IncomingMessage) => void;
 export class GameSocket {
   private socket: WebSocket | null = null;
   private heartbeat: number | null = null;
+  private heartbeatsSinceOnlineCount = 0;
   private reconnectTimer: number | null = null;
   private intentionalClose = false;
   private readonly listeners = new Set<Listener>();
@@ -105,12 +106,17 @@ export class GameSocket {
     this.stopHeartbeat();
     this.heartbeat = window.setInterval(() => {
       this.send(MsgType.Ping, { timestamp: Date.now() });
+      if (++this.heartbeatsSinceOnlineCount === 2) {
+        this.send(MsgType.GetOnlineCount);
+        this.heartbeatsSinceOnlineCount = 0;
+      }
     }, 5000);
   }
 
   private stopHeartbeat(): void {
-    if (this.heartbeat) window.clearInterval(this.heartbeat);
+    if (this.heartbeat !== null) window.clearInterval(this.heartbeat);
     this.heartbeat = null;
+    this.heartbeatsSinceOnlineCount = 0;
   }
 }
 

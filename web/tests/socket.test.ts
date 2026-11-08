@@ -21,6 +21,99 @@ class FakeSocket {
 
 beforeEach(() => { sessionStorage.clear(); vi.stubGlobal('WebSocket', FakeSocket); });
 
+const sentTypes = (socket: FakeSocket) => socket.sent.map((data) => decodeMessage(data).type);
+
+test('opening queries online count immediately and applies online_count responses', () => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  const transport = FakeSocket.latest;
+  expect(transport.sent).toHaveLength(0);
+  expect(vi.getTimerCount()).toBe(0);
+  transport.onopen?.();
+  expect(sentTypes(transport)).toEqual(['get_online_count', 'get_maintenance_status']);
+  expect(vi.getTimerCount()).toBe(1);
+  for (const count of [12, 8, 0]) {
+    transport.receive('online_count', { count });
+    expect(useAppStore.getState().onlineCount).toBe(count);
+  }
+  socket.close();
+});
+
+test('queries online count every two five-second heartbeats using one timer', () => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  const transport = FakeSocket.latest;
+  transport.onopen?.();
+  transport.sent = [];
+  for (let cycle = 0; cycle < 3; cycle++) {
+    vi.advanceTimersByTime(5000);
+    expect(sentTypes(transport)).toEqual(['ping']);
+    expect(decodeMessage(transport.sent[0]).payload).toMatchObject({ timestamp: Date.now() });
+    vi.advanceTimersByTime(4999);
+    expect(sentTypes(transport)).toEqual(['ping']);
+    vi.advanceTimersByTime(1);
+    expect(sentTypes(transport)).toEqual(['ping', 'ping', 'get_online_count']);
+    expect(vi.getTimerCount()).toBe(1);
+    transport.sent = [];
+  }
+  socket.close();
+});
+
+test.each(['manual', 'replaced', 'network'])('%s disconnect stops heartbeat queries and close cancels retries', (reason) => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  const transport = FakeSocket.latest;
+  transport.onopen?.();
+  vi.advanceTimersByTime(5000);
+  if (reason === 'manual') socket.close();
+  else transport.close(reason === 'replaced' ? 4001 : 1006);
+  expect(useAppStore.getState().connected).toBe(false);
+  expect(vi.getTimerCount()).toBe(reason === 'network' ? 1 : 0);
+  const messagesBeforeClose = sentTypes(transport);
+  socket.close();
+  expect(vi.getTimerCount()).toBe(0);
+  vi.advanceTimersByTime(20000);
+  expect(sentTypes(transport)).toEqual(messagesBeforeClose);
+  expect(FakeSocket.latest).toBe(transport);
+});
+
+test('reconnect queries immediately and restarts the full heartbeat cycle without duplicate timers', () => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  let transport = FakeSocket.latest;
+  transport.onopen?.();
+  for (let cycle = 0; cycle < 2; cycle++) {
+    vi.advanceTimersByTime(5000);
+    transport.close(1006);
+    const previous = transport;
+    const previousMessages = sentTypes(previous);
+    vi.advanceTimersByTime(2500);
+    transport = FakeSocket.latest;
+    expect(transport).not.toBe(previous);
+    vi.advanceTimersByTime(10000);
+    expect(sentTypes(previous)).toEqual(previousMessages);
+    expect(transport.sent).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    transport.onopen?.();
+    socket.connect();
+    expect(FakeSocket.latest).toBe(transport);
+    expect(sentTypes(transport)).toEqual(['get_online_count', 'get_maintenance_status']);
+    expect(vi.getTimerCount()).toBe(1);
+    transport.sent = [];
+    vi.advanceTimersByTime(5000);
+    expect(sentTypes(transport)).toEqual(['ping']);
+    vi.advanceTimersByTime(5000);
+    expect(sentTypes(transport)).toEqual(['ping', 'ping', 'get_online_count']);
+    expect(vi.getTimerCount()).toBe(1);
+  }
+  socket.close();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 test('reload and repeated reconnect preserve the original identity and token', () => {
   sessionStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'old', token: 'old-token' }));
   const socket = new GameSocket('ws://localhost/ws');
