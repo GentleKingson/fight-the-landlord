@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"log"
-	"math/rand/v2"
 	"slices"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
@@ -12,6 +11,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
+	"github.com/palemoky/fight-the-landlord/internal/securerand"
 )
 
 // Start 开始游戏
@@ -38,7 +38,8 @@ func (gs *GameSession) startBiddingRound() {
 	gs.room.SetState(RoomStateBidding)
 
 	// 随机选择第一个叫地主的玩家
-	gs.currentBidder = rand.IntN(3)
+	rng := securerand.New()
+	gs.currentBidder = rng.IntN(3)
 
 	// 通知叫地主
 	gs.notifyBidTurn()
@@ -81,7 +82,8 @@ func (gs *GameSession) redeal() {
 	if gs.redealCount >= maxRedeals {
 		log.Printf("🔄 房间 %s 连续 %d 次流局，重新发牌并随机强制指定地主", gs.room.Code, gs.redealCount)
 		gs.dealNewRound()
-		gs.setLandlord(rand.IntN(3))
+		rng := securerand.New()
+		gs.setLandlord(rng.IntN(3))
 		return
 	}
 

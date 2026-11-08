@@ -2,8 +2,9 @@ package card
 
 import (
 	"fmt"
-	"math/rand/v2"
 	"strconv"
+
+	"github.com/palemoky/fight-the-landlord/internal/securerand"
 )
 
 // Suit 定义花色
@@ -143,7 +144,8 @@ func NewDeck() Deck {
 }
 
 func (d Deck) Shuffle() {
-	rand.Shuffle(len(d), func(i, j int) {
+	rng := securerand.New()
+	rng.Shuffle(len(d), func(i, j int) {
 		d[i], d[j] = d[j], d[i]
 	})
 }

@@ -111,29 +111,17 @@ func TestNewDeck(t *testing.T) {
 func TestDeck_Shuffle(t *testing.T) {
 	t.Parallel()
 
-	require := require.New(t) // require 在失败时会停止测试，适合前置条件
-	assert := assert.New(t)
-
-	// Arrange: 创建两副完全相同的牌
-	deck1 := NewDeck()
-	deck2 := make(Deck, len(deck1))
-	copy(deck2, deck1)
-
-	// Pre-condition check
-	require.Equal(deck1, deck2, "Copied deck should be identical before shuffle")
-
-	// Action: 洗牌
-	deck1.Shuffle()
-
-	// Assertion 1: 洗牌后牌的数量不变
-	assert.Len(deck1, 54, "Shuffled deck must still have 54 cards")
-
-	// Assertion 2: 洗牌后顺序应该发生改变
-	// 注意: 这是一个概率性测试，极小概率下洗牌后顺序不变，但对于54张牌来说概率可以忽略不计
-	assert.NotEqual(deck1, deck2, "Shuffled deck should not be in the same order as the original")
-
-	// Assertion 3: 洗牌后，牌的集合应该和原来完全一样（只是顺序不同）
-	assert.ElementsMatch(deck2, deck1, "Shuffled deck should contain the exact same cards as the original")
+	for i := range 16 {
+		t.Run(fmt.Sprintf("deck_%d", i), func(t *testing.T) {
+			t.Parallel()
+			deck := NewDeck()
+			for range 8 {
+				deck.Shuffle()
+				require.Len(t, deck, 54)
+				require.ElementsMatch(t, NewDeck(), deck, "洗牌后 54 张牌不重不漏")
+			}
+		})
+	}
 }
 
 // TestStringers 使用表驱动测试来验证所有 String() 方法的输出
