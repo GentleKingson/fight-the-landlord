@@ -2,6 +2,45 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { MsgType } from '../src/protocol/types';
 import { useAppStore } from '../src/stores/appStore';
 
+describe('reconnect preserves recoverable table state', () => {
+  beforeEach(() => useAppStore.getState().leaveLocalRoom());
+
+  it.each([1, 4, 8])('keeps the known x%i multiplier through a playing snapshot and turn replay', (multiplier) => {
+    useAppStore.setState({ playerId: 'farmer', phase: 'playing', multiplier });
+    const receive = useAppStore.getState().handleMessage;
+    receive({ type: MsgType.Reconnected, payload: {
+      player_id: 'farmer', game_state: { phase: 'playing', players: [], hand: [] }
+    } });
+    expect(useAppStore.getState().multiplier).toBe(multiplier);
+    receive({ type: MsgType.PlayTurn, payload: { player_id: 'landlord', timeout: 30, must_play: true, can_beat: true } });
+    expect(useAppStore.getState().multiplier).toBe(multiplier);
+  });
+
+  it.each(['dealing', 'bidding'])('initializes a farmer counter on %s reconnect and deducts later plays', (phase) => {
+    const hand = Array.from({ length: 17 }, (_, i) => ({ suit: i % 4, rank: 3 + Math.floor(i / 4), color: 0 }));
+    useAppStore.setState({ playerId: 'farmer', multiplier: 4, cardCounter: {} });
+    const receive = useAppStore.getState().handleMessage;
+    receive({ type: MsgType.Reconnected, payload: {
+      player_id: 'farmer', game_state: { phase, players: [], hand, bottom_cards: [] }
+    } });
+    expect(useAppStore.getState().multiplier).toBe(1);
+    expect(useAppStore.getState().cardCounter[3]).toBe(0);
+    expect(useAppStore.getState().cardCounter[7]).toBe(3);
+    expect(useAppStore.getState().cardCounter[17]).toBe(1);
+    expect(Object.values(useAppStore.getState().cardCounter).reduce((sum, count) => sum + count, 0)).toBe(37);
+    receive({ type: MsgType.BidTurn, payload: { player_id: 'landlord', timeout: 15, multiplier: 1 } });
+    receive({ type: MsgType.Landlord, payload: {
+      player_id: 'landlord', bottom_cards: [{ suit: 3, rank: 7, color: 1 }], multiplier: 2
+    } });
+    receive({ type: MsgType.PlayTurn, payload: { player_id: 'landlord', timeout: 30, must_play: true, can_beat: true } });
+    receive({ type: MsgType.CardPlayed, payload: {
+      player_id: 'landlord', cards: [{ suit: 3, rank: 7, color: 1 }], cards_left: 19, hand_type: '单张'
+    } });
+    expect(useAppStore.getState().cardCounter[7]).toBe(2);
+    expect(Object.values(useAppStore.getState().cardCounter).reduce((sum, count) => sum + count, 0)).toBe(36);
+  });
+});
+
 describe('app store message flow', () => {
   beforeEach(() => {
     sessionStorage.clear();

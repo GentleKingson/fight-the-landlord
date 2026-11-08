@@ -186,7 +186,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO };
         persistReconnect(payload.player_id, state.reconnectToken);
         if (payload.game_state) {
-          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
+          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state, state.multiplier) });
         } else {
           set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
         }
@@ -443,7 +443,7 @@ function syncLandlordCounts(players: PlayerInfo[], currentPlayerId: string, land
   });
 }
 
-function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
+function restoreSnapshot(dto: GameStateDTO, knownMultiplier: number): Partial<AppState> {
   const isPlaying = dto.phase === 'playing' || dto.phase === 'ended';
   const hasLandlord = (dto.players ?? []).some((player) => player.is_landlord);
   const hand = sortCards(dto.hand ?? []);
@@ -452,6 +452,8 @@ function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
     : {};
   return {
     ...initialTable,
+    // Playing snapshots and turn replays omit the multiplier; retain the known value.
+    multiplier: isPlaying ? knownMultiplier : initialTable.multiplier,
     deal: dto.phase === 'dealing' ? restoreDeal(dto) : null,
     selectedCards: new Set(),
     phase: dto.phase === 'dealing' ? 'dealing' : dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : 'lobby',
@@ -470,7 +472,7 @@ function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
     seatActions,
     mustPlay: dto.must_play,
     canBeat: dto.can_beat,
-    cardCounter: dto.phase === 'bidding' ? initialCounter(dto.hand ?? []) : {},
+    cardCounter: dto.phase === 'dealing' || dto.phase === 'bidding' ? initialCounter(hand) : {},
     recentActions: dto.last_played?.length ? [{ type: 'play', player_id: dto.last_player_id, cards: dto.last_played, label: '上一手' }] : []
   };
 }
