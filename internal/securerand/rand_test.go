@@ -43,7 +43,11 @@ func TestSourceFailure(t *testing.T) {
 		New().Uint64()
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestSourceFailure$")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	cmd := exec.Command(executable, "-test.run=^TestSourceFailure$")
 	cmd.Env = append(os.Environ(), "SECURERAND_TEST_FAILURE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
