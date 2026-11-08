@@ -38,7 +38,45 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install numpy
       - run: python -m unittest discover -s douzero/tests -v
-  test:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Keep in sync with .pre-commit-config.yaml.
+      GOLANGCI_LINT_VERSION: v2.11.1
+      # Cold installs use the Go module proxy, not GitHub Release assets.
+      GOPROXY: https://proxy.golang.org
+      GOSUMDB: sum.golang.org
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test CI tool installation
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Restore lint executable
+        id: lint-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ci-tools/golangci-lint
+          # Exact match only: never restore a different tool or compiler version.
+          key: lint-bin-v1-${{ runner.os }}-${{ runner.arch }}-go${{ steps.go.outputs.go-version }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ hashFiles('scripts/install-ci-lint.sh') }}
+      - name: Install and verify lint executable
+        run: bash scripts/install-ci-lint.sh "$GOLANGCI_LINT_VERSION" "$HOME/.cache/ci-tools/golangci-lint"
+      - name: Save verified lint executable
+        if: steps.lint-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ci-tools/golangci-lint
+          key: ${{ steps.lint-cache.outputs.cache-primary-key }}
+      - name: Run golangci-lint
+        run: |
+          golangci-lint config verify
+          golangci-lint run --build-tags=ci
+
+  go-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -60,13 +98,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
           restore-keys: ${{ runner.os }}-go-
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          # 版本须与 .pre-commit-config.yaml 保持一致，避免本地与 CI 结果不一致
-          version: v2.11.1
-          args: --build-tags=ci
-
       - name: Run tests
         # Use ci tag to skip sound tests/deps
         run: go test -tags=ci -race -p 4 -coverprofile=coverage.out -covermode=atomic ./...
@@ -86,3 +117,18 @@ jobs:
           files: ./coverage.out
           flags: unittests
           fail_ci_if_error: false
+
+  # Preserve the existing required check name. A failed/skipped/cancelled
+  # dependency must never turn into a green aggregate check.
+  test:
+    if: ${{ always() }}
+    needs: [lint, go-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require lint and Go tests
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.go-test.result }}
+        run: |
+          printf 'lint=%s, go-test=%s\n' "$LINT_RESULT" "$TEST_RESULT"
+          [[ "$LINT_RESULT" == success && "$TEST_RESULT" == success ]]

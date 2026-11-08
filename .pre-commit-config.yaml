@@ -17,7 +17,7 @@ repos:
         args: ["--maxkb=1000"]
 
   # Go linting with golangci-lint
-  # 版本须与 CI (.github/workflows/test.yml 的 golangci-lint-action) 保持一致，
+  # 版本须与 CI (.github/workflows/test.yml 的 GOLANGCI_LINT_VERSION) 保持一致，
   # 否则会出现"本地通过、CI 报错"的情况（不同版本的 linter 规则/阈值会变化）。
   - repo: https://github.com/golangci/golangci-lint
     rev: v2.11.1
