@@ -175,3 +175,40 @@ it('drops stale pending turns and recovers from a stalled decode', async () => {
   expect(spoken()).toHaveLength(1);
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+it.each([
+  ['fetch', 100], ['fetch', 1000], ['decode', 100], ['decode', 1000],
+] as const)('includes queue time when checking expiry after %s takes %i ms', async (stage, loadMs) => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  audio.play('单张', cards(3));
+  await flush();
+  audio.play('单张', cards(4));
+
+  if (stage === 'fetch') {
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
+      window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), loadMs);
+    }));
+  } else {
+    FakeContext.latest.decodeAudioData.mockImplementationOnce(() => new Promise(resolve => {
+      window.setTimeout(() => resolve({}), loadMs);
+    }));
+  }
+
+  // The second play has already waited 2.8 seconds before loading begins.
+  await vi.advanceTimersByTimeAsync(2800);
+  spoken()[0].onended?.();
+  await flush();
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.single_4, expect.anything());
+  await vi.advanceTimersByTimeAsync(loadMs);
+
+  const expired = loadMs === 1000;
+  expect(spoken()).toHaveLength(expired ? 1 : 2);
+  if (!expired) spoken()[1].onended?.();
+  await flush();
+  // Dropping an expired clip must not stop a subsequent fresh announcement.
+  audio.play('单张', cards(5));
+  await flush();
+  expect(spoken()).toHaveLength(expired ? 2 : 3);
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.single_5, expect.anything());
+});

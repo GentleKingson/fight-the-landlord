@@ -10,7 +10,7 @@ export class GameAudio {
   private context: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
   private listeners = new Set<() => void>();
-  private queue: { names: string[]; time: number }[] = [];
+  private queue: { names: string[]; expiresAt: number }[] = [];
   private generation = 0;
   private draining = false;
   private cancelClip: (() => void) | null = null;
@@ -54,7 +54,7 @@ export class GameAudio {
 
   play(handType: string, cards: CardInfo[]): void {
     if (!this.enabled || document.hidden || this.context?.state !== 'running') return;
-    this.queue.push({ names: cardSoundNames(handType, cards), time: Date.now() });
+    this.queue.push({ names: cardSoundNames(handType, cards), expiresAt: Date.now() + MAX_AGE_MS });
     // Keep rapid bot turns bounded; discard the oldest pending announcements.
     this.queue = this.queue.slice(-MAX_PENDING_PLAYS);
     if (!this.draining) void this.drain(this.generation);
@@ -73,10 +73,10 @@ export class GameAudio {
     try {
       while (generation === this.generation && this.queue.length) {
         const next = this.queue.shift()!;
-        if (Date.now() - next.time > MAX_AGE_MS) continue;
+        if (Date.now() > next.expiresAt) continue;
         for (const name of next.names) {
-          if (generation !== this.generation || Date.now() - next.time > MAX_AGE_MS) break;
-          await this.playClip(name, generation);
+          if (generation !== this.generation || Date.now() > next.expiresAt) break;
+          await this.playClip(name, generation, next.expiresAt);
         }
       }
     } finally {
@@ -84,7 +84,7 @@ export class GameAudio {
     }
   }
 
-  private async playClip(name: string, generation: number): Promise<void> {
+  private async playClip(name: string, generation: number, expiresAt: number): Promise<void> {
     const context = this.context!;
     const abort = new AbortController();
     let source: AudioBufferSourceNode | null = null;
@@ -113,6 +113,8 @@ export class GameAudio {
         this.buffers.set(name, buffer);
       }
       if (abort.signal.aborted || generation !== this.generation || context.state !== 'running') return;
+      // Queueing, downloading and decoding all share this hand's deadline.
+      if (Date.now() > expiresAt) return;
       source = context.createBufferSource();
       source.buffer = buffer;
       source.connect(context.destination);
