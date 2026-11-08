@@ -345,3 +345,44 @@ it('does not play a remaining-card alert for a hand that expired while loading',
   expect(spoken()).toHaveLength(1);
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+it('keeps the first turn cue after a 3.87-second deal while the server turn is still active', async () => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 3.87 });
+  audio.deal();
+  audio.turn(false, Date.now() + 15000);
+  await flush();
+  await vi.advanceTimersByTimeAsync(3870);
+  spoken()[0].onended?.();
+  await flush();
+  expect(spoken()).toHaveLength(2);
+  expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.turn, expect.anything());
+});
+
+it('drops the first turn cue if the turn ends before dealing finishes', async () => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 3.87 });
+  audio.deal();
+  audio.turn(false, Date.now() + 15000);
+  await flush();
+  await vi.advanceTimersByTimeAsync(1000);
+  audio.endTurn();
+  await vi.advanceTimersByTimeAsync(2870);
+  spoken()[0].onended?.();
+  await flush();
+  expect(spoken()).toHaveLength(1);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('does not start a turn cue whose server deadline passed during loading', async () => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
+    window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), 1000);
+  }));
+  audio.turn(true, Date.now() + 500);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(spoken()).toHaveLength(0);
+});

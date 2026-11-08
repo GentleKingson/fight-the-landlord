@@ -181,12 +181,13 @@ test.each(['bid_turn', 'play_turn'])('%s cues only the local player and warns on
   receive(type, { player_id: 'opponent', timeout: 10 });
   vi.advanceTimersByTime(10000);
   expect(audio.turn).not.toHaveBeenCalled();
+  const deadline = Date.now() + 10000;
   receive(type, { player_id: 'me', timeout: 10 });
-  expect(audio.turn).toHaveBeenCalledExactlyOnceWith();
+  expect(audio.turn).toHaveBeenCalledExactlyOnceWith(false, deadline);
   vi.advanceTimersByTime(4999);
   expect(audio.turn).toHaveBeenCalledTimes(1);
   vi.advanceTimersByTime(1);
-  expect(audio.turn).toHaveBeenLastCalledWith(true);
+  expect(audio.turn).toHaveBeenLastCalledWith(true, deadline);
   vi.advanceTimersByTime(4999);
   expect(audio.turn).toHaveBeenCalledTimes(2);
   audio.endTurn.mockClear();

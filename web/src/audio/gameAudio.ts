@@ -68,7 +68,10 @@ export class GameAudio {
 
   pass(): void { this.enqueue(['pass_buyao']); }
   deal(): void { this.enqueue(['deal'], 'event', 0.45); }
-  turn(warning = false): void { this.enqueue([warning ? 'warning' : 'turn'], 'turn', 0.3); }
+  turn(warning = false, expiresAt = Date.now() + MAX_AGE_MS): void {
+    // A turn remains relevant until the server deadline, even after a long deal.
+    this.enqueue([warning ? 'warning' : 'turn'], 'turn', 0.3, expiresAt);
+  }
 
   endTurn(): void {
     this.queue = this.queue.filter(item => item.kind !== 'turn');
@@ -82,9 +85,10 @@ export class GameAudio {
     this.enqueue([won ? 'win' : 'lose'], 'result', 0.6);
   }
 
-  private enqueue(names: string[], kind: AudioKind = 'event', volume = 1): void {
+  private enqueue(names: string[], kind: AudioKind = 'event', volume = 1,
+    expiresAt = Date.now() + (kind === 'result' ? 10000 : MAX_AGE_MS)): void {
     if (!this.enabled || document.hidden || this.context?.state !== 'running') return;
-    this.queue.push({ names, kind, volume, expiresAt: Date.now() + (kind === 'result' ? 10000 : MAX_AGE_MS) });
+    this.queue.push({ names, kind, volume, expiresAt });
     this.queue = this.queue.slice(-MAX_PENDING_PLAYS);
     if (!this.draining) void this.drain(this.generation);
   }

@@ -53,11 +53,11 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
         const restored = replayTurn?.type === message.type && replayTurn.playerId === payload.player_id;
         replayTurn = null;
         if (restored || payload.player_id !== state.playerId || payload.timeout <= 0 || document.hidden || !audio.getEnabled()) break;
-        audio.turn();
         const deadline = Date.now() + payload.timeout * 1000;
+        audio.turn(false, deadline);
         warningTimer = window.setTimeout(() => {
           // A throttled background timer must never announce an expired turn.
-          if (Date.now() < deadline) audio.turn(true);
+          if (Date.now() < deadline) audio.turn(true, deadline);
         }, Math.max(0, (payload.timeout - WARNING_SECONDS) * 1000));
         expiryTimer = window.setTimeout(endTurn, payload.timeout * 1000);
         break;
