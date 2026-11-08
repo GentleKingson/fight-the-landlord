@@ -106,6 +106,9 @@ func (e *DouZeroEngine) DecideBid(_ context.Context, _ string, hand []card.Card,
 }
 
 func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx GameContext) []card.Card {
+	if ctx.Err() != nil {
+		return nil
+	}
 	if !gctx.MustPlay && !gctx.CanBeat {
 		return nil
 	}
@@ -117,6 +120,9 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 
 	req := e.buildRequest(gctx)
 	action, err := e.callService(ctx, req)
+	if ctx.Err() != nil {
+		return nil // A cancelled turn must not trigger a fallback decision.
+	}
 	if err != nil {
 		log.Printf("🎮 [DouZero] %s: 服务错误: %v，回退规则出牌", botName, err)
 		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)

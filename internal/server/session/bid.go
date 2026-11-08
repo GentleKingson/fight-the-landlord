@@ -173,7 +173,7 @@ func (gs *GameSession) notifyBidTurn() {
 	gs.decisionStarted = time.Now()
 	gs.turnID++
 	player := gs.players[gs.currentBidder]
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
+	gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
 		PlayerID:   player.ID,
 		Timeout:    gs.gameConfig.BidTimeout,
 		IsGrab:     gs.landlordCaller != -1,

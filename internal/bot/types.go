@@ -23,9 +23,9 @@ type DecisionEngine interface {
 
 // SessionInterface 避免 session↔bot 循环依赖
 type SessionInterface interface {
-	HandleBid(playerID string, bid bool) error
-	HandlePlayCards(playerID string, cardInfos []protocol.CardInfo) error
-	HandlePass(playerID string) error
+	HandleBotBid(ctx context.Context, playerID string, turnID uint64, bid bool) error
+	// A nil card slice means pass. The session checks cancellation and turnID under its lock.
+	HandleBotPlay(ctx context.Context, playerID string, turnID uint64, cardInfos []protocol.CardInfo) error
 }
 
 // PlayRecord 一次出牌记录

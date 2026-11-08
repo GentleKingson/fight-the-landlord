@@ -114,6 +114,7 @@ func (gs *GameSession) deal() {
 
 // endGame 结束游戏
 func (gs *GameSession) endGame(winner *GamePlayer) {
+	gs.cancelBotTurn()
 	gs.finishRecording("completed", winner)
 	gs.state = GameStateEnded
 	gs.room.SetState(RoomStateEnded)
