@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
 test.each([
-  { width: 960, height: 540, budget: 10 * 1024 },
-  { width: 1600, height: 900, budget: 24 * 1024 },
-])('emerald background $width stays within its decoded size and payload budget', ({ width, height, budget }) => {
-  const bytes = readFileSync(new URL(`../src/assets/emerald-table-${width}.webp`, import.meta.url));
+  { name: '960', width: 960, height: 540, budget: 10 * 1024 },
+  { name: '1600', width: 1600, height: 900, budget: 24 * 1024 },
+  { name: 'portrait-900', width: 900, height: 1600, budget: 20 * 1024 },
+])('emerald background $name stays within its decoded size and payload budget', ({ name, width, height, budget }) => {
+  const bytes = readFileSync(new URL(`../src/assets/emerald-table-${name}.webp`, import.meta.url));
   expect(bytes.length).toBeLessThan(budget);
   expect(bytes.toString('ascii', 0, 4)).toBe('RIFF');
   expect(bytes.toString('ascii', 8, 12)).toBe('WEBP');

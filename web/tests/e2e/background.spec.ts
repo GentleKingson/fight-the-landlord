@@ -1,9 +1,31 @@
 import { expect, test, type Page } from '@playwright/test';
 
+function expectedAsset(page: Page) {
+  const { width, height } = page.viewportSize()!;
+  if (height >= width) return { name: 'portrait-900', dimensions: [900, 1600], budget: 20 * 1024 };
+  if (width > 960) return { name: '1600', dimensions: [1600, 900], budget: 24 * 1024 };
+  return { name: '960', dimensions: [960, 540], budget: 10 * 1024 };
+}
+
 async function expectPageBackground(page: Page) {
-  const width = page.viewportSize()!.width;
-  const size = width > 960 ? 1600 : 960;
-  await expect(page.locator('.app-shell')).toHaveCSS('background-image', new RegExp(`emerald-table-${size}`));
+  const { name } = expectedAsset(page);
+  const shell = page.locator('.app-shell');
+  if (name === 'portrait-900') {
+    await expect(shell).toHaveCSS('background-image', 'none');
+    const frame = await shell.evaluate(element => {
+      const css = getComputedStyle(element, '::before');
+      return { image: css.borderImageSource, slice: css.borderImageSlice,
+        pointerEvents: css.pointerEvents, zIndex: css.zIndex, position: css.position };
+    });
+    expect(frame.image).toContain('emerald-table-portrait-900');
+    expect(frame.slice).toBe('120 fill');
+    expect(frame.pointerEvents).toBe('none');
+    expect(frame.zIndex).toBe('-1');
+    expect(frame.position).toBe('absolute');
+  } else {
+    await expect(shell).toHaveCSS('background-image', new RegExp(`emerald-table-${name}`));
+    expect(await shell.evaluate(element => getComputedStyle(element, '::before').content)).toBe('none');
+  }
   await expect(page.locator('.app-shell')).toHaveCSS('background-color', 'rgb(0, 59, 41)');
   await expect(page.locator('.app-shell')).toHaveCSS('background-size', 'cover');
   await expect(page.locator('.app-shell')).toHaveCSS('background-position', '50% 50%');
@@ -21,19 +43,21 @@ test('page background loads one appropriately sized WebP and survives navigation
   const responsePromise = page.waitForResponse(response => response.url().includes('emerald-table-'));
   await page.goto('/?demo=lobby');
   const response = await responsePromise;
-  const size = page.viewportSize()!.width > 960 ? 1600 : 960;
+  const asset = expectedAsset(page);
   expect(response.ok()).toBe(true);
-  expect(response.url()).toContain(`emerald-table-${size}`);
+  expect(response.url()).toContain(`emerald-table-${asset.name}`);
   expect(response.headers()['content-type']).toContain('image/webp');
-  expect((await response.body()).byteLength).toBeLessThan(size === 1600 ? 24 * 1024 : 10 * 1024);
+  expect((await response.body()).byteLength).toBeLessThan(asset.budget);
   expect(imageRequests).toHaveLength(1);
   expect(await page.evaluate(async () => {
-    const css = getComputedStyle(document.querySelector('.app-shell')!);
+    const element = document.querySelector('.app-shell')!;
+    const css = getComputedStyle(element);
+    const source = css.backgroundImage === 'none' ? getComputedStyle(element, '::before').borderImageSource : css.backgroundImage;
     const image = new Image();
-    image.src = css.backgroundImage.slice(5, -2);
+    image.src = source.slice(5, -2);
     await image.decode();
     return [image.naturalWidth, image.naturalHeight];
-  })).toEqual(size === 1600 ? [1600, 900] : [960, 540]);
+  })).toEqual(asset.dimensions);
 
   await expectPageBackground(page);
   await page.getByRole('button', { name: '我的战绩', exact: true }).click();
@@ -83,15 +107,51 @@ test('failed background images retain a readable fallback without affecting layo
 });
 
 test('background selection follows the viewport through portrait and landscape resizing', async ({ page }) => {
+  await page.goto('/?demo=lobby');
   for (const viewport of [
     { width: 320, height: 568 },
     { width: 390, height: 844 },
     { width: 844, height: 390 },
     { width: 1440, height: 900 },
+    { width: 900, height: 1200 },
+    { width: 1200, height: 900 },
+    { width: 390, height: 844 },
   ]) {
     await page.setViewportSize(viewport);
-    await page.goto('/?demo=lobby');
     await expectPageBackground(page);
     await expect(page.getByRole('navigation', { name: '大厅导航' })).toBeInViewport({ ratio: 1 });
   }
+});
+
+test('portrait decoration paints all four gold corners on tall phones behind the content', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const image = page.waitForResponse(response => response.url().includes('emerald-table-portrait-900'));
+  await page.goto('/?demo=lobby');
+  expect((await image).ok()).toBe(true);
+  await expectPageBackground(page);
+  // Hide only the content for this paint check, retaining the real root and its
+  // pseudo-element. A cover crop or a frame painted behind the root would fail.
+  await page.addStyleTag({ content: '.app-shell > * { visibility: hidden !important; }' });
+  const screenshot = await page.screenshot({ animations: 'disabled', scale: 'css' });
+  const goldCounts = await page.evaluate(async base64 => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(image, 0, 0);
+    return [[0, 0], [canvas.width - 50, 0], [0, canvas.height - 50], [canvas.width - 50, canvas.height - 50]]
+      .map(([x, y]) => {
+        const pixels = context.getImageData(x, y, 50, 50).data;
+        let gold = 0;
+        for (let i = 0; i < pixels.length; i += 4) {
+          const [red, green, blue] = [pixels[i], pixels[i + 1], pixels[i + 2]];
+          if (red > 110 && green > 65 && blue < 150 && red > green * 1.1 && green > blue * 1.2) gold++;
+        }
+        return gold;
+      });
+  }, screenshot.toString('base64'));
+  for (const count of goldCounts) expect(count).toBeGreaterThan(20);
 });
