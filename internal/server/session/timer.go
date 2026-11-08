@@ -114,6 +114,7 @@ func (gs *GameSession) stopTimer() {
 func (gs *GameSession) StopAllTimers() {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	gs.stopDealTimer()
 	gs.state = GameStateEnded
 	gs.turnID++
 	gs.stopTimer()

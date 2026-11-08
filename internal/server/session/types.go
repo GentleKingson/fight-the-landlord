@@ -16,4 +16,5 @@ const (
 	RoomStateBidding = room.RoomStateBidding
 	RoomStatePlaying = room.RoomStatePlaying
 	RoomStateEnded   = room.RoomStateEnded
+	RoomStateDealing = room.RoomStateDealing
 )

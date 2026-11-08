@@ -20,7 +20,8 @@ type JoinRoomPayload struct {
 
 // BidPayload 叫地主请求
 type BidPayload struct {
-	Bid bool `json:"bid"` // true = 叫地主, false = 不叫
+	BidToken string `json:"bid_token"`
+	Bid      bool   `json:"bid"` // true = 叫地主, false = 不叫
 }
 
 // PlayCardsPayload 出牌请求
@@ -54,7 +55,12 @@ type ReconnectedPayload struct {
 
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）
 type GameStateDTO struct {
-	Phase        string       `json:"phase"`          // bidding/playing
+	DealID      string `json:"deal_id"`
+	DealStartAt int64  `json:"deal_start_at"`
+	DealEndAt   int64  `json:"deal_end_at"`
+	ServerTime  int64  `json:"server_time"`
+
+	Phase        string       `json:"phase"`          // dealing/bidding/playing
 	Players      []PlayerInfo `json:"players"`        // 所有玩家信息
 	Hand         []CardInfo   `json:"hand"`           // 自己的手牌
 	BottomCards  []CardInfo   `json:"bottom_cards"`   // 底牌
@@ -126,12 +132,18 @@ type GameStartPayload struct {
 
 // DealCardsPayload 发牌通知
 type DealCardsPayload struct {
+	DealID      string `json:"deal_id"`
+	DealStartAt int64  `json:"deal_start_at"`
+	DealEndAt   int64  `json:"deal_end_at"`
+	ServerTime  int64  `json:"server_time"`
+
 	Cards       []CardInfo `json:"cards"`        // 玩家自己的手牌
 	BottomCards []CardInfo `json:"bottom_cards"` // 底牌（地主确定后才显示具体内容）
 }
 
 // BidTurnPayload 轮到叫地主通知
 type BidTurnPayload struct {
+	BidToken   string `json:"bid_token"`
 	PlayerID   string `json:"player_id"`
 	Timeout    int    `json:"timeout"`    // 超时时间（秒）
 	IsGrab     bool   `json:"is_grab"`    // true=抢地主阶段, false=叫地主阶段

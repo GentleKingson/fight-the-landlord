@@ -3,8 +3,10 @@ package session
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	"log"
 	"slices"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
@@ -20,26 +22,51 @@ func (gs *GameSession) Start() {
 	defer gs.mu.Unlock()
 
 	// Disconnect/expiry can remove a matched room before session registration.
-	if gs.room.GetState() == RoomStateEnded {
+	if gs.state != GameStateInit || gs.room.GetState() == RoomStateEnded {
 		return
 	}
 	gs.startBiddingRound()
 }
 
-// startBiddingRound 发牌并进入叫地主阶段（调用方需持有 gs.mu）
-func (gs *GameSession) startBiddingRound() {
-	gs.dealNewRound()
+// DealDuration is shared by first deals and redeals, independently of clients.
+const DealDuration = 3870 * time.Millisecond
 
-	// 进入叫地主阶段
+// startBiddingRound requires gs.mu.
+func (gs *GameSession) startBiddingRound() {
+	gs.stopTimer()
+	gs.cancelBotTurn()
+	gs.stopDealTimer()
+	gs.turnID++
+	gs.bidToken = ""
+	gs.dealID = rand.Text()
+	gs.state = GameStateDealing
+	gs.room.SetState(RoomStateDealing)
+	gs.dealStartAt = time.Now()
+	gs.dealEndAt = gs.dealStartAt.Add(DealDuration)
+	gs.currentBidder = securerand.New().IntN(3)
+	gs.dealNewRound()
+	dealID := gs.dealID
+	gs.dealTimer = time.AfterFunc(time.Until(gs.dealEndAt), func() { gs.finishDeal(dealID) })
+}
+
+func (gs *GameSession) finishDeal(dealID string) {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	if gs.state != GameStateDealing || gs.dealID != dealID || gs.room.GetState() == RoomStateEnded {
+		return
+	}
+	gs.stopDealTimer()
 	gs.state = GameStateBidding
 	gs.room.SetState(RoomStateBidding)
-
-	// 随机选择第一个叫地主的玩家
-	rng := securerand.New()
-	gs.currentBidder = rng.IntN(3)
-
-	// 通知叫地主
 	gs.notifyBidTurn()
+}
+
+// stopDealTimer requires gs.mu. State and dealID also fence callbacks already queued.
+func (gs *GameSession) stopDealTimer() {
+	if gs.dealTimer != nil {
+		gs.dealTimer.Stop()
+		gs.dealTimer = nil
+	}
 }
 
 // dealNewRound 重置本局状态并发牌（不进入叫地主流程；调用方需持有 gs.mu）
@@ -106,6 +133,10 @@ func (gs *GameSession) deal() {
 		rp := gs.room.Players[p.ID]
 		client := rp.Client
 		client.SendMessage(codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
+			DealID:      gs.dealID,
+			DealStartAt: gs.dealStartAt.UnixMilli(),
+			DealEndAt:   gs.dealEndAt.UnixMilli(),
+			ServerTime:  time.Now().UnixMilli(),
 			Cards:       convert.CardsToInfos(p.Hand),
 			BottomCards: make([]protocol.CardInfo, 3), // 暂时不显示
 		}))
@@ -114,6 +145,8 @@ func (gs *GameSession) deal() {
 
 // endGame 结束游戏
 func (gs *GameSession) endGame(winner *GamePlayer) {
+	gs.stopDealTimer()
+	gs.stopTimer()
 	gs.cancelBotTurn()
 	gs.finishRecording("completed", winner)
 	gs.state = GameStateEnded

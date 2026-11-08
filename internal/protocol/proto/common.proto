@@ -41,7 +41,12 @@ message PlayerScore {
 
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）
 message GameStateDTO {
-  string phase = 1;                      // bidding/playing
+  string deal_id = 10;
+  int64 deal_start_at = 11;
+  int64 deal_end_at = 12;
+  int64 server_time = 13;
+
+  string phase = 1;                      // dealing/bidding/playing
   repeated PlayerInfo players = 2;       // 所有玩家信息
   repeated CardInfo hand = 3;            // 自己的手牌
   repeated CardInfo bottom_cards = 4;  // 底牌

@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
+	"github.com/stretchr/testify/require"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -46,6 +49,9 @@ func setupGameRoom(t *testing.T) (*r.Room, *session.GameSession, []*testutil.Moc
 	// Create and start session
 	gs := session.NewGameSession(room, nil, config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	t.Cleanup(gs.StopAllTimers)
+	require.Eventually(t, func() bool { return room.GetState() == r.RoomStateBidding }, 5*time.Second, 10*time.Millisecond)
+	gs.SerializeForRedis(func() {})
 
 	return room, gs, clients
 }
@@ -86,7 +92,7 @@ func driveBiddingToPlay(t *testing.T, h *Handler, room *r.Room, gs *session.Game
 
 	sendBid := func(bidderIdx int, bid bool) {
 		id := room.PlayerOrder[bidderIdx]
-		payloadBytes, _ := payloadconv.EncodePayload(protocol.MsgBid, protocol.BidPayload{Bid: bid})
+		payloadBytes, _ := payloadconv.EncodePayload(protocol.MsgBid, protocol.BidPayload{Bid: bid, BidToken: currentBidToken(t, gs)})
 		h.handleBid(clientByID[id], &protocol.Message{Type: protocol.MsgBid, Payload: payloadBytes})
 	}
 
@@ -154,4 +160,13 @@ func TestHandler_HandlePlayCards_Success(t *testing.T) {
 
 	// Verify hand size decreased
 	assert.Equal(t, 19, len(landlordPlayer.Hand))
+}
+
+func currentBidToken(t *testing.T, gs *session.GameSession) string {
+	t.Helper()
+	c := testutil.NewSimpleClient("probe", "Probe")
+	gs.ResendTurnTo(c)
+	payload, err := codec.ParsePayload[protocol.BidTurnPayload](c.Messages[len(c.Messages)-1])
+	require.NoError(t, err)
+	return payload.BidToken
 }

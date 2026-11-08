@@ -2301,3 +2301,17 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
   .hand .card__joker-word { left: 6px; bottom: 5px; font-size: 10px; }
   .hand .card__joker-star { right: 7px; bottom: 7px; font-size: 24px; }
 }
+
+/* A bounded table-relative surface keeps card flights inside portrait/landscape tables. */
+.deal-animation { position: relative; width: 100%; height: 100%; min-height: 72px; display: grid; place-items: center; }
+.deal-animation__cards { position: absolute; inset: 0 0 24px; overflow: hidden; container-type: size; }
+.deal-card { position: absolute; left: calc(50% - 15px); top: calc(50% - 21px); width: 30px; height: 42px; border: 2px solid #eee5c8; border-radius: 4px; background: repeating-linear-gradient(45deg, #254f69 0 4px, #35627b 4px 6px); box-shadow: 0 2px 5px #0005; }
+.deal-card:not(.deal-card--deck) { opacity: 0; animation: deal-flight var(--deal-flight) linear var(--deal-delay) both; }
+.deal-card--left { --deal-x: -40cqw; --deal-y: -28cqh; --deal-rotation: -18deg; }
+.deal-card--right { --deal-x: 40cqw; --deal-y: -28cqh; --deal-rotation: 18deg; }
+.deal-card--me { --deal-x: 0px; --deal-y: 40cqh; --deal-rotation: 0deg; }
+.deal-animation__label { position: relative; align-self: end; font-size: 13px; color: var(--text-secondary, #dedaca); }
+@keyframes deal-flight { 0% { opacity: 0; transform: translate(0, 0); } 8% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--deal-x), var(--deal-y)) rotate(var(--deal-rotation)); } }
+@media (prefers-reduced-motion: reduce) { .deal-card:not(.deal-card--deck) { display: none; animation: none; } }
+
+.action-bar--dealing { display: flex; justify-content: center; align-items: center; font-size: 14px; white-space: nowrap; }

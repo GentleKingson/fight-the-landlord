@@ -5,8 +5,8 @@ const PREFERENCE_KEY = 'ddz_sound_enabled';
 const MAX_PENDING_PLAYS = 3;
 const MAX_AGE_MS = 3000;
 
-type AudioKind = 'event' | 'turn' | 'final-play' | 'result';
-interface Announcement { names: string[]; expiresAt: number; kind: AudioKind; volume: number }
+type AudioKind = 'deal' | 'event' | 'turn' | 'final-play' | 'result';
+interface Announcement { names: string[]; expiresAt: number; kind: AudioKind; volume: number; startAt?: number }
 
 export class GameAudio {
   private enabled = this.loadPreference();
@@ -67,7 +67,15 @@ export class GameAudio {
   }
 
   pass(): void { this.enqueue(['pass_buyao']); }
-  deal(): void { this.enqueue(['deal'], 'event', 0.45); }
+  deal(startAt?: number, endAt?: number): void {
+    // Redeals replace the preceding bid voice. Loading seeks to this timeline.
+    this.stop();
+    this.enqueue(['deal'], 'deal', 0.45, endAt ?? Date.now() + MAX_AGE_MS, startAt);
+  }
+  endDeal(): void {
+    this.queue = this.queue.filter(item => item.kind !== 'deal');
+    if (this.active?.kind === 'deal') this.interrupt();
+  }
   turn(warning = false, expiresAt = Date.now() + MAX_AGE_MS): void {
     // A turn remains relevant until the server deadline, even after a long deal.
     this.enqueue([warning ? 'warning' : 'turn'], 'turn', 0.3, expiresAt);
@@ -86,9 +94,9 @@ export class GameAudio {
   }
 
   private enqueue(names: string[], kind: AudioKind = 'event', volume = 1,
-    expiresAt = Date.now() + (kind === 'result' ? 10000 : MAX_AGE_MS)): void {
+    expiresAt = Date.now() + (kind === 'result' ? 10000 : MAX_AGE_MS), startAt?: number): void {
     if (!this.enabled || document.hidden || this.context?.state !== 'running') return;
-    this.queue.push({ names, kind, volume, expiresAt });
+    this.queue.push({ names, kind, volume, expiresAt, startAt });
     this.queue = this.queue.slice(-MAX_PENDING_PLAYS);
     if (!this.draining) void this.drain(this.generation);
   }
@@ -122,7 +130,7 @@ export class GameAudio {
           if (generation !== this.generation) break;
           // Once a hand starts, finish its effect/remaining-card announcement in order.
           const deadline = index === 0 ? next.expiresAt : Date.now() + MAX_AGE_MS;
-          const played = await this.playClip(name, generation, deadline, next.volume);
+          const played = await this.playClip(name, generation, deadline, next.volume, next.startAt);
           if (!played && Date.now() > deadline) break;
         }
       }
@@ -131,7 +139,7 @@ export class GameAudio {
     }
   }
 
-  private async playClip(name: string, generation: number, expiresAt: number, volume: number): Promise<boolean> {
+  private async playClip(name: string, generation: number, expiresAt: number, volume: number, startAt?: number): Promise<boolean> {
     const context = this.context!;
     const abort = new AbortController();
     let source: AudioBufferSourceNode | null = null;
@@ -163,6 +171,8 @@ export class GameAudio {
       if (abort.signal.aborted || generation !== this.generation || context.state !== 'running') return false;
       // Queueing, downloading and decoding all share this hand's deadline.
       if (Date.now() > expiresAt) return false;
+      const offset = startAt === undefined ? 0 : Math.max(0, (Date.now() - startAt) / 1000);
+      if (offset >= buffer.duration) return false;
       source = context.createBufferSource();
       source.buffer = buffer;
       gain = context.createGain();
@@ -177,7 +187,8 @@ export class GameAudio {
       await new Promise<void>((resolve) => {
         finish = resolve;
         source!.onended = () => resolve();
-        source!.start();
+        if (startAt === undefined) source!.start();
+        else source!.start(0, offset, Math.max(0, (expiresAt - Date.now()) / 1000));
       });
       return true;
     } catch { return false; /* Audio failures must never affect the game. */ }

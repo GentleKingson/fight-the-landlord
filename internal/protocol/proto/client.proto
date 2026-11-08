@@ -26,6 +26,7 @@ message JoinRoomPayload {
 
 // BidPayload 叫地主请求
 message BidPayload {
+  string bid_token = 2;
   bool bid = 1; // true = 叫地主, false = 不叫
 }
 

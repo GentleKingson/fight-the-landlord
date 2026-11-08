@@ -60,6 +60,7 @@ func TestStartGame_DealCards(t *testing.T) {
 	// Start game
 	t.Cleanup(gs.StopAllTimers)
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// Verify state
 	assert.Equal(t, GameStateBidding, gs.state)
@@ -79,6 +80,7 @@ func TestStartGame_CardsAreSorted(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// Verify hands are sorted (descending by rank)
 	for _, p := range gs.players {
@@ -100,6 +102,7 @@ func TestStartGame_BidderSelected(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// Verify a bidder was selected (0, 1, or 2)
 	assert.GreaterOrEqual(t, gs.currentBidder, 0)
@@ -117,6 +120,7 @@ func TestEndGame_WinnerAnnounced(t *testing.T) {
 
 	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
 	gs.Start()
+	gs.finishDeal(gs.dealID)
 
 	// Set winner
 	winner := gs.players[0]

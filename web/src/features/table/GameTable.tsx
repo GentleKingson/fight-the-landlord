@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { DealAnimation } from './DealAnimation';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
@@ -65,7 +66,7 @@ export function GameTable({ socket }: GameTableProps) {
         </div>
 
         <div className={`felt-table ${phase === 'playing' ? 'felt-table--seats' : ''}`}>
-          {phase === 'bidding' ? (
+          {phase === 'dealing' ? <DealAnimation /> : phase === 'bidding' ? (
             <div className="table-center-hint">等待叫抢地主</div>
           ) : (
             <>
@@ -82,7 +83,7 @@ export function GameTable({ socket }: GameTableProps) {
 
       <section className="hand-zone">
         <div className="hand-heading">
-          <strong>{seats.me?.name || '我'} · {phase === 'bidding' ? '等待定地主' : seats.me?.is_landlord ? '地主' : '农民'}</strong>
+          <strong>{seats.me?.name || '我'} · {phase === 'dealing' || phase === 'bidding' ? '等待定地主' : seats.me?.is_landlord ? '地主' : '农民'}</strong>
           <span>手牌 {hand.length} 张</span>
         </div>
         <Hand
@@ -180,7 +181,7 @@ function TurnBanner() {
     return () => window.clearInterval(id);
   }, []);
 
-  const remaining = timeout ? Math.max(0, Math.ceil(timeout - (now - timerStart) / 1000)) : 0;
+  const remaining = timeout ? Math.max(0, Math.ceil(timeout - Math.max(0, now - timerStart) / 1000)) : 0;
   const actor = players.find((player) => player.id === currentTurn);
   const isMe = currentTurn === playerId;
   const lastBid = [...recentActions].reverse().find((action) => action.type === 'bid');
@@ -192,10 +193,10 @@ function TurnBanner() {
   return (
     <div className={`turn-banner ${isMe ? 'is-mine' : ''}`}>
       <div className="turn-banner__copy">
-        <strong>{title}</strong>
-        <span>{lastBid?.label ? `${lastBid.player_name || '玩家'}：${lastBid.label}` : subtitle}</span>
+        <strong>{phase === 'dealing' ? '正在发牌' : title}</strong>
+        <span>{phase === 'dealing' ? '发牌结束后开始叫地主' : lastBid?.label ? `${lastBid.player_name || '玩家'}：${lastBid.label}` : subtitle}</span>
       </div>
-      <time>{remaining || 0}</time>
+      {phase !== 'dealing' ? <time>{remaining || 0}</time> : null}
     </div>
   );
 }
@@ -239,13 +240,15 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
     useAppStore.setState({ tableMessage: `提示：${summarizeHand(suggestions[0])}` });
   }
 
+  if (phase === 'dealing') return <section className="action-bar action-bar--dealing" aria-label="发牌中">等待发牌完成</section>;
+
   if (phase === 'bidding') {
     return (
       <section className="action-bar action-bar--bidding" aria-label="叫地主操作">
         {isMyTurn ? (
           <>
-            <button className="primary-action" onClick={() => socket.send(MsgType.Bid, { bid: true })}>{isGrabTurn ? '抢地主' : '叫地主'}</button>
-            <button className="secondary-action secondary-action--muted" onClick={() => socket.send(MsgType.Bid, { bid: false })}>{isGrabTurn ? '不抢' : '不叫'}</button>
+            <button className="primary-action" onClick={() => socket.send(MsgType.Bid, { bid: true, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '抢地主' : '叫地主'}</button>
+            <button className="secondary-action secondary-action--muted" onClick={() => socket.send(MsgType.Bid, { bid: false, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '不抢' : '不叫'}</button>
           </>
         ) : <span>等待其他玩家{isGrabTurn ? '抢地主' : '叫地主'}...</span>}
       </section>

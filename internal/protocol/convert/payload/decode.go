@@ -68,7 +68,8 @@ func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) 
 			return true, err
 		}
 		*target.(*protocol.BidPayload) = protocol.BidPayload{
-			Bid: pbMsg.Bid,
+			BidToken: pbMsg.BidToken,
+			Bid:      pbMsg.Bid,
 		}
 		return true, nil
 	case protocol.MsgPlayCards:
@@ -364,6 +365,10 @@ func decodeBiddingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.DealCardsPayload) = protocol.DealCardsPayload{
+			DealID:      pbMsg.DealId,
+			DealStartAt: pbMsg.DealStartAt,
+			DealEndAt:   pbMsg.DealEndAt,
+			ServerTime:  pbMsg.ServerTime,
 			Cards:       convert.ProtoToCards(pbMsg.Cards),
 			BottomCards: convert.ProtoToCards(pbMsg.BottomCards),
 		}
@@ -374,6 +379,7 @@ func decodeBiddingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.BidTurnPayload) = protocol.BidTurnPayload{
+			BidToken:   pbMsg.BidToken,
 			PlayerID:   pbMsg.PlayerId,
 			Timeout:    int(pbMsg.Timeout),
 			IsGrab:     pbMsg.IsGrab,

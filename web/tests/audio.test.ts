@@ -386,3 +386,30 @@ it('does not start a turn cue whose server deadline passed during loading', asyn
   await vi.advanceTimersByTimeAsync(1000);
   expect(spoken()).toHaveLength(0);
 });
+
+it('seeks a delayed deal load to the shared timeline and stops on official turn', async () => {
+  vi.useFakeTimers();
+  audio.setEnabled(true);
+  FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 3.87 });
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
+    window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), 1000);
+  }));
+  audio.deal(Date.now(), Date.now() + 3870);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(spoken()[0].start).toHaveBeenCalledWith(0, 1, 2.87);
+  audio.endDeal();
+  expect(spoken()[0].stop).toHaveBeenCalledOnce();
+});
+
+it.each(['muted', 'locked', 'failed', 'expired'] as const)('drops %s deal audio without throwing or replaying later', async mode => {
+  vi.useFakeTimers();
+  if (mode === 'muted') audio.setEnabled(false);
+  if (mode === 'failed' || mode === 'expired') audio.setEnabled(true);
+  if (mode === 'failed') vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'));
+  audio.deal(Date.now() - (mode === 'expired' ? 4000 : 0), Date.now() + (mode === 'expired' ? -130 : 3870));
+  await flush();
+  audio.endDeal();
+  audio.setEnabled(true);
+  await flush();
+  expect(spoken()).toHaveLength(0);
+});

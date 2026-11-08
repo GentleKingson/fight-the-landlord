@@ -109,12 +109,21 @@ func handleMsgDealCards(m model.Model, msg *protocol.Message) tea.Cmd {
 	m.Game().State().LastPlayedName = ""
 	m.Game().State().LastHandType = ""
 
-	// 地主确定后服务端会再发一次 MsgDealCards 更新地主手牌（含底牌），
-	// 此时已处于 PhaseBidding，不应重复播放发牌音效。
-	if m.Phase() != model.PhaseBidding {
+	if payload.DealID != "" && payload.DealID != m.Game().State().DealID {
+		m.Game().State().DealID = payload.DealID
+		m.Game().State().BottomCards = nil
+		m.Game().State().BidToken = ""
+		m.Game().State().Multiplier = 1
+		m.Game().State().IsGrabTurn = false
+		m.Game().SetBidTurn("")
+		m.Game().SetTimerDuration(0)
+		m.SetPhase(model.PhaseBidding)
+		m.Input().Placeholder = "正在发牌，等待叫地主..."
+		m.Input().Blur()
 		m.StopBGM()
 		m.PlaySound("deal")
 	}
+
 	return nil
 }
 
@@ -122,6 +131,7 @@ func handleMsgBidTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	var payload protocol.BidTurnPayload
 	_ = payloadconv.DecodePayload(msg.Type, msg.Payload, &payload)
 	m.SetPhase(model.PhaseBidding)
+	m.Game().State().BidToken = payload.BidToken
 	m.Game().SetBidTurn(payload.PlayerID)
 	m.Game().SetBellPlayed(false)
 	m.Game().State().IsGrabTurn = payload.IsGrab

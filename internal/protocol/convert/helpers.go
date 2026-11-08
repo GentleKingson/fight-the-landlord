@@ -85,6 +85,10 @@ func ProtoToPlayerInfos(pbs []*pb.PlayerInfo) []protocol.PlayerInfo {
 
 func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 	return &pb.GameStateDTO{
+		DealId:       gs.DealID,
+		DealStartAt:  gs.DealStartAt,
+		DealEndAt:    gs.DealEndAt,
+		ServerTime:   gs.ServerTime,
 		Phase:        gs.Phase,
 		Players:      PlayerInfosToProto(gs.Players),
 		Hand:         CardsToProto(gs.Hand),
@@ -99,6 +103,10 @@ func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 
 func ProtoToGameStateDTO(pb *pb.GameStateDTO) *protocol.GameStateDTO {
 	return &protocol.GameStateDTO{
+		DealID:       pb.DealId,
+		DealStartAt:  pb.DealStartAt,
+		DealEndAt:    pb.DealEndAt,
+		ServerTime:   pb.ServerTime,
 		Phase:        pb.Phase,
 		Players:      ProtoToPlayerInfos(pb.Players),
 		Hand:         ProtoToCards(pb.Hand),

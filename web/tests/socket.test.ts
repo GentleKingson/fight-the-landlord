@@ -73,7 +73,7 @@ test('a replaced tab stops reconnecting while network failures still retry', () 
 });
 
 test('audio only follows confirmed live plays, never sends, errors, snapshots or remounts', () => {
-  const audio = { play: vi.fn(), stop: vi.fn(), unlock: vi.fn(), endTurn: vi.fn(), subscribe: vi.fn(() => () => {}) };
+  const audio = { play: vi.fn(), stop: vi.fn(), unlock: vi.fn(), endDeal: vi.fn(), endTurn: vi.fn(), subscribe: vi.fn(() => () => {}) };
   const socket = new GameSocket('ws://localhost/ws');
   let dispose = connectGameAudio(socket, audio as unknown as GameAudio);
   socket.connect();
@@ -108,7 +108,7 @@ test('audio only follows confirmed live plays, never sends, errors, snapshots or
 });
 
 test('audio clears on backgrounding/disconnect and gesture listeners are removed on cleanup', () => {
-  const audio = { play: vi.fn(), stop: vi.fn(), unlock: vi.fn(), endTurn: vi.fn(), subscribe: vi.fn(() => () => {}) };
+  const audio = { play: vi.fn(), stop: vi.fn(), unlock: vi.fn(), endDeal: vi.fn(), endTurn: vi.fn(), subscribe: vi.fn(() => () => {}) };
   const socket = new GameSocket('ws://localhost/ws');
   const dispose = connectGameAudio(socket, audio as unknown as GameAudio);
   document.dispatchEvent(new Event('pointerup'));
@@ -129,7 +129,7 @@ test('audio clears on backgrounding/disconnect and gesture listeners are removed
 function audioSession() {
   const audio = {
     play: vi.fn(), bid: vi.fn(), pass: vi.fn(), deal: vi.fn(), turn: vi.fn(), result: vi.fn(),
-    stop: vi.fn(), endTurn: vi.fn(), unlock: vi.fn(), getEnabled: vi.fn(() => true),
+    stop: vi.fn(), endDeal: vi.fn(), endTurn: vi.fn(), unlock: vi.fn(), getEnabled: vi.fn(() => true),
     subscribe: vi.fn((_listener: () => void) => () => {}),
   };
   const socket = new GameSocket('ws://localhost/ws');
@@ -275,5 +275,23 @@ test('passes authoritative remaining counts to audio after updating the hand', (
   receive('play_turn', { player_id: 'me', timeout: 10 });
   receive('card_played', { player_id: 'opponent', cards: testCards(4), cards_left: 1, hand_type: '炸弹' });
   expect(audio.play).toHaveBeenCalledWith('炸弹', testCards(4), 1);
+  close();
+});
+
+test('authoritative deal rounds replay audio, seek on reconnect, and stop at the official turn', () => {
+  const { audio, receive, close } = audioSession();
+  const timing = { deal_id: 'r1', deal_start_at: 100000, deal_end_at: 103870, server_time: 100000 };
+  receive('deal_cards', { cards: Array.from({length:17}, () => ({rank:3,suit:0,color:0})), ...timing });
+  expect(audio.deal).toHaveBeenLastCalledWith(Date.now(), Date.now() + 3870);
+  receive('deal_cards', timing);
+  expect(audio.deal).toHaveBeenCalledTimes(1);
+  receive('bid_turn', { player_id: 'me', timeout: 15 });
+  expect(audio.endDeal).toHaveBeenCalled();
+  receive('deal_cards', { ...timing, deal_id: 'r2' });
+  expect(audio.deal).toHaveBeenCalledTimes(2);
+  receive('reconnected', { player_id: 'me', game_state: { phase: 'dealing', ...timing, server_time: 102000 } });
+  expect(audio.deal).toHaveBeenLastCalledWith(Date.now() - 2000, Date.now() + 1870);
+  receive('reconnected', { player_id: 'me', game_state: { phase: 'playing', hand: [] } });
+  expect(audio.deal).toHaveBeenCalledTimes(3);
   close();
 });
