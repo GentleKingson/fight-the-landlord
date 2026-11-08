@@ -3,9 +3,18 @@
   display: flex;
   flex-direction: column;
   color: var(--text);
-  background:
-    radial-gradient(ellipse at 50% 0, #28684d, transparent 65%),
-    #0c2d23;
+  /* Decorative only: keep a dark, readable fallback while the image loads. */
+  background-color: #003b29;
+  background-image: url('../assets/emerald-table-960.webp');
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+@media (min-width: 961px) {
+  .app-shell {
+    background-image: url('../assets/emerald-table-1600.webp');
+  }
 }
 
 .maintenance-banner,
@@ -1148,23 +1157,9 @@
   gap: 8px;
   padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom));
   color: var(--text-light);
-  background:
-    radial-gradient(circle at 50% 8%, rgba(255, 220, 128, .18), transparent 24%),
-    linear-gradient(180deg, rgba(6, 18, 29, .16), rgba(3, 18, 11, .72)),
-    linear-gradient(135deg, #1c4736 0%, #082a21 42%, #0f3f28 100%);
+  /* Let the shared page background show through; keep the felt table opaque. */
+  background: transparent;
   overflow: hidden;
-}
-
-.table-screen::before {
-  content: "";
-  position: fixed;
-  inset: 58px 0 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse at 20% 4%, rgba(255, 207, 115, .18), transparent 18%),
-    radial-gradient(ellipse at 82% 2%, rgba(255, 207, 115, .14), transparent 20%),
-    linear-gradient(180deg, rgba(70, 38, 22, .72) 0 118px, transparent 119px);
 }
 
 .table-screen > :not(.utility-drawer) {
