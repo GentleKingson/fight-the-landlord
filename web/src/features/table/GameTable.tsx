@@ -7,6 +7,7 @@ import { Card } from '../../shared/cards/Card';
 import { Hand } from '../../shared/cards/Hand';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
 import { Icon } from '../../shared/ui/Icon';
+import { SoundToggle } from '../../audio/SoundToggle';
 import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
 
 interface GameTableProps {
@@ -49,6 +50,7 @@ export function GameTable({ socket }: GameTableProps) {
           <span>{latency ? `${latency}ms` : '在线'}</span>
         </div>
         <div className="table-tools">
+          <SoundToggle />
           <ToolButton drawer="counter" label="记牌器" icon="counter" />
           <ToolButton drawer="chat" label="聊天" icon="chat" />
           <ToolButton drawer="history" label="历史" icon="history" />

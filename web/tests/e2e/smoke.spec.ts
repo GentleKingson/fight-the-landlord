@@ -22,6 +22,27 @@ test('mobile demo table keeps controls and drawers visible', async ({ page }) =>
   await expect(page.getByRole('button', { name: '聊天' })).toBeVisible();
 });
 
+test('sound defaults on and both preferences survive reload and reopening the site', async ({ page, context }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto('/?demo=table');
+  const toggle = page.getByRole('button', { name: '关闭音效' });
+  await expect(toggle).toBeInViewport({ ratio: 1 });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await toggle.click();
+  await page.reload();
+  await expect(page.getByRole('button', { name: '开启音效' })).toHaveAttribute('aria-pressed', 'false');
+  const reopened = await context.newPage();
+  await reopened.goto('/?demo=table');
+  await expect(reopened.getByRole('button', { name: '开启音效' })).toHaveAttribute('aria-pressed', 'false');
+  await reopened.getByRole('button', { name: '开启音效' }).click();
+  await reopened.close();
+  await page.reload();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  for (const name of ['记牌器', '聊天', '历史']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
+  }
+});
+
 test('hand supports keyboard activation without double toggling pointer clicks', async ({ page }) => {
   await page.goto('/?demo=table');
   const card = page.getByLabel('手牌').getByRole('button').first();

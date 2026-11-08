@@ -5,6 +5,7 @@ import { GameResult } from './features/table/GameResult';
 import { createGameSocket, type GameSocket } from './transport/wsClient';
 import { useAppStore } from './stores/appStore';
 import { seedDemoState } from './stores/demoState';
+import { connectGameAudio } from './audio/connectGameAudio';
 
 const ERROR_TOAST_DURATION_MS = 5000;
 
@@ -18,6 +19,8 @@ export function App() {
   const connected = useAppStore((state) => state.connected);
   const error = useAppStore((state) => state.error);
   const maintenance = useAppStore((state) => state.maintenance);
+
+  useEffect(() => connectGameAudio(socket), [socket]);
 
   useEffect(() => {
     if (!connected || !error) return;
