@@ -285,18 +285,23 @@ test('passes authoritative remaining counts to audio after updating the hand', (
 });
 
 test('authoritative deal rounds replay audio, seek on reconnect, and stop at the official turn', () => {
+  // Keep message handling and exact timeline assertions independent of wall-clock drift.
+  vi.useFakeTimers();
+  const now = 1_000_000;
+  vi.setSystemTime(now);
   const { audio, receive, close } = audioSession();
   const timing = { deal_id: 'r1', deal_start_at: 100000, deal_end_at: 103870, server_time: 100000 };
   receive('deal_cards', { cards: Array.from({length:17}, () => ({rank:3,suit:0,color:0})), ...timing });
-  expect(audio.deal).toHaveBeenLastCalledWith(Date.now(), Date.now() + 3870);
+  expect(audio.deal).toHaveBeenLastCalledWith(now, now + 3870);
   receive('deal_cards', timing);
   expect(audio.deal).toHaveBeenCalledTimes(1);
   receive('bid_turn', { player_id: 'me', timeout: 15 });
   expect(audio.endDeal).toHaveBeenCalled();
   receive('deal_cards', { ...timing, deal_id: 'r2' });
   expect(audio.deal).toHaveBeenCalledTimes(2);
+  vi.advanceTimersByTime(2000);
   receive('reconnected', { player_id: 'me', game_state: { phase: 'dealing', ...timing, server_time: 102000 } });
-  expect(audio.deal).toHaveBeenLastCalledWith(Date.now() - 2000, Date.now() + 1870);
+  expect(audio.deal).toHaveBeenLastCalledWith(now, now + 3870);
   receive('reconnected', { player_id: 'me', game_state: { phase: 'playing', hand: [] } });
   expect(audio.deal).toHaveBeenCalledTimes(3);
   close();
