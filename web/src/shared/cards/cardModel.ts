@@ -86,6 +86,17 @@ export function sortCards(cards: CardInfo[]): CardInfo[] {
   return [...cards].sort((a, b) => b.rank - a.rank || a.suit - b.suit);
 }
 
+// Match the terminal's groupPlayedForDisplay: the largest rank groups form
+// the body of a trio, four-of-a-kind or airplane; kickers follow by rank.
+// Sort a copy so presentation never changes protocol/history/snapshot data.
+export function sortPlayedCards(cards: CardInfo[]): CardInfo[] {
+  const counts = new Map<number, number>();
+  for (const card of cards) counts.set(card.rank, (counts.get(card.rank) ?? 0) + 1);
+  const bodyCount = Math.max(0, ...counts.values());
+  const isBody = (card: CardInfo) => Number(counts.get(card.rank) === bodyCount);
+  return [...cards].sort((a, b) => isBody(b) - isBody(a) || b.rank - a.rank || a.suit - b.suit);
+}
+
 export function summarizeHand(cards: CardInfo[]): string {
   if (cards.length === 0) return '';
   return parseHand(cards)?.type ?? '无效牌型';

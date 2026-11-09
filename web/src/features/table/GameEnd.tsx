@@ -5,6 +5,7 @@ import { RESULT_ACTION_GUARD_MS } from '../../shared/resultPresentation';
 import { SoundToggle } from '../../audio/SoundToggle';
 import type { CardInfo, PlayerInfo } from '../../protocol/types';
 import { Card } from '../../shared/cards/Card';
+import { sortPlayedCards } from '../../shared/cards/cardModel';
 
 export function GameEnd() {
   const snapshot = useAppStore(state => state.endSnapshot);
@@ -68,7 +69,7 @@ export function GameEnd() {
           <h2>{snapshot.winnerName || '获胜玩家'} · 获胜最后一手</h2>
           {snapshot.lastPlayed.length ? <>
             <p>{snapshot.lastHandType}</p>
-            <ReadOnlyCards cards={snapshot.lastPlayed} />
+            <ReadOnlyCards cards={sortPlayedCards(snapshot.lastPlayed)} />
           </> : <p>最后一手数据暂不可用</p>}
         </section>
         <RemainingHand player={left} side="left" label="上家" snapshot={snapshot} />

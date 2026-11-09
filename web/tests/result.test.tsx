@@ -54,6 +54,24 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('terminal table snapshot', () => {
+  it('keeps the winning combination body first during reveal and review without changing the snapshot', () => {
+    const cards = [
+      { suit: 0, rank: 14, color: 0 }, { suit: 1, rank: 14, color: 1 },
+      { suit: 0, rank: 3, color: 0 }, { suit: 1, rank: 3, color: 1 }, { suit: 2, rank: 3, color: 0 }
+    ];
+    receive(MsgType.CardPlayed, { player_id: 'p3', cards, cards_left: 0, hand_type: '三带二' });
+    receive(MsgType.GameOver, result('p3'));
+    render(<App />);
+    const labels = () => within(screen.getByRole('region', { name: '获胜最后一手' }))
+      .getAllByRole('button').map(card => card.getAttribute('aria-label'));
+    expect(labels()).toEqual(['3♠', '3♥', '3♣', 'A♠', 'A♥']);
+    act(() => useAppStore.getState().showSettlement());
+    act(() => useAppStore.getState().reviewEndTable());
+    expect(labels()).toEqual(['3♠', '3♥', '3♣', 'A♠', 'A♥']);
+    expect(useAppStore.getState().endSnapshot?.lastPlayed).toEqual(cards);
+    expect(useAppStore.getState().lastPlayed).toEqual(cards);
+  });
+
   it.each(['p1', 'p2', 'p3'])('reveals all three seats and the winning play for %s only after GameOver', winner => {
     render(<App />);
     expect(screen.queryByRole('region', { name: '终局牌桌' })).not.toBeInTheDocument();
