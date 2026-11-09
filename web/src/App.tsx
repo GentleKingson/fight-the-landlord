@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Lobby } from './features/lobby/Lobby';
 import { GameTable } from './features/table/GameTable';
 import { GameResult } from './features/table/GameResult';
+import { GameEnd } from './features/table/GameEnd';
 import { createGameSocket, type GameSocket } from './transport/wsClient';
 import { useAppStore } from './stores/appStore';
 import { seedDemoState } from './stores/demoState';
@@ -16,23 +17,12 @@ export function App() {
   }, []);
   const socket = useMemo<GameSocket>(() => createGameSocket(), []);
   const phase = useAppStore((state) => state.phase);
-  const resultRevealAt = useAppStore((state) => state.resultRevealAt);
+  const endView = useAppStore((state) => state.endView);
   const connected = useAppStore((state) => state.connected);
   const error = useAppStore((state) => state.error);
   const maintenance = useAppStore((state) => state.maintenance);
 
   useEffect(() => connectGameAudio(socket), [socket]);
-
-  useEffect(() => {
-    if (phase !== 'game_over' || resultRevealAt === null) return;
-    const timeout = window.setTimeout(() => {
-      const state = useAppStore.getState();
-      if (state.phase === 'game_over' && state.resultRevealAt === resultRevealAt) {
-        useAppStore.setState({ resultRevealAt: null });
-      }
-    }, Math.max(0, resultRevealAt - Date.now()));
-    return () => window.clearTimeout(timeout);
-  }, [phase, resultRevealAt]);
 
   useEffect(() => {
     if (!connected || !error) return;
@@ -62,9 +52,9 @@ export function App() {
         <ConnectionState error={error} />
       ) : null}
       {connected && error ? <div className="connection-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError('')}>关闭</button></div> : null}
-      {phase === 'game_over' && resultRevealAt === null ? (
-        <GameResult socket={socket} />
-      ) : phase === 'dealing' || phase === 'bidding' || phase === 'playing' || phase === 'game_over' ? (
+      {phase === 'game_over' ? (
+        endView === 'result' ? <GameResult socket={socket} /> : <GameEnd />
+      ) : phase === 'dealing' || phase === 'bidding' || phase === 'playing' ? (
         <GameTable socket={socket} />
       ) : (
         <Lobby socket={socket} />

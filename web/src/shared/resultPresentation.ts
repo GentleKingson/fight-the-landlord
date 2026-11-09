@@ -1,3 +1,2 @@
-// Frontend presentation only; neither value changes game rules or scoring.
-export const FINAL_PLAY_DURATION_MS = 5000;
+// Prevent a final-play double tap from immediately dismissing the terminal table.
 export const RESULT_ACTION_GUARD_MS = 500;

@@ -1,25 +1,24 @@
+import { useEffect, useRef } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore } from '../../stores/appStore';
-import { PlayedCards } from '../../shared/cards/PlayedCards';
 
 export function GameResult({ socket }: { socket: GameSocket }) {
   const winnerName = useAppStore((state) => state.winnerName);
   const winnerIsLandlord = useAppStore((state) => state.winnerIsLandlord);
   const finalMultiplier = useAppStore((state) => state.finalMultiplier);
   const scores = useAppStore((state) => state.scores);
-  const playerHands = useAppStore((state) => state.playerHands);
-  const winnerId = useAppStore((state) => state.winnerId);
-  const lastPlayedBy = useAppStore((state) => state.lastPlayedBy);
-  const lastPlayed = useAppStore((state) => state.lastPlayed);
-  const lastHandType = useAppStore((state) => state.lastHandType);
+  const snapshot = useAppStore((state) => state.endSnapshot);
+  const reviewEndTable = useAppStore((state) => state.reviewEndTable);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, []);
 
   return (
     <main className="result-screen">
       <section className="result-panel">
         <header className="result-heading">
           <span className="result-badge">{winnerIsLandlord ? '地主获胜' : '农民获胜'}</span>
-          <h1>{winnerName || '本局'} 获胜</h1>
+          <h1 ref={heading} tabIndex={-1}>{winnerName || '本局'} 获胜</h1>
           <p>最终倍数 x{finalMultiplier || 1}</p>
         </header>
         <div className="score-list">
@@ -30,22 +29,7 @@ export function GameResult({ socket }: { socket: GameSocket }) {
             </div>
           ))}
         </div>
-        <div className="result-hands">
-          <section className="winning-hand" aria-label="获胜最后一手">
-            <h2>获胜最后一手</h2>
-            {lastPlayedBy === winnerId && lastPlayed.length ? (
-              <PlayedCards cards={lastPlayed} playerName={winnerName} handType={lastHandType} compact />
-            ) : <p>暂无最后一手记录</p>}
-          </section>
-          <details className="remaining-hands">
-            <summary>查看剩余手牌</summary>
-            <div className="remaining-hands__list">
-              {playerHands.map((playerHand) => (
-                <PlayedCards key={playerHand.player_id} cards={playerHand.cards} playerName={playerHand.player_name} compact />
-              ))}
-            </div>
-          </details>
-        </div>
+        {snapshot ? <button className="secondary-action" onClick={reviewEndTable}>查看本局牌面</button> : null}
         <div className="room-actions">
           <button className="primary-action" onClick={() => { const mode = useAppStore.getState().matchMode; useAppStore.getState().leaveLocalRoom(); useAppStore.setState({ phase: 'matching' }); socket.send(mode === 'practice' ? MsgType.PracticeMatch : MsgType.QuickMatch); }}>再来一局</button>
           <button className="secondary-action" onClick={() => { useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>

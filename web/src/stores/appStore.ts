@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { MsgType, type DealTiming, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
-import { FINAL_PLAY_DURATION_MS } from '../shared/resultPresentation';
+import { captureEndSnapshot, END_REVEAL_DURATION_MS, type EndSnapshot, type EndView } from './endGame';
 
 interface ConnectionSlice {
   connected: boolean;
@@ -30,7 +30,10 @@ interface LobbySlice {
 export interface DealStage { id: string; startAt: number; endAt: number }
 
 interface TableSlice {
-  resultRevealAt: number | null;
+  roundId: string;
+  endSnapshot: EndSnapshot | null;
+  endView: EndView;
+  revealDeadline: number | null;
   deal: DealStage | null;
   bidToken: string;
   turnToken: string;
@@ -95,13 +98,18 @@ interface AppActions {
   setSelection: (keys: string[]) => void;
   clearSelection: () => void;
   leaveLocalRoom: () => void;
+  showSettlement: () => void;
+  reviewEndTable: () => void;
   handleMessage: (message: IncomingMessage) => void;
 }
 
 export type AppState = ConnectionSlice & LobbySlice & TableSlice & UiSlice & AppActions;
 
 const initialTable: TableSlice = {
-  resultRevealAt: null,
+  roundId: '',
+  endSnapshot: null,
+  endView: 'reveal',
+  revealDeadline: null,
   deal: null,
   bidToken: '',
   turnToken: '',
@@ -170,15 +178,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelection: (keys) => set({ selectedCards: new Set(keys) }),
   clearSelection: () => set({ selectedCards: new Set(), tableMessage: '' }),
   leaveLocalRoom: () => set({ roomCode: '', players: [], phase: 'lobby', ...initialTable, selectedCards: new Set() }),
+  showSettlement: () => {
+    if (get().phase === 'game_over' && get().endSnapshot) set({ endView: 'result', revealDeadline: null });
+  },
+  reviewEndTable: () => {
+    if (get().phase === 'game_over' && get().endSnapshot) set({ endView: 'review', revealDeadline: null });
+  },
   handleMessage: (message) => {
     const state = get();
     switch (message.type) {
       case MsgType.Connected: {
         const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
+        const keepResult = state.phase === 'game_over' && state.endSnapshot && state.playerId === payload.player_id;
         set({
+          ...(!keepResult ? { ...initialTable, players: [], roomCode: '', selectedCards: new Set<string>() } : {}),
           connected: true,
           error: '',
-          phase: 'lobby',
+          phase: keepResult ? 'game_over' : 'lobby',
           playerId: payload.player_id,
           playerName: payload.player_name,
           reconnectToken: payload.reconnect_token
@@ -187,6 +203,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.Reconnected: {
         const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO };
+        const snapshot = state.endSnapshot;
+        const samePlayer = state.playerId === payload.player_id;
+        const sameEndedRound = snapshot && payload.game_state?.phase === 'ended' && snapshot.roomCode === payload.room_code
+          && (!payload.game_state.deal_id || !snapshot.roundId || snapshot.roundId === payload.game_state.deal_id);
+        // The server may already have expired the room; a local snapshot remains readable.
+        if (state.phase === 'game_over' && snapshot && samePlayer && (sameEndedRound || (!payload.game_state && !payload.room_code))) {
+          set({ playerName: payload.player_name });
+          break;
+        }
         if (payload.game_state) {
           set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
         } else {
@@ -209,12 +234,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.RoomCreated: {
         const payload = message.payload as { room_code: string; player: PlayerInfo };
-        set({ roomCode: payload.room_code, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
+        set({ ...initialTable, roomCode: payload.room_code, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.RoomJoined: {
         const payload = message.payload as { room_code: string; players: PlayerInfo[] };
-        set({ roomCode: payload.room_code, players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
+        set({ ...initialTable, roomCode: payload.room_code, players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.PlayerJoined: {
@@ -224,6 +249,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayerLeft: {
         const payload = message.payload as { player_id: string };
+        if (state.phase === 'game_over' && state.endSnapshot) break;
         if (payload.player_id === state.playerId) get().leaveLocalRoom();
         else set({ players: state.players.filter((player) => player.id !== payload.player_id) });
         break;
@@ -248,6 +274,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (deal && state.deal?.id === deal.id) break;
         set({
           ...(deal ? { ...initialTable, deal, phase: 'dealing' as const, selectedCards: new Set<string>(), tableMessage: '' } : {}),
+          roundId: payload.deal_id ?? state.roundId,
           hand,
           bottomCards: payload.bottom_cards ?? [],
           bottomCardsRevealed: hand.length === 20 && state.bottomCardsRevealed,
@@ -332,32 +359,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.GameOver: {
+        if (!['dealing', 'bidding', 'playing', 'game_over'].includes(state.phase)) break;
+        if (state.endSnapshot) break; // A replay must not restart the reveal or interrupt review.
         const payload = message.payload as { winner_id: string; winner_name: string; is_landlord: boolean; multiplier: number; scores: PlayerScore[]; player_hands: PlayerHand[] };
-        // Only live endings hold the table. Restored snapshots reset this deadline
-        // and leave the playing phase before the cached settlement arrives.
-        const resultRevealAt = state.phase === 'playing' && state.lastPlayedBy === payload.winner_id && state.lastPlayed.length
-          ? Date.now() + FINAL_PLAY_DURATION_MS
-          : state.phase === 'game_over' ? state.resultRevealAt : null;
-        set({
-          deal: null,
-          bidToken: '',
-          phase: 'game_over',
-          resultRevealAt,
-          currentTurn: '',
-          timeout: 0,
-          timerStart: 0,
-          mustPlay: false,
-          canBeat: false,
-          selectedCards: new Set(),
-          tableMessage: '',
-          winnerId: payload.winner_id,
-          winnerName: payload.winner_name,
-          winnerIsLandlord: payload.is_landlord,
-          finalMultiplier: payload.multiplier,
-          scores: payload.scores ?? [],
-          playerHands: payload.player_hands ?? [],
-          drawer: 'none'
-        });
+        const endSnapshot = captureEndSnapshot(state, payload);
+        set({ deal: null, bidToken: '', turnToken: '', phase: 'game_over', winnerId: endSnapshot.winnerId, winnerName: endSnapshot.winnerName, winnerIsLandlord: endSnapshot.winnerIsLandlord, finalMultiplier: endSnapshot.finalMultiplier, scores: endSnapshot.scores, playerHands: endSnapshot.playerHands, drawer: 'none',
+          endSnapshot, endView: 'reveal', revealDeadline: Date.now() + END_REVEAL_DURATION_MS,
+          currentTurn: '', timeout: 0, timerStart: 0, mustPlay: false, canBeat: false, selectedCards: new Set(), tableMessage: '' });
         break;
       }
       case MsgType.StatsResult:
@@ -472,12 +480,13 @@ function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
   const cardCounter = deductCounter(initialCounter(hand), plays.flatMap(play => play.cards ?? []));
   return {
     ...initialTable,
+    roundId: dto.deal_id ?? '',
     multiplier: dto.multiplier || 1,
     timeout: dto.turn_paused ? 0 : Math.max(0, Math.ceil(((dto.turn_deadline ?? 0) - (dto.server_time ?? 0)) / 1000)),
     timerStart: Date.now(),
     deal: dto.phase === 'dealing' ? restoreDeal(dto) : null,
     selectedCards: new Set(),
-    phase: dto.phase === 'dealing' ? 'dealing' : dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : 'lobby',
+    phase: dto.phase === 'dealing' ? 'dealing' : dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : dto.phase === 'ended' ? 'game_over' : 'lobby',
     players: [...(dto.players ?? [])].sort((a, b) => a.seat - b.seat),
     hand,
     bottomCards: dto.bottom_cards ?? [],
