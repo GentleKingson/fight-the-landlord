@@ -37,7 +37,7 @@ export function GameTable({ socket }: GameTableProps) {
   const setDrawer = useAppStore((state) => state.setDrawer);
   const toggleCard = useAppStore((state) => state.toggleCard);
   const setSelection = useAppStore((state) => state.setSelection);
-  const isMyTurn = currentTurn === playerId;
+  const isMyTurn = (phase === 'bidding' || phase === 'playing') && currentTurn === playerId;
   const seats = useMemo(() => arrangeSeats(players, playerId), [players, playerId]);
   const botAvatars = useMemo(() => assignBotAvatars(players), [players]);
 
@@ -71,7 +71,7 @@ export function GameTable({ socket }: GameTableProps) {
           <SeatPanel player={seats.right} avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
         </div>
 
-        <div className={`felt-table ${phase === 'playing' ? 'felt-table--seats' : ''}`}>
+        <div className={`felt-table ${phase === 'playing' || phase === 'game_over' ? 'felt-table--seats' : ''}`}>
           {phase === 'dealing' ? (
             <div className="deal-origin">
               <span className="deal-animation__label">{presentation.finished ? '等待叫地主通知…' : '正在发牌…'}</span>
@@ -186,12 +186,18 @@ function TurnBanner() {
   const phase = useAppStore((state) => state.phase);
   const isGrabTurn = useAppStore((state) => state.isGrabTurn);
   const recentActions = useAppStore((state) => state.recentActions);
+  const winnerName = useAppStore((state) => state.winnerName);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
+    if (phase === 'game_over') return;
     const id = window.setInterval(() => setNow(Date.now()), 400);
     return () => window.clearInterval(id);
-  }, []);
+  }, [phase]);
+
+  if (phase === 'game_over') {
+    return <div className="turn-banner" role="status"><div className="turn-banner__copy"><strong>{winnerName} 获胜</strong><span>本局已结束，即将显示结算</span></div></div>;
+  }
 
   const remaining = timeout ? Math.max(0, Math.ceil(timeout - Math.max(0, now - timerStart) / 1000)) : 0;
   const actor = players.find((player) => player.id === currentTurn);
@@ -253,6 +259,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   }
 
   if (phase === 'dealing') return <section className="action-bar action-bar--dealing" aria-label="发牌中">等待发牌完成</section>;
+  if (phase === 'game_over') return <section className="action-bar" aria-label="本局已结束">获胜最后一手</section>;
 
   if (phase === 'bidding') {
     return (
