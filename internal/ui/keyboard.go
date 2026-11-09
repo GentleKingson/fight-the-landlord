@@ -429,7 +429,7 @@ func handlePlayingEnter(m model.Model, input string) tea.Cmd {
 	if m.Game().State().CurrentTurn == m.PlayerID() {
 		upperInput := strings.ToUpper(input)
 		if upperInput == "PASS" || upperInput == "P" {
-			_ = m.Client().Pass()
+			_ = m.Client().Pass(m.Game().State().TurnToken)
 		} else if input != "" {
 			cards, err := card.FindCardsInHand(m.Game().State().Hand, strings.ToUpper(input))
 			if err != nil {
@@ -438,7 +438,7 @@ func handlePlayingEnter(m model.Model, input string) tea.Cmd {
 					return model.ClearInputErrorMsg{}
 				})
 			}
-			_ = m.Client().PlayCards(convert.CardsToInfos(cards))
+			_ = m.Client().PlayCards(convert.CardsToInfos(cards), m.Game().State().TurnToken)
 		}
 	}
 	return nil

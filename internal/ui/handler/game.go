@@ -18,6 +18,7 @@ import (
 
 // restoreGameState 用重连快照覆盖本地游戏状态，避免沿用掉线前的过期数据（例如上家出牌、各家剩余牌数、地主标记等）
 func restoreGameState(m model.Model, dto *protocol.GameStateDTO) {
+	m.Game().State().TurnToken = dto.TurnToken
 	st := m.Game().State()
 	myID := m.PlayerID()
 
@@ -217,6 +218,7 @@ func handleMsgPlayTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	_ = payloadconv.DecodePayload(msg.Type, msg.Payload, &payload)
 	m.SetPhase(model.PhasePlaying)
 	m.Game().State().CurrentTurn = payload.PlayerID
+	m.Game().State().TurnToken = payload.TurnToken
 	m.Game().SetMustPlay(payload.MustPlay)
 	m.Game().SetCanBeat(payload.CanBeat)
 	m.Game().SetBellPlayed(false)

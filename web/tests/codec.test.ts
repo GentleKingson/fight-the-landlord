@@ -20,6 +20,7 @@ describe('protocol codec', () => {
 
   it('round trips play cards payloads', () => {
     const decoded = decodeMessage(encodeMessage(MsgType.PlayCards, {
+      turn_token: 'round-turn',
       cards: [
         { suit: 1, rank: 14, color: 1 },
         { suit: 3, rank: 14, color: 1 }
@@ -27,6 +28,7 @@ describe('protocol codec', () => {
     }));
     expect(decoded.type).toBe(MsgType.PlayCards);
     expect(decoded.payload).toEqual({
+      turn_token: 'round-turn',
       cards: [
         { suit: 1, rank: 14, color: 1 },
         { suit: 3, rank: 14, color: 1 }
@@ -38,6 +40,12 @@ describe('protocol codec', () => {
     const decoded = decodeMessage(encodeMessage(MsgType.MaintenancePush, { maintenance: true }));
     expect(decoded.type).toBe(MsgType.MaintenancePush);
     expect(decoded.payload).toEqual({ maintenance: true });
+  });
+
+  it('preserves turn tokens on pass requests', () => {
+    const decoded = decodeMessage(encodeMessage(MsgType.Pass, { turn_token: 'saved-turn' }));
+    expect(decoded.type).toBe(MsgType.Pass);
+    expect(decoded.payload).toMatchObject({ turn_token: 'saved-turn' });
   });
 
   it('round trips chat payloads as JSON for the current Go fallback', () => {

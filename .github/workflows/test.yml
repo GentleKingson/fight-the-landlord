@@ -104,9 +104,18 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
           restore-keys: ${{ runner.os }}-go-
 
+      - name: Install Redis for crash and backup recovery tests
+        run: |
+          if ! command -v redis-server >/dev/null || ! command -v redis-cli >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y redis-server
+          fi
+
       - name: Run tests
         # Use ci tag to skip sound tests/deps
         run: go test -tags=ci -race -p 4 -coverprofile=coverage.out -covermode=atomic ./...
+        env:
+          DDZ_REDIS_INTEGRATION: "1"
 
       - name: Save Go cache
         uses: actions/cache/save@v6

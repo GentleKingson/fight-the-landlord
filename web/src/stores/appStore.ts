@@ -32,6 +32,7 @@ interface TableSlice {
   resultRevealAt: number | null;
   deal: DealStage | null;
   bidToken: string;
+  turnToken: string;
   hand: CardInfo[];
   bottomCards: CardInfo[];
   bottomCardsRevealed: boolean;
@@ -104,6 +105,7 @@ const initialTable: TableSlice = {
   resultRevealAt: null,
   deal: null,
   bidToken: '',
+  turnToken: '',
   hand: [],
   bottomCards: [],
   bottomCardsRevealed: false,
@@ -291,8 +293,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.PlayTurn: {
-        const payload = message.payload as { player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
-        set({ deal: null, bidToken: '', phase: 'playing', currentTurn: payload.player_id, timeout: payload.timeout, mustPlay: payload.must_play, canBeat: payload.can_beat, timerStart: Date.now(), tableMessage: '' });
+        const payload = message.payload as { turn_token?: string; player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
+        set({ deal: null, bidToken: '', turnToken: payload.turn_token ?? '', phase: 'playing', currentTurn: payload.player_id, timeout: payload.timeout, mustPlay: payload.must_play, canBeat: payload.can_beat, timerStart: Date.now(), tableMessage: '' });
         break;
       }
       case MsgType.CardPlayed: {
@@ -482,6 +484,7 @@ function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
     bottomCards: dto.bottom_cards ?? [],
     bottomCardsRevealed: isPlaying || hasLandlord,
     currentTurn: dto.current_turn ?? '',
+    turnToken: dto.turn_token ?? '',
     lastPlayed: dto.last_played ?? [],
     lastPlayedBy: dto.last_player_id ?? '',
     lastPlayedName: dto.last_played?.length

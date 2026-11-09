@@ -130,16 +130,37 @@ func (sm *SessionManager) SetRoom(playerID, roomCode string) {
 
 	if ok {
 		session.mu.Lock()
-		if roomCode == "" && session.RoomCode != "" {
-			session.LastRoomCode = session.RoomCode
-			session.LastRoomAt = time.Now()
-		}
-		if roomCode != "" {
-			session.LastRoomCode = ""
-		}
-		session.RoomCode = roomCode
+		setSessionRoomLocked(session, roomCode)
 		session.mu.Unlock()
 	}
+}
+
+// ClearRoomIfCurrent fences cleanup from an old room or recovered placeholder
+// against a newer game owned by the same persistent identity.
+func (sm *SessionManager) ClearRoomIfCurrent(playerID, expectedRoom string) {
+	sm.mu.RLock()
+	session := sm.sessions[playerID]
+	sm.mu.RUnlock()
+	if session == nil {
+		return
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.RoomCode == expectedRoom {
+		setSessionRoomLocked(session, "")
+	}
+}
+
+// Caller holds session.mu.
+func setSessionRoomLocked(session *PlayerSession, roomCode string) {
+	if roomCode == "" && session.RoomCode != "" {
+		session.LastRoomCode = session.RoomCode
+		session.LastRoomAt = time.Now()
+	}
+	if roomCode != "" {
+		session.LastRoomCode = ""
+	}
+	session.RoomCode = roomCode
 }
 
 // DeleteSession 删除会话

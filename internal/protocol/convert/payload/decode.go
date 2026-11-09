@@ -72,13 +72,14 @@ func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) 
 			Bid:      pbMsg.Bid,
 		}
 		return true, nil
-	case protocol.MsgPlayCards:
+	case protocol.MsgPlayCards, protocol.MsgPass:
 		var pbMsg pb.PlayCardsPayload
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
 			return true, err
 		}
 		*target.(*protocol.PlayCardsPayload) = protocol.PlayCardsPayload{
-			Cards: convert.ProtoToCards(pbMsg.Cards),
+			TurnToken: pbMsg.TurnToken,
+			Cards:     convert.ProtoToCards(pbMsg.Cards),
 		}
 		return true, nil
 	case protocol.MsgGetLeaderboard:
@@ -424,10 +425,11 @@ func decodePlayingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.PlayTurnPayload) = protocol.PlayTurnPayload{
-			PlayerID: pbMsg.PlayerId,
-			Timeout:  int(pbMsg.Timeout),
-			MustPlay: pbMsg.MustPlay,
-			CanBeat:  pbMsg.CanBeat,
+			TurnToken: pbMsg.TurnToken,
+			PlayerID:  pbMsg.PlayerId,
+			Timeout:   int(pbMsg.Timeout),
+			MustPlay:  pbMsg.MustPlay,
+			CanBeat:   pbMsg.CanBeat,
 		}
 		return true, nil
 	case protocol.MsgCardPlayed:

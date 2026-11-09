@@ -32,6 +32,7 @@ message BidPayload {
 
 // PlayCardsPayload 出牌请求
 message PlayCardsPayload {
+  string turn_token = 2;
   repeated CardInfo cards = 1;
 }
 

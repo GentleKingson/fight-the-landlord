@@ -32,6 +32,7 @@ const payloadNames: Record<string, string> = {
   join_room: 'JoinRoomPayload',
   bid: 'BidPayload',
   play_cards: 'PlayCardsPayload',
+  pass: 'PlayCardsPayload',
   get_leaderboard: 'GetLeaderboardPayload',
   connected: 'ConnectedPayload',
   reconnected: 'ReconnectedPayload',
