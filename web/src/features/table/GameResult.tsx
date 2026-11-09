@@ -9,6 +9,10 @@ export function GameResult({ socket }: { socket: GameSocket }) {
   const finalMultiplier = useAppStore((state) => state.finalMultiplier);
   const scores = useAppStore((state) => state.scores);
   const playerHands = useAppStore((state) => state.playerHands);
+  const winnerId = useAppStore((state) => state.winnerId);
+  const lastPlayedBy = useAppStore((state) => state.lastPlayedBy);
+  const lastPlayed = useAppStore((state) => state.lastPlayed);
+  const lastHandType = useAppStore((state) => state.lastHandType);
 
   return (
     <main className="result-screen">
@@ -26,14 +30,22 @@ export function GameResult({ socket }: { socket: GameSocket }) {
             </div>
           ))}
         </div>
-        <details className="remaining-hands">
-          <summary>查看剩余手牌</summary>
-          <div className="remaining-hands__list">
-            {playerHands.map((playerHand) => (
-              <PlayedCards key={playerHand.player_id} cards={playerHand.cards} playerName={playerHand.player_name} compact />
-            ))}
-          </div>
-        </details>
+        <div className="result-hands">
+          <section className="winning-hand" aria-label="获胜最后一手">
+            <h2>获胜最后一手</h2>
+            {lastPlayedBy === winnerId && lastPlayed.length ? (
+              <PlayedCards cards={lastPlayed} playerName={winnerName} handType={lastHandType} compact />
+            ) : <p>暂无最后一手记录</p>}
+          </section>
+          <details className="remaining-hands">
+            <summary>查看剩余手牌</summary>
+            <div className="remaining-hands__list">
+              {playerHands.map((playerHand) => (
+                <PlayedCards key={playerHand.player_id} cards={playerHand.cards} playerName={playerHand.player_name} compact />
+              ))}
+            </div>
+          </details>
+        </div>
         <div className="room-actions">
           <button className="primary-action" onClick={() => { const mode = useAppStore.getState().matchMode; useAppStore.getState().leaveLocalRoom(); useAppStore.setState({ phase: 'matching' }); socket.send(mode === 'practice' ? MsgType.PracticeMatch : MsgType.QuickMatch); }}>再来一局</button>
           <button className="secondary-action" onClick={() => { useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>

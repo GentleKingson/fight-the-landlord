@@ -29,6 +29,7 @@ interface LobbySlice {
 export interface DealStage { id: string; startAt: number; endAt: number }
 
 interface TableSlice {
+  resultRevealAt: number | null;
   deal: DealStage | null;
   bidToken: string;
   turnToken: string;
@@ -98,7 +99,10 @@ interface AppActions {
 
 export type AppState = ConnectionSlice & LobbySlice & TableSlice & UiSlice & AppActions;
 
+const FINAL_PLAY_DURATION_MS = 2000;
+
 const initialTable: TableSlice = {
+  resultRevealAt: null,
   deal: null,
   bidToken: '',
   turnToken: '',
@@ -330,7 +334,31 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.GameOver: {
         const payload = message.payload as { winner_id: string; winner_name: string; is_landlord: boolean; multiplier: number; scores: PlayerScore[]; player_hands: PlayerHand[] };
-        set({ deal: null, bidToken: '', phase: 'game_over', winnerId: payload.winner_id, winnerName: payload.winner_name, winnerIsLandlord: payload.is_landlord, finalMultiplier: payload.multiplier, scores: payload.scores ?? [], playerHands: payload.player_hands ?? [], drawer: 'none' });
+        // Only live endings hold the table. Restored snapshots reset this deadline
+        // and leave the playing phase before the cached settlement arrives.
+        const resultRevealAt = state.phase === 'playing' && state.lastPlayedBy === payload.winner_id && state.lastPlayed.length
+          ? Date.now() + FINAL_PLAY_DURATION_MS
+          : state.phase === 'game_over' ? state.resultRevealAt : null;
+        set({
+          deal: null,
+          bidToken: '',
+          phase: 'game_over',
+          resultRevealAt,
+          currentTurn: '',
+          timeout: 0,
+          timerStart: 0,
+          mustPlay: false,
+          canBeat: false,
+          selectedCards: new Set(),
+          tableMessage: '',
+          winnerId: payload.winner_id,
+          winnerName: payload.winner_name,
+          winnerIsLandlord: payload.is_landlord,
+          finalMultiplier: payload.multiplier,
+          scores: payload.scores ?? [],
+          playerHands: payload.player_hands ?? [],
+          drawer: 'none'
+        });
         break;
       }
       case MsgType.StatsResult:

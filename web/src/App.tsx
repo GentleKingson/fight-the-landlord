@@ -16,11 +16,23 @@ export function App() {
   }, []);
   const socket = useMemo<GameSocket>(() => createGameSocket(), []);
   const phase = useAppStore((state) => state.phase);
+  const resultRevealAt = useAppStore((state) => state.resultRevealAt);
   const connected = useAppStore((state) => state.connected);
   const error = useAppStore((state) => state.error);
   const maintenance = useAppStore((state) => state.maintenance);
 
   useEffect(() => connectGameAudio(socket), [socket]);
+
+  useEffect(() => {
+    if (phase !== 'game_over' || resultRevealAt === null) return;
+    const timeout = window.setTimeout(() => {
+      const state = useAppStore.getState();
+      if (state.phase === 'game_over' && state.resultRevealAt === resultRevealAt) {
+        useAppStore.setState({ resultRevealAt: null });
+      }
+    }, Math.max(0, resultRevealAt - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [phase, resultRevealAt]);
 
   useEffect(() => {
     if (!connected || !error) return;
@@ -50,9 +62,9 @@ export function App() {
         <ConnectionState error={error} />
       ) : null}
       {connected && error ? <div className="connection-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError('')}>关闭</button></div> : null}
-      {phase === 'game_over' ? (
+      {phase === 'game_over' && resultRevealAt === null ? (
         <GameResult socket={socket} />
-      ) : phase === 'dealing' || phase === 'bidding' || phase === 'playing' ? (
+      ) : phase === 'dealing' || phase === 'bidding' || phase === 'playing' || phase === 'game_over' ? (
         <GameTable socket={socket} />
       ) : (
         <Lobby socket={socket} />
