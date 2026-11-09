@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DealAnimation } from './DealAnimation';
+import { ResultActionBar } from './ResultActionBar';
 import { useDealPresentation } from './useDealPresentation';
 import { assignBotAvatars } from './botAvatars';
 import { PlayerAvatar } from './PlayerAvatar';
@@ -259,7 +260,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   }
 
   if (phase === 'dealing') return <section className="action-bar action-bar--dealing" aria-label="发牌中">等待发牌完成</section>;
-  if (phase === 'game_over') return <section className="action-bar" aria-label="本局已结束">获胜最后一手</section>;
+  if (phase === 'game_over') return <ResultActionBar />;
 
   if (phase === 'bidding') {
     return (

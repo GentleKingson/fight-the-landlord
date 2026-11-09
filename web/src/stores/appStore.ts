@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { MsgType, type DealTiming, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
+import { FINAL_PLAY_DURATION_MS } from '../shared/resultPresentation';
 
 interface ConnectionSlice {
   connected: boolean;
@@ -98,8 +99,6 @@ interface AppActions {
 }
 
 export type AppState = ConnectionSlice & LobbySlice & TableSlice & UiSlice & AppActions;
-
-const FINAL_PLAY_DURATION_MS = 2000;
 
 const initialTable: TableSlice = {
   resultRevealAt: null,
