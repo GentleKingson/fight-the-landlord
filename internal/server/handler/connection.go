@@ -109,6 +109,9 @@ func (h *Handler) RestoreConnection(client types.ClientInterface, playerID strin
 func (h *Handler) tryRestoreRoomState(client types.ClientInterface, saved *session.PlayerSession, payload *protocol.ReconnectedPayload) bool {
 	room := h.roomManager.GetRoom(saved.RoomCode)
 	if room == nil {
+		// A fresh socket has no local RoomID yet; clear the stale association
+		// using the room from the session snapshot rather than its empty ID.
+		h.sessionManager.ClearRoomIfCurrent(saved.PlayerID, saved.RoomCode)
 		client.SetRoom("")
 		return false
 	}
@@ -128,7 +131,10 @@ func (h *Handler) tryRestoreRoomState(client types.ClientInterface, saved *sessi
 		log.Printf("重连到房间失败: %v", err)
 		if errors.Is(err, session.ErrPersistenceUnavailable) {
 			client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, err.Error()))
-			return true // Keep the game association while its write is unresolved.
+			// Preserve the association, but let the client's existing reconnect
+			// loop retry both room replacement and snapshot delivery.
+			client.Close()
+			return true
 		}
 		client.SetRoom("")
 		return false
