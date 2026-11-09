@@ -91,7 +91,21 @@ export interface DealTiming {
   server_time?: number;
 }
 
+export interface PublicPlay {
+ type: 'play' | 'pass';
+ player_id: string;
+ player_name: string;
+ cards: CardInfo[];
+ hand_type: string;
+ new_trick: boolean;
+}
+
 export interface GameStateDTO extends DealTiming {
+ multiplier?: number;
+ public_plays?: PublicPlay[];
+ turn_deadline?: number;
+ turn_paused?: boolean;
+ last_hand_type?: string;
   phase: 'bidding' | 'playing' | string;
   players: PlayerInfo[];
   hand: CardInfo[];

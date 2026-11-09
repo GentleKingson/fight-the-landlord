@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
         '/ws': {
           target: wsTarget,
           ws: true,
-          changeOrigin: true
+          changeOrigin: false
         }
       }
     }

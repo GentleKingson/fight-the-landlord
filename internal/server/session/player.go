@@ -20,6 +20,8 @@ type PlayerSession struct {
 	PlayerName     string
 	ReconnectToken string
 	RoomCode       string
+	LastRoomCode   string
+	LastRoomAt     time.Time
 
 	DisconnectedAt time.Time // 断线时间
 	IsOnline       bool      // 是否在线
@@ -29,18 +31,23 @@ type PlayerSession struct {
 
 // SessionManager 会话管理器
 type SessionManager struct {
-	sessions map[string]*PlayerSession // playerID -> session
-	tokens   map[string]string         // token -> playerID
-	mu       sync.RWMutex
+	retention time.Duration
+	sessions  map[string]*PlayerSession // playerID -> session
+	tokens    map[string]string         // token -> playerID
+	mu        sync.RWMutex
 }
 
 // NewSessionManager 创建会话管理器
-func NewSessionManager() *SessionManager {
+func NewSessionManager(retention ...time.Duration) *SessionManager {
 	sm := &SessionManager{
-		sessions: make(map[string]*PlayerSession),
-		tokens:   make(map[string]string),
+		retention: sessionExpireTime,
+		sessions:  make(map[string]*PlayerSession),
+		tokens:    make(map[string]string),
 	}
 
+	for _, duration := range retention {
+		sm.retention = max(sm.retention, duration+time.Minute)
+	}
 	// 启动会话清理协程
 	go sm.cleanupLoop()
 
@@ -123,6 +130,13 @@ func (sm *SessionManager) SetRoom(playerID, roomCode string) {
 
 	if ok {
 		session.mu.Lock()
+		if roomCode == "" && session.RoomCode != "" {
+			session.LastRoomCode = session.RoomCode
+			session.LastRoomAt = time.Now()
+		}
+		if roomCode != "" {
+			session.LastRoomCode = ""
+		}
 		session.RoomCode = roomCode
 		session.mu.Unlock()
 	}
@@ -199,7 +213,7 @@ func (sm *SessionManager) cleanup() {
 	for playerID, session := range sm.sessions {
 		session.mu.RLock()
 		// 清理离线超过会话过期时间的会话
-		if !session.IsOnline && now.Sub(session.DisconnectedAt) > sessionExpireTime {
+		if !session.IsOnline && session.RoomCode == "" && now.Sub(session.DisconnectedAt) > sm.retention && now.Sub(session.LastRoomAt) > sm.retention {
 			delete(sm.tokens, session.ReconnectToken)
 			delete(sm.sessions, playerID)
 		}
@@ -223,6 +237,15 @@ func (sm *SessionManager) Snapshot(playerID string) *PlayerSession {
 	session.mu.RLock()
 	defer session.mu.RUnlock()
 	return &PlayerSession{PlayerID: session.PlayerID, PlayerName: session.PlayerName,
-		ReconnectToken: session.ReconnectToken, RoomCode: session.RoomCode,
+		ReconnectToken: session.ReconnectToken, RoomCode: session.RoomCode, LastRoomCode: session.LastRoomCode,
 		IsOnline: session.IsOnline, DisconnectedAt: session.DisconnectedAt}
+}
+
+// EnsureSession restores volatile metadata only after persistent identity verification.
+func (sm *SessionManager) EnsureSession(id, name string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.sessions[id] == nil {
+		sm.sessions[id] = &PlayerSession{PlayerID: id, PlayerName: name, IsOnline: true}
+	}
 }

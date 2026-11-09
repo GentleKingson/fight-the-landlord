@@ -342,14 +342,14 @@ func TestMessageRateLimiter_ClearRateLimit(t *testing.T) {
 	assert.False(t, warning)
 }
 
-func TestOriginChecker_AllowAll(t *testing.T) {
+func TestOriginChecker_WildcardDoesNotAllowCrossOrigin(t *testing.T) {
 	t.Parallel()
 
 	oc := NewOriginChecker([]string{"*"})
 	req, _ := http.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Origin", "https://evil.com")
 
-	assert.True(t, oc.Check(req))
+	assert.False(t, oc.Check(req))
 }
 
 func TestOriginChecker_SpecificOrigins(t *testing.T) {

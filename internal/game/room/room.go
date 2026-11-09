@@ -25,12 +25,13 @@ type RoomPlayer struct {
 
 // Room 游戏房间
 type Room struct {
-	Code        string                 // 房间号
-	State       RoomState              // 房间状态
-	Players     map[string]*RoomPlayer // 玩家列表
-	PlayerOrder []string               // 玩家顺序（按座位）
-	EndedAt     time.Time              // 结算保留期从结束时开始
-	CreatedAt   time.Time              // 创建时间
+	Code         string                 // 房间号
+	State        RoomState              // 房间状态
+	Players      map[string]*RoomPlayer // 玩家列表
+	PlayerOrder  []string               // 玩家顺序（按座位）
+	AllOfflineAt time.Time              // 真人全部离线的时间；机器人不延长保留期
+	EndedAt      time.Time              // 结算保留期从结束时开始
+	CreatedAt    time.Time              // 创建时间
 
 	mu sync.RWMutex
 }
@@ -48,6 +49,9 @@ type RoomManager struct {
 
 // NewRoomManager 创建房间管理器
 func NewRoomManager(rs *storage.RedisStore, gameConfig config.GameConfig) *RoomManager {
+	if gameConfig.RoomTimeout <= 0 {
+		gameConfig.RoomTimeout = 10
+	}
 	rm := &RoomManager{
 		redisStore:  rs,
 		roomTimeout: gameConfig.RoomTimeoutDuration(),

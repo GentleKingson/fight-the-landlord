@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
@@ -37,8 +38,8 @@ func TestRoomOperationsCannotRemoveActivePlayer(t *testing.T) {
 	}
 }
 
-func TestAllOfflineRemovesGameRegistryAndClosesRecording(t *testing.T) {
-	cfg := config.GameConfig{BidTimeout: 600, TurnTimeout: 600, CollectTrainingData: true, TrainingDataDir: t.TempDir()}
+func TestAllOfflineRetentionThenRemovesGameRegistryAndClosesRecording(t *testing.T) {
+	cfg := config.GameConfig{BidTimeout: 600, TurnTimeout: 600, OfflineRoomRetention: 1, CollectTrainingData: true, TrainingDataDir: t.TempDir()}
 	rm := room.NewRoomManager(nil, cfg)
 	clients := []types.ClientInterface{testutil.NewSimpleClient("a", "A"), testutil.NewSimpleClient("b", "B"), testutil.NewSimpleClient("c", "C")}
 	r, err := rm.CreateMatchedRoom(clients)
@@ -51,11 +52,13 @@ func TestAllOfflineRemovesGameRegistryAndClosesRecording(t *testing.T) {
 	for _, c := range clients {
 		rm.NotifyPlayerOffline(c)
 	}
-	require.Nil(t, rm.GetRoom(r.Code))
-	require.Nil(t, h.GetGameSession(r.Code))
-	files, err := filepath.Glob(filepath.Join(cfg.TrainingDataDir, "*", "*.jsonl"))
-	require.NoError(t, err)
-	require.Len(t, files, 1)
+	require.Eventually(t, func() bool { return rm.GetRoom(r.Code) == nil }, 3*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return h.GetGameSession(r.Code) == nil }, time.Second, time.Millisecond)
+	var files []string
+	require.Eventually(t, func() bool {
+		files, _ = filepath.Glob(filepath.Join(cfg.TrainingDataDir, "*", "*.jsonl"))
+		return len(files) == 1
+	}, time.Second, time.Millisecond)
 	data, err := os.ReadFile(files[0])
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"status":"aborted"`)

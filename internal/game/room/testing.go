@@ -4,6 +4,7 @@ package room
 
 import (
 	"github.com/stretchr/testify/mock"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
@@ -64,8 +65,9 @@ func (m *MockMatcher) AddToQueue(client types.ClientInterface) {
 // NewMockRoom 创建测试用的 Room
 func NewMockRoom(code string, client types.ClientInterface) *Room {
 	room := &Room{
-		Code:    code,
-		Players: make(map[string]*RoomPlayer),
+		Code:      code,
+		CreatedAt: time.Now(),
+		Players:   make(map[string]*RoomPlayer),
 	}
 	if client != nil {
 		room.Players[client.GetID()] = &RoomPlayer{

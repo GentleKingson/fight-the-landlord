@@ -39,7 +39,8 @@ type GameSession struct {
 	room        *room.Room
 	leaderboard *storage.LeaderboardManager
 	gameConfig  config.GameConfig
-	lastResult  *protocol.Message // Replay settlement if a reconnect races with game completion.
+	publicPlays []protocol.PublicPlay // Only accepted, public play/pass actions; no training/private data.
+	lastResult  *protocol.Message     // Replay settlement if a reconnect races with game completion.
 	state       GameState
 	players     []*GamePlayer // 按座位顺序
 

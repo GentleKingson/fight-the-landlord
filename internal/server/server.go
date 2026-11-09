@@ -28,7 +28,7 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // 允许所有来源，生产环境需要限制
+		return NewOriginChecker(nil).Check(r)
 	},
 	// 启用 permessage-deflate 压缩扩展
 	// 可减少 40-70% 流量，gorilla/websocket 会自动协商压缩参数
@@ -68,14 +68,18 @@ type Server struct {
 
 // NewServer 创建服务器实例
 func NewServer(cfg *config.Config) (*Server, error) {
+	if cfg.Server.IdentityTTL < 0 || cfg.Game.OfflineRoomRetention < 0 || cfg.Game.ResultRetention < 0 || cfg.Game.OfflineWaitTimeout < 0 {
+		return nil, fmt.Errorf("identity and retention durations must be non-negative")
+	}
 	if err := validateWebConfig(cfg); err != nil {
 		return nil, err
 	}
 	// 初始化 Redis 客户端
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
+		ContextTimeoutEnabled: true,
+		Addr:                  cfg.Redis.Addr,
+		Password:              cfg.Redis.Password,
+		DB:                    cfg.Redis.DB,
 	})
 
 	// 测试 Redis 连接
@@ -91,7 +95,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		redisStore:     storage.NewRedisStore(rdb),
 		leaderboard:    storage.NewLeaderboardManager(rdb),
 		clients:        make(map[string]*Client),
-		sessionManager: session.NewSessionManager(),
+		sessionManager: session.NewSessionManager(cfg.Game.ResultRetentionDuration()),
 		// 初始化安全组件
 		rateLimiter: NewRateLimiter(
 			cfg.Security.RateLimit.MaxPerSecond,
@@ -129,6 +133,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	// 初始化匹配器
 	s.matcher = match.NewMatcher(match.MatcherDeps{
 		RoomManager: s.roomManager,
+		WithClients: s.withActiveClients,
 		RedisStore:  s.redisStore,
 		Leaderboard: s.leaderboard,
 		GameConfig:  cfg.Game,
@@ -147,6 +152,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		ChatLimiter:    s.chatLimiter,
 		Leaderboard:    s.leaderboard,
 		SessionManager: s.sessionManager,
+		Authenticate:   s.authenticateTerminal,
 	})
 
 	// 设置房间游戏开始回调

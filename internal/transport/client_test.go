@@ -68,3 +68,29 @@ func TestClient_ConnectAndSend(t *testing.T) {
 	assert.NotNil(t, receivedMsg)
 	assert.Equal(t, protocol.MsgPing, receivedMsg.Type)
 }
+
+func TestReconnectKeepsOriginalCredentialUntilValidated(t *testing.T) {
+	c := NewClient("")
+	c.PlayerID, c.ReconnectToken = "original", "original-token"
+	c.reconnecting.Store(true)
+	c.processMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{PlayerID: "temporary", ReconnectToken: "temporary-token"}))
+	assert.Equal(t, "original", c.PlayerID)
+	assert.Equal(t, "original-token", c.ReconnectToken)
+	assert.Empty(t, c.receive)
+	c.processMessage(codec.MustNewMessage(protocol.MsgReconnected, protocol.ReconnectedPayload{PlayerID: "original"}))
+	assert.False(t, c.IsReconnecting())
+	assert.Equal(t, "original-token", c.ReconnectToken)
+	c.handleReadError(&websocket.CloseError{Code: 4001})
+	assert.True(t, c.replaced.Load())
+}
+
+func TestIdentityOutageDoesNotFallBackToTemporaryTerminalIdentity(t *testing.T) {
+	c := NewClient("")
+	c.PlayerID, c.ReconnectToken = "original", "original-token"
+	c.reconnecting.Store(true)
+	c.processMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{PlayerID: "temporary", ReconnectToken: "temporary-token"}))
+	c.processMessage(codec.NewErrorMessage(protocol.ErrCodeIdentityUnavailable))
+	assert.Equal(t, "original", c.PlayerID)
+	assert.Equal(t, "original-token", c.ReconnectToken)
+	assert.False(t, c.IsReconnecting())
+}

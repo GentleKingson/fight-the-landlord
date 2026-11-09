@@ -41,7 +41,22 @@ message PlayerScore {
 }
 
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）
+message PublicPlay {
+ string type = 1;
+ string player_id = 2;
+ string player_name = 3;
+ repeated CardInfo cards = 4;
+ string hand_type = 5;
+ bool new_trick = 6;
+}
+
 message GameStateDTO {
+ int64 multiplier = 14;
+ repeated PublicPlay public_plays = 15;
+ int64 turn_deadline = 16;
+ bool turn_paused = 17;
+ string last_hand_type = 18;
+
   string deal_id = 10;
   int64 deal_start_at = 11;
   int64 deal_end_at = 12;

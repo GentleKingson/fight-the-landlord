@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -131,7 +132,6 @@ func (rl *RateLimiter) cleanup() {
 // OriginChecker 来源验证器
 type OriginChecker struct {
 	allowedOrigins map[string]bool
-	allowAll       bool
 }
 
 // NewOriginChecker 创建来源验证器
@@ -141,9 +141,9 @@ func NewOriginChecker(origins []string) *OriginChecker {
 	}
 
 	for _, origin := range origins {
+		origin = strings.TrimSpace(origin)
 		if origin == "*" {
-			oc.allowAll = true
-			return oc
+			continue // Credential-bearing browser sockets never allow wildcard origins.
 		}
 		oc.allowedOrigins[strings.ToLower(origin)] = true
 	}
@@ -153,17 +153,21 @@ func NewOriginChecker(origins []string) *OriginChecker {
 
 // Check 检查来源是否允许
 func (oc *OriginChecker) Check(r *http.Request) bool {
-	if oc.allowAll {
-		return true
-	}
-
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		// 没有 Origin 头，可能是同源请求或本地客户端
 		return true
 	}
 
-	return oc.allowedOrigins[strings.ToLower(origin)]
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return (u.Scheme == scheme && strings.EqualFold(u.Host, r.Host)) || oc.allowedOrigins[strings.ToLower(origin)]
 }
 
 // --- IP 白名单/黑名单 ---

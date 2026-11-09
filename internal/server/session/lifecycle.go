@@ -14,6 +14,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 	"github.com/palemoky/fight-the-landlord/internal/securerand"
+	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 )
 
 // Start 开始游戏
@@ -71,6 +72,7 @@ func (gs *GameSession) stopDealTimer() {
 
 // dealNewRound 重置本局状态并发牌（不进入叫地主流程；调用方需持有 gs.mu）
 func (gs *GameSession) dealNewRound() {
+	gs.publicPlays = nil
 	// 重置叫抢与倍数状态
 	gs.landlordCaller = -1
 	gs.landlordCandidate = -1
@@ -245,7 +247,12 @@ func (gs *GameSession) computeScores(winner *GamePlayer, mult int) []protocol.Pl
 
 // recordGameResults 记录游戏结果到排行榜
 func (gs *GameSession) recordGameResults(winner *GamePlayer) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	gameID := gs.dealID
+	if gameID == "" {
+		gameID = rand.Text()
+	}
 	leaderboard := gs.leaderboard
 	if leaderboard == nil || !leaderboard.IsReady() {
 		return
@@ -274,8 +281,9 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 		}
 
 		// 记录结果
-		if err := leaderboard.RecordGameResult(ctx, p.ID, playerName, p.IsLandlord, isWinner); err != nil {
-			log.Printf("记录游戏结果失败: %v", err)
+		if err := leaderboard.RecordGameResultOnce(ctx, gameID, p.ID, playerName, p.IsLandlord, isWinner); err != nil {
+			log.Printf("记录游戏结果失败，将在进程内重试: %v", err)
+			go retryGameResult(leaderboard, gameID, p.ID, playerName, p.IsLandlord, isWinner)
 		}
 	}
 }
@@ -283,3 +291,26 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 // BelongsToRoom distinguishes successive games that reuse the same room code.
 // The room pointer is immutable for the lifetime of a session.
 func (gs *GameSession) BelongsToRoom(r *room.Room) bool { return gs.room == r }
+
+// Bounded in-process retries survive a short Redis outage, not a server restart.
+// The 24h Redis marker outlives this 10m retry window by a wide margin.
+func retryGameResult(lb *storage.LeaderboardManager, gameID, id, name string, landlord, winner bool) {
+	deadline := time.NewTimer(10 * time.Minute)
+	defer deadline.Stop()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline.C:
+			log.Printf("战绩重试超时，game=%s player=%s", gameID, id)
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err := lb.RecordGameResultOnce(ctx, gameID, id, name, landlord, winner)
+			cancel()
+			if err == nil {
+				return
+			}
+		}
+	}
+}

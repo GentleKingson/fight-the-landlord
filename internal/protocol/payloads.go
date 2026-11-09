@@ -54,11 +54,25 @@ type ReconnectedPayload struct {
 }
 
 // GameStateDTO 游戏状态数据传输对象（用于重连恢复）
+type PublicPlay struct {
+	Type       string     `json:"type"`
+	PlayerID   string     `json:"player_id"`
+	PlayerName string     `json:"player_name"`
+	Cards      []CardInfo `json:"cards"`
+	HandType   string     `json:"hand_type"`
+	NewTrick   bool       `json:"new_trick"`
+}
+
 type GameStateDTO struct {
-	DealID      string `json:"deal_id"`
-	DealStartAt int64  `json:"deal_start_at"`
-	DealEndAt   int64  `json:"deal_end_at"`
-	ServerTime  int64  `json:"server_time"`
+	Multiplier   int          `json:"multiplier"`
+	PublicPlays  []PublicPlay `json:"public_plays"`
+	TurnDeadline int64        `json:"turn_deadline"`
+	TurnPaused   bool         `json:"turn_paused"`
+	LastHandType string       `json:"last_hand_type"`
+	DealID       string       `json:"deal_id"`
+	DealStartAt  int64        `json:"deal_start_at"`
+	DealEndAt    int64        `json:"deal_end_at"`
+	ServerTime   int64        `json:"server_time"`
 
 	Phase        string       `json:"phase"`          // dealing/bidding/playing
 	Players      []PlayerInfo `json:"players"`        // 所有玩家信息

@@ -1,6 +1,6 @@
 import { decodeMessage, encodeMessage } from '../protocol/codec';
 import { MsgType, type IncomingMessage, type MessageType, type OutgoingPayload } from '../protocol/types';
-import { loadReconnect, useAppStore } from '../stores/appStore';
+import { useAppStore } from '../stores/appStore';
 
 type Listener = (message: IncomingMessage) => void;
 
@@ -20,9 +20,8 @@ export class GameSocket {
     const store = useAppStore.getState();
     store.setError('');
 
-    const saved = loadReconnect();
-    let reconnecting = Boolean(saved?.id && saved.token);
-    let freshIdentity: IncomingMessage | null = null;
+    // Authentication and recovery happen during the cookie-authenticated handshake.
+    try { sessionStorage.removeItem('ddz_next_reconnect'); } catch { /* storage may be disabled */ }
     const socket = new WebSocket(this.url);
     this.socket = socket;
     socket.binaryType = 'arraybuffer';
@@ -31,9 +30,6 @@ export class GameSocket {
       if (this.socket !== socket) return;
       useAppStore.getState().setConnected(true);
       this.startHeartbeat();
-      if (saved?.id && saved.token) {
-        this.send(MsgType.Reconnect, { player_id: saved.id, token: saved.token });
-      }
       this.send(MsgType.GetOnlineCount);
       this.send(MsgType.GetMaintenanceStatus);
     };
@@ -43,19 +39,6 @@ export class GameSocket {
       let message: IncomingMessage;
       try { message = decodeMessage(event.data as ArrayBuffer); }
       catch { useAppStore.getState().setError('收到无效的服务器消息'); return; }
-      // The server sends a temporary identity before answering Reconnect.
-      // Keep the old token until recovery succeeds (also across page reloads).
-      if (reconnecting && message.type === MsgType.Connected) {
-        freshIdentity = message;
-        return;
-      }
-      if (reconnecting && message.type === MsgType.Reconnected) {
-        useAppStore.setState({ reconnectToken: saved!.token });
-        reconnecting = false;
-      } else if (reconnecting && message.type === MsgType.Error) {
-        reconnecting = false;
-        if (freshIdentity) useAppStore.getState().handleMessage(freshIdentity);
-      }
       useAppStore.getState().handleMessage(message);
       for (const listener of this.listeners) listener(message);
     };

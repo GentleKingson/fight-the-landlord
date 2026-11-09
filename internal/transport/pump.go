@@ -41,7 +41,7 @@ func (c *Client) handleReadExit() {
 		log.Printf("[PANIC] readPump panic recovered: %v", r)
 	}
 	// 尝试重连
-	if c.ReconnectToken != "" && !c.reconnecting.Load() {
+	if c.ReconnectToken != "" && !c.reconnecting.Load() && !c.replaced.Load() {
 		go c.tryReconnect()
 	} else {
 		c.Close()
@@ -60,6 +60,9 @@ func (c *Client) setupPongHandler() {
 }
 
 func (c *Client) handleReadError(err error) {
+	if websocket.IsCloseError(err, 4001) {
+		c.replaced.Store(true)
+	}
 	if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 		if c.OnError != nil {
 			c.OnError(err)
@@ -68,6 +71,28 @@ func (c *Client) handleReadError(err error) {
 }
 
 func (c *Client) processMessage(msg *protocol.Message) {
+	// A fresh terminal socket receives a temporary identity before Reconnect.
+	// Do not overwrite the credential that the reconnect request still needs.
+	if c.reconnecting.Load() && msg.Type == protocol.MsgConnected {
+		c.pendingIdentity = msg
+		return
+	}
+	if c.reconnecting.Load() && msg.Type == protocol.MsgError && c.pendingIdentity != nil {
+		payload, err := codec.ParsePayload[protocol.ErrorPayload](msg)
+		if err == nil && payload.Code == protocol.ErrCodeIdentityInvalid {
+			pending := c.pendingIdentity
+			c.pendingIdentity = nil
+			c.reconnecting.Store(false)
+			c.processMessage(pending)
+		} else if err == nil && payload.Code == protocol.ErrCodeIdentityUnavailable {
+			// The server closes this temporary socket; retry with the original credential.
+			c.pendingIdentity = nil
+			c.reconnecting.Store(false)
+		}
+	}
+	if msg.Type == protocol.MsgReconnected {
+		c.pendingIdentity = nil
+	}
 	isReconnected := c.handleInternalMessage(msg)
 
 	// 回调处理

@@ -40,11 +40,16 @@ func (gs *GameSession) BuildGameStateDTO(playerID string, sessionManager *Sessio
 
 func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *SessionManager) *protocol.GameStateDTO {
 	var hand []card.Card
+	found := false
 	for _, p := range gs.players {
 		if p.ID == playerID {
+			found = true
 			hand = p.Hand
 			break
 		}
+	}
+	if !found {
+		return nil
 	}
 	players := make([]protocol.PlayerInfo, len(gs.players))
 	for i, p := range gs.players {
@@ -87,7 +92,30 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 	if gs.state == GameStateBidding || gs.state == GameStateDealing {
 		bottomCards = nil
 	}
+	mustPlay := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
+	canBeat := false
+	if gs.state == GameStatePlaying && currentTurnID == playerID {
+		canBeat = mustPlay || rule.CanBeatWithHand(hand, gs.lastPlayedHand)
+	}
+	gs.timerMu.Lock()
+	deadline := int64(0)
+	paused := gs.offlineWaitTimer != nil
+	if gs.turnTimer != nil {
+		deadline = gs.timerStartTime.Add(gs.remainingTime).UnixMilli()
+	}
+	gs.timerMu.Unlock()
+	plays := make([]protocol.PublicPlay, len(gs.publicPlays))
+	for i, p := range gs.publicPlays {
+		plays[i] = p
+		plays[i].Cards = append([]protocol.CardInfo{}, p.Cards...)
+	}
+	lastType := ""
+	if !gs.lastPlayedHand.IsEmpty() {
+		lastType = gs.lastPlayedHand.Type.String()
+	}
 	return &protocol.GameStateDTO{
+		Multiplier: max(gs.bidMultiplier, 1) << gs.bombCount, PublicPlays: plays,
+		TurnDeadline: deadline, TurnPaused: paused, LastHandType: lastType,
 		DealID:       gs.dealID,
 		DealStartAt:  gs.dealStartAt.UnixMilli(),
 		DealEndAt:    gs.dealEndAt.UnixMilli(),
@@ -99,8 +127,8 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 		CurrentTurn:  currentTurnID,
 		LastPlayed:   convert.CardsToInfos(lastPlayed),
 		LastPlayerID: lastPlayerID,
-		MustPlay:     gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty(),
-		CanBeat:      true,
+		MustPlay:     mustPlay,
+		CanBeat:      canBeat,
 	}
 }
 
@@ -134,7 +162,7 @@ func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 			PlayerID: player.ID,
 			Timeout:  gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout),
 			MustPlay: mustPlay,
-			CanBeat:  canBeat,
+			CanBeat:  canBeat && client.GetID() == player.ID,
 		}))
 	}
 }
@@ -144,6 +172,9 @@ func (gs *GameSession) remainingTurnSeconds(fallback int) int {
 	gs.timerMu.Lock()
 	defer gs.timerMu.Unlock()
 
+	if gs.offlineWaitTimer != nil {
+		return 0
+	}
 	if gs.turnTimer == nil || gs.timerStartTime.IsZero() {
 		return fallback
 	}
@@ -151,7 +182,7 @@ func (gs *GameSession) remainingTurnSeconds(fallback int) int {
 	if remaining <= 0 {
 		return 0
 	}
-	return int(remaining.Seconds())
+	return int((remaining + time.Second - 1) / time.Second)
 }
 
 // SerializeForRedis 为Redis序列化准备数据（提供只读访问）

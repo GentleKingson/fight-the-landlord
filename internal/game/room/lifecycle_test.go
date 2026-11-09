@@ -36,6 +36,11 @@ func TestNotifyPlayerOffline_AllPlayersOffline(t *testing.T) {
 	rm.NotifyPlayerOffline(client3)
 
 	// Room should be deleted
+	assert.NotNil(t, rm.GetRoom(room.Code))
+	room.mu.Lock()
+	room.AllOfflineAt = time.Now().Add(-rm.gameConfig.OfflineRoomRetentionDuration() - time.Second)
+	room.mu.Unlock()
+	rm.cleanup()
 	assert.Nil(t, rm.GetRoom(room.Code))
 }
 
@@ -164,6 +169,8 @@ func TestGenerateRoomCode_Uniqueness(t *testing.T) {
 
 	rm := NewRoomManager(storage.NewRedisStore(nil), config.GameConfig{RoomTimeout: 10})
 
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
 	codes := make(map[string]bool)
 	for i := 0; i < 100; i++ {
 		code := rm.generateRoomCode()
@@ -276,4 +283,41 @@ func TestSetAllPlayersReady(t *testing.T) {
 		assert.True(t, p.Ready)
 	}
 	room.mu.RUnlock()
+}
+
+// Bots keep playing but must not prevent an empty human table from expiring.
+type retentionBot struct{ *testutil.SimpleClient }
+
+func (*retentionBot) IsBot() bool { return true }
+
+func TestOfflineRoomRetentionIgnoresBotsAndResultHasOwnDeadline(t *testing.T) {
+	cfg := config.GameConfig{RoomTimeout: 10, OfflineRoomRetention: 5, ResultRetention: 30}
+	rm := NewRoomManager(nil, cfg)
+	human := testutil.NewSimpleClient("human", "Human")
+	r, err := rm.CreateRoom(human)
+	require.NoError(t, err)
+	for _, id := range []string{"bot1", "bot2"} {
+		_, err = rm.JoinRoom(&retentionBot{testutil.NewSimpleClient(id, id)}, r.Code)
+		require.NoError(t, err)
+	}
+	r.SetState(RoomStatePlaying)
+	rm.NotifyPlayerOffline(human)
+	r.mu.Lock()
+	require.False(t, r.AllOfflineAt.IsZero())
+	r.AllOfflineAt = time.Now().Add(-6 * time.Second)
+	r.mu.Unlock()
+	// Refuse revival even before the cleanup ticker has run.
+	replacement := testutil.NewSimpleClient("human", "Human")
+	replacement.SetRoom(r.Code)
+	require.ErrorIs(t, rm.ReconnectPlayer(human, replacement), apperrors.ErrRoomNotFound)
+	r.SetState(RoomStateEnded)
+	rm.cleanup()
+	require.Same(t, r, rm.GetRoom(r.Code), "settlement has its own deadline")
+	require.NoError(t, rm.ReconnectPlayer(human, replacement))
+	r.mu.Lock()
+	r.EndedAt = time.Now().Add(-31 * time.Second)
+	r.mu.Unlock()
+	require.ErrorIs(t, rm.ReconnectPlayer(replacement, replacement), apperrors.ErrRoomNotFound)
+	rm.cleanup()
+	require.Nil(t, rm.GetRoom(r.Code))
 }

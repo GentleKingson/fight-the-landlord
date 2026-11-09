@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"errors"
 	"log"
 	"time"
 
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
+	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
@@ -32,19 +35,38 @@ func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Me
 		return
 	}
 
-	// 验证重连令牌
-	if !h.sessionManager.CanReconnect(payload.Token, payload.PlayerID) {
-		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "重连令牌无效或已过期"))
+	// Do not abandon an existing game by changing identity on this socket.
+	if client.GetRoom() != "" && client.GetID() != payload.PlayerID {
+		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameStarted))
+		return
+	}
+	valid := false
+	if h.authenticate != nil {
+		name, err := h.authenticate(payload.PlayerID, payload.Token)
+		if err != nil && !errors.Is(err, storage.ErrInvalidIdentity) {
+			client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeIdentityUnavailable))
+			client.Close()
+			return
+		}
+		if err == nil {
+			h.sessionManager.EnsureSession(payload.PlayerID, name)
+			valid = true
+		}
+	} else {
+		valid = h.sessionManager.CanReconnect(payload.Token, payload.PlayerID)
+	}
+	if !valid {
+		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeIdentityInvalid))
 		return
 	}
 
 	h.server.RestoreClient(payload.PlayerID, client, func() {
-		h.restoreConnection(client, payload.PlayerID)
+		h.RestoreConnection(client, payload.PlayerID)
 	})
 }
 
-// restoreConnection runs inside the server connection lifecycle lock.
-func (h *Handler) restoreConnection(client types.ClientInterface, playerID string) {
+// RestoreConnection runs inside the server connection lifecycle lock.
+func (h *Handler) RestoreConnection(client types.ClientInterface, playerID string) {
 	session := h.sessionManager.Snapshot(playerID)
 	if session == nil {
 		return
@@ -59,6 +81,11 @@ func (h *Handler) restoreConnection(client types.ClientInterface, playerID strin
 		PlayerName: session.PlayerName,
 	}
 
+	if session.RoomCode == "" && session.LastRoomCode != "" {
+		if r := h.roomManager.GetRoom(session.LastRoomCode); r != nil && r.GetState() == room.RoomStateEnded {
+			session.RoomCode = session.LastRoomCode
+		}
+	}
 	// 如果在房间中，尝试恢复房间信息
 	if session.RoomCode != "" && h.tryRestoreRoomState(client, session, &reconnectPayload) {
 		return // Active-game snapshot and turn have already been enqueued under the game lock.

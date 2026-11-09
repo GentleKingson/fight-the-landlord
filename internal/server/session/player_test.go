@@ -233,3 +233,19 @@ func TestSessionManager_DeleteSession_NonExistent(t *testing.T) {
 	// Should not panic
 	sm.DeleteSession("non-existent")
 }
+
+func TestLongOfflineGameRetainsNewSettlementMetadata(t *testing.T) {
+	sm := NewSessionManager()
+	sm.EnsureSession("p1", "P1")
+	sm.SetRoom("p1", "123456")
+	sm.SetOffline("p1")
+	saved := sm.GetSession("p1")
+	saved.mu.Lock()
+	saved.DisconnectedAt = time.Now().Add(-24 * time.Hour)
+	saved.mu.Unlock()
+	sm.cleanup()
+	assert.NotNil(t, sm.Snapshot("p1"), "a living game keeps its reconnect association")
+	sm.SetRoom("p1", "")
+	sm.cleanup()
+	assert.Equal(t, "123456", sm.Snapshot("p1").LastRoomCode, "new settlement retention starts at completion")
+}
