@@ -2330,6 +2330,10 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
   .felt-table .card--played .card__joker-star { right: 3px; bottom: 4px; font-size: 12px; }
 }
 
+@media (max-width: 360px) and (orientation: portrait) {
+  .table-arena { padding-inline: 4px; }
+}
+
 @media (orientation: landscape) and (max-height: 520px) {
   .table-arena { padding: 3px 8px; gap: 4px; }
   .turn-banner { width: min(260px, 54%); }

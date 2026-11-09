@@ -16,13 +16,13 @@ async function expectLayout(page: Page) {
     const right = bounds('.seat-panel--right .player-badge');
     const bottom = bounds('.bottom-cards');
     return { left: left.right, bottomLeft: bottom.left, bottomRight: bottom.right, right: right.left,
-      clippedLabels: [...row.querySelectorAll('.player-badge > div > span')].some(label => label.scrollWidth > label.clientWidth),
+      labels: [...row.querySelectorAll('.player-badge > div > span')].map(label => ({ text: label.textContent, scroll: label.scrollWidth, available: label.clientWidth })),
       width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
       height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) };
   });
   expect(geometry.left).toBeLessThanOrEqual(geometry.bottomLeft);
   expect(geometry.right).toBeGreaterThanOrEqual(geometry.bottomRight);
-  expect(geometry.clippedLabels).toBe(false);
+  expect(geometry.labels.filter(label => label.scroll > label.available), `Role/card-count clipping at ${JSON.stringify(page.viewportSize())}`).toEqual([]);
   expect([geometry.width, geometry.height]).toEqual([page.viewportSize()!.width, page.viewportSize()!.height]);
 }
 
@@ -50,6 +50,7 @@ test('practice loads only two distinct small portraits and preserves them on rel
     expect(await image.evaluate(async element => (await (await fetch((element as HTMLImageElement).src)).arrayBuffer()).byteLength)).toBeLessThan(12 * 1024);
   }
   await expectLayout(page);
+  await page.screenshot({ path: test.info().outputPath('practice-table.png') });
   const card = page.getByLabel('手牌').getByRole('button').first();
   await card.click();
   await expect(card).toHaveAttribute('aria-pressed', 'true');
@@ -77,6 +78,7 @@ test('avatars, role and card count fit narrow portrait and landscape while rotat
     await expectLayout(page);
     expect(await sources(page)).toEqual(initial);
     await expect(page.getByRole('button', { name: '出牌', exact: true })).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: test.info().outputPath(`practice-${viewport.width}x${viewport.height}.png`) });
   }
   await page.evaluate(async () => {
     const path = '/src/stores/appStore.ts';
@@ -89,7 +91,7 @@ test('avatars, role and card count fit narrow portrait and landscape while rotat
   await expect(page.getByRole('button', { name: '叫地主', exact: true })).toBeInViewport({ ratio: 1 });
   await expectLayout(page);
   expect(await sources(page)).toEqual(initial);
-  await page.screenshot({ path: `/tmp/bot-avatars-${test.info().project.name}.png` });
+  await page.screenshot({ path: test.info().outputPath('bidding-long-names.png') });
 });
 
 test('failed images retain initials and human opponents never request bot portraits', async ({ page }) => {
