@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { CardInfo } from '../../protocol/types';
 import { Card } from './Card';
+import { sortPlayedCards } from './cardModel';
 
 interface PlayedCardsProps {
   cards: CardInfo[];
@@ -21,7 +22,7 @@ export function PlayedCards({ cards, handType, playerName, compact = false }: Pl
         {handType ? <strong>{handType}</strong> : null}
       </div>
       <div className="played-cards__row" style={{ '--played-count': cards.length } as CSSProperties}>
-        {cards.map((card, index) => (
+        {sortPlayedCards(cards).map((card, index) => (
           <Card key={`${card.suit}_${card.rank}_${index}`} card={card} size="played" />
         ))}
       </div>
