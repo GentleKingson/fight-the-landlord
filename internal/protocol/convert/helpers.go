@@ -87,6 +87,7 @@ func ProtoToPlayerInfos(pbs []*pb.PlayerInfo) []protocol.PlayerInfo {
 
 func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 	return &pb.GameStateDTO{
+		GameId: gs.GameID, StateVersion: gs.StateVersion, TurnToken: gs.TurnToken,
 		Multiplier: int64(gs.Multiplier), PublicPlays: PublicPlaysToProto(gs.PublicPlays),
 		TurnDeadline: gs.TurnDeadline, TurnPaused: gs.TurnPaused, LastHandType: gs.LastHandType,
 		DealId:       gs.DealID,
@@ -107,6 +108,7 @@ func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 
 func ProtoToGameStateDTO(pb *pb.GameStateDTO) *protocol.GameStateDTO {
 	return &protocol.GameStateDTO{
+		GameID: pb.GameId, StateVersion: pb.StateVersion, TurnToken: pb.TurnToken,
 		Multiplier: int(pb.Multiplier), PublicPlays: ProtoToPublicPlays(pb.PublicPlays),
 		TurnDeadline: pb.TurnDeadline, TurnPaused: pb.TurnPaused, LastHandType: pb.LastHandType,
 		DealID:       pb.DealId,

@@ -267,11 +267,16 @@ func (c *Client) closeWithCode(code int) {
 // SetRoom 设置客户端所在房间
 func (c *Client) SetRoom(roomID string) {
 	c.mu.Lock()
+	previousRoom := c.RoomID
 	c.RoomID = roomID
 	id := c.ID
 	c.mu.Unlock()
 	if c.server != nil && c.server.sessionManager != nil {
-		c.server.sessionManager.SetRoom(id, roomID)
+		if roomID == "" {
+			c.server.sessionManager.ClearRoomIfCurrent(id, previousRoom)
+		} else {
+			c.server.sessionManager.SetRoom(id, roomID)
+		}
 	}
 }
 

@@ -26,7 +26,8 @@ type BidPayload struct {
 
 // PlayCardsPayload 出牌请求
 type PlayCardsPayload struct {
-	Cards []CardInfo `json:"cards"`
+	TurnToken string     `json:"turn_token"`
+	Cards     []CardInfo `json:"cards"`
 }
 
 // GetLeaderboardPayload 获取排行榜请求
@@ -64,6 +65,9 @@ type PublicPlay struct {
 }
 
 type GameStateDTO struct {
+	GameID       string       `json:"game_id"`
+	StateVersion int64        `json:"state_version"`
+	TurnToken    string       `json:"turn_token"`
 	Multiplier   int          `json:"multiplier"`
 	PublicPlays  []PublicPlay `json:"public_plays"`
 	TurnDeadline int64        `json:"turn_deadline"`
@@ -183,10 +187,11 @@ type LandlordPayload struct {
 
 // PlayTurnPayload 轮到出牌通知
 type PlayTurnPayload struct {
-	PlayerID string `json:"player_id"`
-	Timeout  int    `json:"timeout"`   // 超时时间（秒）
-	MustPlay bool   `json:"must_play"` // 是否必须出牌（新一轮开始时为 true）
-	CanBeat  bool   `json:"can_beat"`  // 是否有牌能打过上家
+	TurnToken string `json:"turn_token"`
+	PlayerID  string `json:"player_id"`
+	Timeout   int    `json:"timeout"`   // 超时时间（秒）
+	MustPlay  bool   `json:"must_play"` // 是否必须出牌（新一轮开始时为 true）
+	CanBeat   bool   `json:"can_beat"`  // 是否有牌能打过上家
 }
 
 // CardPlayedPayload 出牌通知

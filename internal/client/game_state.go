@@ -29,6 +29,7 @@ type GameState struct {
 	// 叫抢地主 / 倍数
 	Multiplier int // 当前倍数（叫抢阶段为底倍，出牌阶段含炸弹等累计）
 	BidToken   string
+	TurnToken  string
 	DealID     string
 	IsGrabTurn bool // 当前叫地主轮是否处于抢地主阶段
 

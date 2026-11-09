@@ -11,20 +11,20 @@ afterEach(cleanup);
 
 it('allows manually selected replies regardless of the advisory can_beat flag', () => {
   const hand = [4, 5, 6, 7, 8].map(rank => ({ rank, suit: 0, color: 0 }));
-  useAppStore.setState({ phase: 'playing', playerId: 'a', currentTurn: 'a', hand,
+  useAppStore.setState({ turnToken: 'turn-test', phase: 'playing', playerId: 'a', currentTurn: 'a', hand,
     selectedCards: new Set(hand.map(cardKey)), mustPlay: false, canBeat: false, players: [],
     lastPlayed: [3, 4, 5, 6, 7].map(rank => ({ rank, suit: 1, color: 1 })), drawer: 'none', tableMessage: '' });
   const send = vi.fn();
   render(<GameTable socket={{ send } as unknown as GameSocket} />);
   fireEvent.click(screen.getByRole('button', { name: /^出牌$/ }));
-  expect(send).toHaveBeenCalledWith(MsgType.PlayCards, { cards: hand });
+  expect(send).toHaveBeenCalledWith(MsgType.PlayCards, { cards: hand, turn_token: 'turn-test' });
   fireEvent.click(screen.getByRole('button', { name: /^提示$/ }));
   expect(useAppStore.getState().tableMessage).toBe('提示：顺子');
 });
 
 it.each([0, 1, 2])('keeps previous player left and next player right with their played cards (self seat %i)', (seat) => {
   useAppStore.setState({
-    phase: 'playing',
+    turnToken: 'turn-test', phase: 'playing',
     playerId: 'p1',
     currentTurn: 'p1',
     hand: [],

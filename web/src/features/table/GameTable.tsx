@@ -230,7 +230,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       useAppStore.setState({ tableMessage: selected.length ? '当前牌型不可出' : '请选择要出的牌' });
       return;
     }
-    socket.send(MsgType.PlayCards, { cards: selected });
+    socket.send(MsgType.PlayCards, { cards: selected, turn_token: useAppStore.getState().turnToken });
   }
 
   function pass() {
@@ -238,7 +238,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       useAppStore.setState({ tableMessage: '本轮必须出牌' });
       return;
     }
-    socket.send(MsgType.Pass);
+    socket.send(MsgType.Pass, { turn_token: useAppStore.getState().turnToken });
     clearSelection();
   }
 

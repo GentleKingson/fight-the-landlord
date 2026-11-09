@@ -7,6 +7,8 @@
 
 基于 Go 语言实现的斗地主游戏，支持联网对战、断线重连、智能机器人等功能。
 
+单实例服务支持 Redis 权威快照与重启续局。部署条件、故障策略和备份恢复步骤见[重启恢复说明](docs/restart-recovery.md)。
+
 [![Docker Image Size](https://img.shields.io/docker/image-size/palemoky/fight-the-landlord/latest)](https://hub.docker.com/r/palemoky/fight-the-landlord)
 [![Test](https://github.com/palemoky/fight-the-landlord/actions/workflows/test.yml/badge.svg)](https://github.com/palemoky/fight-the-landlord/actions/workflows/test.yml)
 [![Release](https://github.com/palemoky/fight-the-landlord/actions/workflows/release.yml/badge.svg)](https://github.com/palemoky/fight-the-landlord/actions/workflows/release.yml)

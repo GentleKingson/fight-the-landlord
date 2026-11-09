@@ -33,7 +33,9 @@ type Room struct {
 	EndedAt      time.Time              // 结算保留期从结束时开始
 	CreatedAt    time.Time              // 创建时间
 
-	mu sync.RWMutex
+	offlineRetention time.Duration
+	resultRetention  time.Duration
+	mu               sync.RWMutex
 }
 
 // RoomManager 房间管理器

@@ -38,6 +38,9 @@ func (gs *GameSession) HandleBidTurn(playerID string, bid bool, token string) er
 }
 
 func (gs *GameSession) handleBidLocked(playerID string, bid bool, source string) error {
+	if gs.store != nil && !gs.inTransition {
+		return gs.transition(func() error { return gs.handleBidLocked(playerID, bid, source) })
+	}
 	if gs.state != GameStateBidding {
 		return apperrors.ErrGameNotStart
 	}
@@ -130,7 +133,8 @@ func (gs *GameSession) nextGrabber(from int) int {
 
 // broadcastBidResult 广播叫/抢地主结果
 func (gs *GameSession) broadcastBidResult(player *GamePlayer, bid, isGrab bool) {
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgBidResult, protocol.BidResultPayload{
+	gs.bidHistory = append(gs.bidHistory, protocol.BidResultPayload{PlayerID: player.ID, PlayerName: player.Name, Bid: bid, IsGrab: isGrab, Multiplier: gs.bidMultiplier})
+	gs.broadcast(codec.MustNewMessage(protocol.MsgBidResult, protocol.BidResultPayload{
 		PlayerID:   player.ID,
 		PlayerName: player.Name,
 		Bid:        bid,
@@ -151,10 +155,10 @@ func (gs *GameSession) setLandlord(idx int) {
 	})
 
 	// 更新房间玩家状态
-	gs.room.Players[landlord.ID].IsLandlord = true
+	gs.effect(func() { gs.room.Players[landlord.ID].IsLandlord = true })
 
 	// 广播地主信息（含底倍）
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgLandlord, protocol.LandlordPayload{
+	gs.broadcast(codec.MustNewMessage(protocol.MsgLandlord, protocol.LandlordPayload{
 		PlayerID:    landlord.ID,
 		PlayerName:  landlord.Name,
 		BottomCards: convert.CardsToInfos(gs.bottomCards),
@@ -164,14 +168,14 @@ func (gs *GameSession) setLandlord(idx int) {
 	// 给地主发送更新后的手牌
 	rp := gs.room.Players[landlord.ID]
 	client := rp.Client
-	client.SendMessage(codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
+	gs.send(client, codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
 		Cards:       convert.CardsToInfos(landlord.Hand),
 		BottomCards: convert.CardsToInfos(gs.bottomCards),
 	}))
 
 	// 开始游戏，地主先出牌
 	gs.state = GameStatePlaying
-	gs.room.SetState(RoomStatePlaying)
+	gs.setRoomState(RoomStatePlaying)
 	gs.currentPlayer = idx
 	gs.lastPlayerIdx = idx
 

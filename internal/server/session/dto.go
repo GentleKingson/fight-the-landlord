@@ -16,10 +16,18 @@ import (
 func (gs *GameSession) ReconnectClient(manager *room.RoomManager, client types.ClientInterface, sessions *SessionManager, payload *protocol.ReconnectedPayload) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	if gs.pending != nil {
+		if err := gs.commitPendingLocked(); err != nil {
+			return err
+		}
+	}
 	if err := manager.ReconnectPlayer(client, client); err != nil {
 		return err
 	}
 	gs.playerOnlineLocked(client.GetID())
+	if gs.pending != nil {
+		return ErrPersistenceUnavailable
+	}
 	payload.RoomCode = gs.room.Code
 	payload.GameState = gs.buildGameStateDTOLocked(client.GetID(), sessions)
 	client.SendMessage(codec.MustNewMessage(protocol.MsgReconnected, *payload))
@@ -39,6 +47,9 @@ func (gs *GameSession) BuildGameStateDTO(playerID string, sessionManager *Sessio
 }
 
 func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *SessionManager) *protocol.GameStateDTO {
+	if gs.pending != nil {
+		return nil
+	}
 	var hand []card.Card
 	found := false
 	for _, p := range gs.players {
@@ -77,6 +88,7 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 		plays[i].Cards = append([]protocol.CardInfo{}, p.Cards...)
 	}
 	return &protocol.GameStateDTO{
+		GameID: gs.gameID, StateVersion: gs.revision, TurnToken: gs.playToken,
 		Multiplier: max(gs.bidMultiplier, 1) << gs.bombCount, PublicPlays: plays,
 		TurnDeadline: deadline, TurnPaused: paused, LastHandType: lastType,
 		DealID:       gs.dealID,
@@ -164,10 +176,11 @@ func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 			canBeat = rule.CanBeatWithHand(player.Hand, gs.lastPlayedHand)
 		}
 		client.SendMessage(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
-			PlayerID: player.ID,
-			Timeout:  gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout),
-			MustPlay: mustPlay,
-			CanBeat:  canBeat && client.GetID() == player.ID,
+			TurnToken: gs.playToken,
+			PlayerID:  player.ID,
+			Timeout:   gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout),
+			MustPlay:  mustPlay,
+			CanBeat:   canBeat && client.GetID() == player.ID,
 		}))
 	}
 }

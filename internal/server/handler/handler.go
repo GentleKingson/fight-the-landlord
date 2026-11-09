@@ -67,6 +67,16 @@ func (h *Handler) GetGameSession(roomCode string) *session.GameSession {
 	return h.games[roomCode]
 }
 
+func (h *Handler) GameSessions() []*session.GameSession {
+	h.gamesMu.RLock()
+	defer h.gamesMu.RUnlock()
+	games := make([]*session.GameSession, 0, len(h.games))
+	for _, gs := range h.games {
+		games = append(games, gs)
+	}
+	return games
+}
+
 // SetGameSession 设置房间的游戏会话
 func (h *Handler) SetGameSession(roomCode string, gs *session.GameSession) {
 	h.gamesMu.Lock()
@@ -79,17 +89,22 @@ func (h *Handler) SetGameSession(roomCode string, gs *session.GameSession) {
 }
 
 func (h *Handler) removeGameSession(r *room.Room) {
-	h.gamesMu.Lock()
+	h.gamesMu.RLock()
 	gs := h.games[r.Code]
+	h.gamesMu.RUnlock()
 	if gs != nil && !gs.BelongsToRoom(r) {
-		h.gamesMu.Unlock()
 		return
 	}
-	delete(h.games, r.Code)
-	h.gamesMu.Unlock()
 	if gs != nil {
 		gs.StopAllTimers()
 	}
+	// Leave the session registered until its last write and timers have stopped.
+	// A newly registered game with the same code must survive this cleanup.
+	h.gamesMu.Lock()
+	if h.games[r.Code] == gs {
+		delete(h.games, r.Code)
+	}
+	h.gamesMu.Unlock()
 }
 
 // initHandlers 初始化消息处理器映射
@@ -111,7 +126,7 @@ func (h *Handler) initHandlers() {
 		// 游戏操作
 		protocol.MsgBid:       h.handleBid,
 		protocol.MsgPlayCards: h.handlePlayCards,
-		protocol.MsgPass:      func(c types.ClientInterface, _ *protocol.Message) { h.handlePass(c) },
+		protocol.MsgPass:      func(c types.ClientInterface, msg *protocol.Message) { h.handlePass(c, msg) },
 
 		// 信息查询
 		protocol.MsgGetStats:             func(c types.ClientInterface, _ *protocol.Message) { h.handleGetStats(c) },

@@ -68,10 +68,11 @@ func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Mess
 			BidToken: p.BidToken,
 			Bid:      p.Bid,
 		}, true
-	case protocol.MsgPlayCards:
+	case protocol.MsgPlayCards, protocol.MsgPass:
 		p := payload.(protocol.PlayCardsPayload)
 		return &pb.PlayCardsPayload{
-			Cards: convert.CardsToProto(p.Cards),
+			TurnToken: p.TurnToken,
+			Cards:     convert.CardsToProto(p.Cards),
 		}, true
 	case protocol.MsgGetLeaderboard:
 		p := payload.(protocol.GetLeaderboardPayload)
@@ -266,10 +267,11 @@ func encodeServerGameMessages(msgType protocol.MessageType, payload any) (proto.
 	case protocol.MsgPlayTurn:
 		p := payload.(protocol.PlayTurnPayload)
 		return &pb.PlayTurnPayload{
-			PlayerId: p.PlayerID,
-			Timeout:  int64(p.Timeout),
-			MustPlay: p.MustPlay,
-			CanBeat:  p.CanBeat,
+			TurnToken: p.TurnToken,
+			PlayerId:  p.PlayerID,
+			Timeout:   int64(p.Timeout),
+			MustPlay:  p.MustPlay,
+			CanBeat:   p.CanBeat,
 		}, true
 	case protocol.MsgCardPlayed:
 		p := payload.(protocol.CardPlayedPayload)

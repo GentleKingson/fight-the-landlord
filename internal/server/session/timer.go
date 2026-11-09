@@ -19,7 +19,10 @@ func (gs *GameSession) startBidTimer() {
 	gs.timerStartTime = time.Now()
 	gs.remainingTime = bidTimeout
 	turnID := gs.turnID
-	gs.turnTimer = time.AfterFunc(bidTimeout, func() { gs.handleTurnTimeout(turnID, "timeout") })
+	gs.timerMode = "turn"
+	if !gs.inTransition {
+		gs.turnTimer = time.AfterFunc(bidTimeout, func() { gs.handleTurnTimeout(turnID, "timeout") })
+	}
 }
 
 func (gs *GameSession) startPlayTimer() {
@@ -30,13 +33,16 @@ func (gs *GameSession) startPlayTimer() {
 	gs.timerStartTime = time.Now()
 	gs.remainingTime = turnTimeout
 	turnID := gs.turnID
-	gs.turnTimer = time.AfterFunc(turnTimeout, func() { gs.handleTurnTimeout(turnID, "timeout") })
+	gs.timerMode = "turn"
+	if !gs.inTransition {
+		gs.turnTimer = time.AfterFunc(turnTimeout, func() { gs.handleTurnTimeout(turnID, "timeout") })
+	}
 }
 
 func (gs *GameSession) handleTurnTimeout(turnID uint64, source string) {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
-	if turnID != gs.turnID {
+	if turnID != gs.turnID || gs.stopped || gs.pending != nil {
 		return
 	}
 	switch gs.state {
@@ -62,6 +68,9 @@ func (gs *GameSession) handlePlayTimeout() {
 }
 
 func (gs *GameSession) playTimeoutLocked(source string) {
+	if gs.pending != nil || gs.stopped {
+		return
+	}
 	p := gs.players[gs.currentPlayer]
 	opponentHand := gs.lastPlayedHand
 	if gs.lastPlayerIdx == gs.currentPlayer {
@@ -81,6 +90,9 @@ func (gs *GameSession) applyTimeoutPlayLocked(cards []card.Card, source string) 
 			log.Printf("自动出牌失败，尝试兜底动作: %v", err)
 		}
 	}
+	if gs.pending != nil {
+		return
+	}
 	if !gs.lastPlayedHand.IsEmpty() && gs.lastPlayerIdx != gs.currentPlayer {
 		if err := gs.handlePassLocked(p.ID, source); err == nil {
 			return
@@ -90,12 +102,16 @@ func (gs *GameSession) applyTimeoutPlayLocked(cards []card.Card, source string) 
 			return
 		}
 	}
+	if gs.pending != nil {
+		return
+	}
 	// Keep a live timer even if an unexpected invalid state prevents the fallback.
 	gs.stopTimer()
 	gs.notifyPlayTurn()
 }
 
 func (gs *GameSession) stopTimer() {
+	gs.timerMode = ""
 	gs.cancelBotTurn()
 	gs.timerMu.Lock()
 	defer gs.timerMu.Unlock()
@@ -114,6 +130,10 @@ func (gs *GameSession) stopTimer() {
 func (gs *GameSession) StopAllTimers() {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	gs.stopped = true
+	if gs.retryTimer != nil {
+		gs.retryTimer.Stop()
+	}
 	gs.stopDealTimer()
 	gs.state = GameStateEnded
 	gs.turnID++
@@ -127,7 +147,15 @@ func (gs *GameSession) StopAllTimers() {
 func (gs *GameSession) PlayerOffline(playerID string) {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
+	observedAt := time.Now()
+	if gs.pending != nil {
+		gs.presence = append(gs.presence, presenceChange{id: playerID, at: observedAt})
+		return
+	}
+	_ = gs.transition(func() error { gs.playerOfflineLocked(playerID, observedAt); return nil })
+}
 
+func (gs *GameSession) playerOfflineLocked(playerID string, observedAt time.Time) {
 	// 找到玩家
 	playerIdx := -1
 	for i, p := range gs.players {
@@ -141,6 +169,7 @@ func (gs *GameSession) PlayerOffline(playerID string) {
 	if playerIdx == -1 {
 		return
 	}
+	gs.updateAllOfflineLocked(observedAt)
 
 	// 检查是否是当前回合玩家
 	isBidding := gs.state == GameStateBidding && gs.currentBidder == playerIdx
@@ -154,9 +183,11 @@ func (gs *GameSession) PlayerOffline(playerID string) {
 	defer gs.timerMu.Unlock()
 
 	// 暂停计时器，计算剩余时间
-	if gs.turnTimer != nil {
-		gs.turnTimer.Stop()
-		gs.remainingTime = time.Until(gs.timerStartTime.Add(gs.remainingTime))
+	if gs.turnTimer != nil || gs.timerMode == "turn" {
+		if gs.turnTimer != nil {
+			gs.turnTimer.Stop()
+		}
+		gs.remainingTime = gs.timerStartTime.Add(gs.remainingTime).Sub(observedAt)
 		if gs.remainingTime < 0 {
 			gs.remainingTime = 0
 		}
@@ -168,7 +199,10 @@ func (gs *GameSession) PlayerOffline(playerID string) {
 	// 启动离线等待计时器
 	offlineTimeout := gs.gameConfig.OfflineWaitTimeoutDuration()
 	turnID := gs.turnID
-	gs.offlineWaitTimer = time.AfterFunc(offlineTimeout, func() { gs.handleTurnTimeout(turnID, "offline") })
+	gs.timerMode, gs.offlineDeadline = "offline", observedAt.Add(offlineTimeout)
+	if !gs.inTransition {
+		gs.offlineWaitTimer = time.AfterFunc(offlineTimeout, func() { gs.handleTurnTimeout(turnID, "offline") })
+	}
 
 	log.Printf("⏸️ 玩家 %s 离线，暂停计时等待重连 (%v)", gs.players[playerIdx].Name, offlineTimeout)
 }
@@ -182,19 +216,15 @@ func (gs *GameSession) PlayerOnline(playerID string) {
 }
 
 func (gs *GameSession) playerOnlineLocked(playerID string) {
-	// 找到玩家
-	playerIdx := -1
-	for i, p := range gs.players {
-		if p.ID == playerID {
-			if !p.IsOffline {
-				return
-			}
-			p.IsOffline = false
-			playerIdx = i
-			break
-		}
+	if gs.pending != nil {
+		gs.presence = append(gs.presence, presenceChange{id: playerID, online: true})
+		return
 	}
-
+	if gs.store != nil && !gs.inTransition {
+		_ = gs.transition(func() error { gs.playerOnlineLocked(playerID); return nil })
+		return
+	}
+	playerIdx := gs.markPlayerOnline(playerID)
 	if playerIdx == -1 {
 		return
 	}
@@ -210,7 +240,7 @@ func (gs *GameSession) playerOnlineLocked(playerID string) {
 		return
 	}
 
-	if gs.turnTimer != nil || gs.offlineWaitTimer == nil {
+	if gs.timerMode != "offline" {
 		return
 	}
 
@@ -227,7 +257,10 @@ func (gs *GameSession) playerOnlineLocked(playerID string) {
 	if gs.remainingTime >= 0 {
 		gs.timerStartTime = time.Now()
 		turnID := gs.turnID
-		gs.turnTimer = time.AfterFunc(gs.remainingTime, func() { gs.handleTurnTimeout(turnID, "timeout") })
+		gs.timerMode = "turn"
+		if !gs.inTransition {
+			gs.turnTimer = time.AfterFunc(gs.remainingTime, func() { gs.handleTurnTimeout(turnID, "timeout") })
+		}
 		log.Printf("▶️ 玩家 %s 重连，恢复计时 (剩余 %v)", gs.players[playerIdx].Name, gs.remainingTime)
 	}
 }
@@ -241,4 +274,19 @@ func (gs *GameSession) handleOfflineTimeout(playerID string) {
 	} else if gs.state == GameStatePlaying && gs.players[gs.currentPlayer].ID == playerID {
 		gs.playTimeoutLocked("offline")
 	}
+}
+
+func (gs *GameSession) markPlayerOnline(playerID string) int {
+	for i, p := range gs.players {
+		if p.ID != playerID {
+			continue
+		}
+		if !p.IsOffline {
+			return -1
+		}
+		p.IsOffline = false
+		gs.allOfflineAt = time.Time{}
+		return i
+	}
+	return -1
 }
