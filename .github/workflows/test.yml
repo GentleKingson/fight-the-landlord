@@ -80,9 +80,7 @@ jobs:
           path: ~/.cache/ci-tools/golangci-lint
           key: ${{ steps.lint-cache.outputs.cache-primary-key }}
       - name: Run golangci-lint
-        run: |
-          golangci-lint config verify
-          golangci-lint run --build-tags=ci
+        run: make lint
 
   go-test:
     runs-on: ubuntu-latest

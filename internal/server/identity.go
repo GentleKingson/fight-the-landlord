@@ -29,15 +29,9 @@ func (s *Server) resolveIdentity(r *http.Request) (*storage.GuestIdentity, strin
 	defer cancel()
 	browser := r.Header.Get("Origin") != ""
 	if browser {
-		if cookie, err := r.Cookie(identityCookie); err == nil {
-			id, token, _ := strings.Cut(cookie.Value, ".")
-			identity, err := s.redisStore.VerifyIdentity(ctx, id, token)
-			if err == nil {
-				return identity, "", nil, nil
-			}
-			if !errors.Is(err, storage.ErrInvalidIdentity) {
-				return nil, "", nil, err
-			}
+		identity, err := s.verifyCookieIdentity(ctx, r)
+		if err != nil || identity != nil {
+			return identity, "", nil, err
 		}
 	}
 	identity, token, err := s.redisStore.CreateIdentity(ctx, GenerateNickname(), s.config.Server.IdentityTTLDuration())
@@ -53,4 +47,22 @@ func (s *Server) resolveIdentity(r *http.Request) (*storage.GuestIdentity, strin
 		token = "" // Never expose a browser bearer credential to JavaScript.
 	}
 	return identity, token, headers, nil
+}
+
+// verifyCookieIdentity returns no identity and no error when a new guest is needed.
+// Storage failures propagate so an outage cannot replace an existing identity.
+func (s *Server) verifyCookieIdentity(ctx context.Context, r *http.Request) (*storage.GuestIdentity, error) {
+	cookie, err := r.Cookie(identityCookie)
+	if errors.Is(err, http.ErrNoCookie) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	id, token, _ := strings.Cut(cookie.Value, ".")
+	identity, err := s.redisStore.VerifyIdentity(ctx, id, token)
+	if errors.Is(err, storage.ErrInvalidIdentity) {
+		return nil, nil
+	}
+	return identity, err
 }

@@ -44,6 +44,9 @@
 ## 验证
 
 ```sh
+# 与 CI 使用相同版本、配置和构建标签；go vet 不能替代完整 lint
+bash scripts/install-ci-lint.sh v2.11.1 /tmp/ddz-ci-tools
+PATH="/tmp/ddz-ci-tools:$PATH" make lint
 # CI 标签禁用本地音频设备依赖，仍验证终端协议和 UI 逻辑
 go test -race -tags ci ./...
 cd web

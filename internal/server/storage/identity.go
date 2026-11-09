@@ -36,7 +36,7 @@ func (rs *RedisStore) CreateIdentity(ctx context.Context, name string, ttl time.
 	if err != nil {
 		return nil, "", err
 	}
-	if err = rs.client.Set(ctx, "identity:"+identity.ID, data, ttl).Err(); err != nil {
+	if err := rs.client.Set(ctx, "identity:"+identity.ID, data, ttl).Err(); err != nil {
 		return nil, "", err
 	}
 	return identity, token, nil

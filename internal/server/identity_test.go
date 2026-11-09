@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func identityServer(t *testing.T, redis *miniredis.Miniredis) (*Server, *httptest.Server) {
+func identityServer(t *testing.T, redis *miniredis.Miniredis) (gameServer *Server, httpServer *httptest.Server) {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Redis.Addr = redis.Addr()
@@ -29,7 +29,7 @@ func identityServer(t *testing.T, redis *miniredis.Miniredis) (*Server, *httptes
 	cfg.Game.BidTimeout, cfg.Game.TurnTimeout, cfg.Game.OfflineWaitTimeout = 600, 600, 600
 	s, err := NewServer(cfg)
 	require.NoError(t, err)
-	httpServer := httptest.NewServer(s.routes())
+	httpServer = httptest.NewServer(s.routes())
 	t.Cleanup(func() {
 		httpServer.Close()
 		s.clientsMu.RLock()
@@ -49,7 +49,7 @@ func identityServer(t *testing.T, redis *miniredis.Miniredis) (*Server, *httptes
 	return s, httpServer
 }
 
-func dialIdentity(t *testing.T, url string, cookie *http.Cookie, browser bool) (*websocket.Conn, *http.Response) {
+func dialIdentity(t *testing.T, url string, cookie *http.Cookie, browser bool) (*websocket.Conn, []*http.Cookie) {
 	t.Helper()
 	headers := http.Header{}
 	if browser {
@@ -59,9 +59,14 @@ func dialIdentity(t *testing.T, url string, cookie *http.Cookie, browser bool) (
 		headers.Set("Cookie", cookie.String())
 	}
 	conn, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(url, "http")+"/ws", headers)
+	// This helper owns the handshake response on both success and failure.
+	// Return detached cookie data so callers never inherit a body to close.
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
-	return conn, resp
+	return conn, resp.Cookies()
 }
 
 func receivePayload[T any](t *testing.T, conn *websocket.Conn, want protocol.MessageType) T {
@@ -91,11 +96,11 @@ func sendIdentityMessage(t *testing.T, conn *websocket.Conn, typ protocol.Messag
 func TestCookieIdentityRefreshReopenReplacementAndRestart(t *testing.T) {
 	redis := miniredis.RunT(t)
 	s, web := identityServer(t, redis)
-	first, resp := dialIdentity(t, web.URL, nil, true)
+	first, cookies := dialIdentity(t, web.URL, nil, true)
 	connected := receivePayload[protocol.ConnectedPayload](t, first, protocol.MsgConnected)
 	require.Empty(t, connected.ReconnectToken)
-	require.Len(t, resp.Cookies(), 1)
-	cookie := resp.Cookies()[0]
+	require.Len(t, cookies, 1)
+	cookie := cookies[0]
 	require.True(t, cookie.HttpOnly)
 	require.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
 	require.Greater(t, cookie.MaxAge, 24*60*60)
@@ -141,16 +146,22 @@ func TestCookieIdentityRefreshReopenReplacementAndRestart(t *testing.T) {
 func TestIdentityOriginRedisFailureAndTampering(t *testing.T) {
 	redis := miniredis.RunT(t)
 	s, web := identityServer(t, redis)
-	conn, resp := dialIdentity(t, web.URL, nil, true)
+	conn, cookies := dialIdentity(t, web.URL, nil, true)
 	original := receivePayload[protocol.ConnectedPayload](t, conn, protocol.MsgConnected)
-	cookie := resp.Cookies()[0]
+	cookie := cookies[0]
 	for _, origin := range []string{"https://evil.example", "null", web.URL + "/path"} {
 		_, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(web.URL, "http")+"/ws", http.Header{"Origin": {origin}, "Cookie": {cookie.String()}})
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
 		require.Error(t, err)
 		require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	}
 	redis.SetError("ERR unavailable")
 	_, failed, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(web.URL, "http")+"/ws", http.Header{"Origin": {web.URL}, "Cookie": {cookie.String()}})
+	if failed != nil {
+		_ = failed.Body.Close()
+	}
 	require.Error(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, failed.StatusCode)
 	require.Empty(t, failed.Cookies())
@@ -164,8 +175,8 @@ func TestIdentityOriginRedisFailureAndTampering(t *testing.T) {
 	require.NotEqual(t, original.PlayerID, receivePayload[protocol.ConnectedPayload](t, tampered, protocol.MsgConnected).PlayerID)
 	// Secure is explicitly configurable for TLS terminated by a reverse proxy.
 	s.config.Server.CookieSecure = true
-	secure, secureResp := dialIdentity(t, web.URL, nil, true)
-	require.True(t, secureResp.Cookies()[0].Secure)
+	secure, secureCookies := dialIdentity(t, web.URL, nil, true)
+	require.True(t, secureCookies[0].Secure)
 	_ = secure.Close()
 }
 
@@ -204,10 +215,10 @@ func TestCookieRecoversGameAndOfflineSettlementWithoutSecondGame(t *testing.T) {
 	players := make([]types.ClientInterface, 3)
 	ids := make([]string, 3)
 	for i := range sockets {
-		var resp *http.Response
-		sockets[i], resp = dialIdentity(t, web.URL, nil, true)
+		var handshakeCookies []*http.Cookie
+		sockets[i], handshakeCookies = dialIdentity(t, web.URL, nil, true)
 		identity := receivePayload[protocol.ConnectedPayload](t, sockets[i], protocol.MsgConnected)
-		ids[i], cookies[i] = identity.PlayerID, resp.Cookies()[0]
+		ids[i], cookies[i] = identity.PlayerID, handshakeCookies[0]
 		players[i] = s.GetClientByID(identity.PlayerID)
 	}
 	s.connectionMu.Lock()
