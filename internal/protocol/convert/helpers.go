@@ -50,6 +50,7 @@ func PlayerInfoToProto(p *protocol.PlayerInfo) *pb.PlayerInfo {
 		IsLandlord: p.IsLandlord,
 		CardsCount: int64(p.CardsCount),
 		Online:     p.Online,
+		IsBot:      p.IsBot,
 	}
 }
 
@@ -70,6 +71,7 @@ func ProtoToPlayerInfo(pb *pb.PlayerInfo) protocol.PlayerInfo {
 		IsLandlord: pb.IsLandlord,
 		CardsCount: int(pb.CardsCount),
 		Online:     pb.Online,
+		IsBot:      pb.IsBot,
 	}
 }
 

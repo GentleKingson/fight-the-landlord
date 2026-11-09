@@ -221,7 +221,7 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 		original := protocol.GameStartPayload{
 			Players: []protocol.PlayerInfo{
 				{ID: "p1", Name: "Player1", Seat: 0},
-				{ID: "p2", Name: "Player2", Seat: 1},
+				{ID: "p2", Name: "Player2", Seat: 1, IsBot: true},
 				{ID: "p3", Name: "Player3", Seat: 2},
 			},
 		}
@@ -234,7 +234,7 @@ func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, result.Players, 3)
-		assert.Equal(t, "p1", result.Players[0].ID)
+		assert.Equal(t, original.Players, result.Players)
 	})
 
 	t.Run("DealCards", func(t *testing.T) {
@@ -585,6 +585,7 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 				Phase: "playing",
 				Players: []protocol.PlayerInfo{
 					{ID: "p1", Name: "Player1", Seat: 0, IsLandlord: true},
+					{ID: "p2", Name: "Player2", Seat: 1, IsBot: true},
 				},
 				Hand:        []protocol.CardInfo{{Suit: 0, Rank: 3}},
 				BottomCards: []protocol.CardInfo{{Suit: 1, Rank: 5}},
@@ -604,6 +605,7 @@ func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 		assert.Equal(t, "123456", result.RoomCode)
 		require.NotNil(t, result.GameState)
 		assert.Equal(t, "playing", result.GameState.Phase)
+		assert.Equal(t, original.GameState.Players, result.GameState.Players)
 		assert.True(t, result.GameState.MustPlay)
 	})
 

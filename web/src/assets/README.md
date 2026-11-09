@@ -48,3 +48,41 @@ magick "$PORTRAIT_SOURCE_PNG" -filter Lanczos -resize x1600 -strip -quality 82 -
 sizes, portrait-frame layering, live rotation/viewport changes, navigation/reload,
 image-failure fallback, intact felt and repeated drawer/card interactions on
 desktop and mobile viewports.
+
+## Bot portraits
+
+`bot-avatars/` contains the six selected emerald-and-gold portraits: scholar,
+jade, uncle, blossom, sunshine and grandma. Each is a 192 × 192, metadata-free
+WebP, sufficient for the largest 42px avatar at 4× density. Together they are
+58,888 bytes (99.5% smaller than the six 1254 × 1254 PNG sources, 12,081,886 bytes).
+No full-size sources are imported or shipped. Only the two assigned portraits
+are fetched in a normal practice match, with a 12 KiB per-image budget.
+
+The server explicitly sends `PlayerInfo.is_bot` in the additive protobuf field 8
+on game-start and reconnect. Do not infer bots from their display names. The
+web client hashes the bots' random UUIDs, sorts their IDs and draws without
+replacement, so opponents never share a portrait in a match. The pair stays
+stable through refresh, reconnect, role changes and redeals without browser
+storage. A new practice match creates fresh bot UUIDs and a fresh selection;
+it may legitimately repeat a prior portrait.
+
+Avatars are 42px on desktop, 30px on compact widths, 28px on phone portrait and
+26px on short landscape screens. A circular frame reserves the same space while
+loading; a failed image falls back to the player's first full Unicode character.
+Images are decorative because the adjacent name identifies the player. Humans
+keep their initials. Names truncate, with full names in a title, while role and
+remaining-card count stay visible.
+
+Regenerate each runtime file from its selected original with ImageMagick:
+
+```sh
+magick "$SOURCE_PNG" -filter Lanczos -resize 192x192 -strip -quality 82 -define webp:method=6 web/src/assets/bot-avatars/NAME.webp
+```
+
+`?demo=practice` previews the two bot portraits without a backend. Unit tests
+cover deterministic assignment, uniqueness, Unicode/error fallbacks and protocol
+round trips. `tests/e2e/botAvatars.spec.ts` covers payload/decoded dimensions,
+reload, image failures, human opponents, repeated interactions and live resizing
+from 320px portrait to desktop. `live.spec.ts` checks real practice/reconnect when
+`DDZ_LIVE_URL` is set. The server and web should be updated together; older servers
+that omit `is_bot` safely retain initials rather than guessing robot identities.
