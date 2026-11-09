@@ -283,9 +283,10 @@ func TestCookieRecoversGameAndOfflineSettlementWithoutSecondGame(t *testing.T) {
 	require.Equal(t, "ended", resultState.GameState.Phase)
 	result := receivePayload[protocol.GameOverPayload](t, returned, protocol.MsgGameOver)
 	require.Len(t, result.Scores, 3)
-	stats, err := s.leaderboard.GetPlayerStats(context.Background(), ids[0])
-	require.NoError(t, err)
-	require.Equal(t, 1, stats.TotalGames)
+	require.Eventually(t, func() bool {
+		stats, err := s.leaderboard.GetPlayerStats(context.Background(), ids[0])
+		return err == nil && stats != nil && stats.TotalGames == 1
+	}, time.Second, time.Millisecond)
 	sendIdentityMessage(t, returned, protocol.MsgCreateRoom, nil)
 	next := receivePayload[protocol.RoomCreatedPayload](t, returned, protocol.MsgRoomCreated)
 	another, _ := dialIdentity(t, web.URL, cookies[0], true)

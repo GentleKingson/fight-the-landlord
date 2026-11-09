@@ -124,18 +124,35 @@ func (c *Client) ReadPump() {
 		}
 
 		// 交给处理器处理，处理完后归还到池
-		if msg.Type == protocol.MsgReconnect {
-			if !c.browser {
-				c.server.handler.Handle(c, msg)
-			}
-		} else {
-			c.server.connectionMu.Lock()
-			if c.server.GetClientByID(c.GetID()) == c && !c.isClosed() {
-				c.server.handler.Handle(c, msg)
-			}
-			c.server.connectionMu.Unlock()
-		}
+		c.handleMessage(msg)
 		codec.PutMessage(msg)
+	}
+}
+
+func (c *Client) handleMessage(msg *protocol.Message) {
+	if msg.Type == protocol.MsgReconnect {
+		if !c.browser {
+			c.server.handler.Handle(c, msg)
+		}
+		return
+	}
+	// These queries do not change room, game, or identity state. Validate the
+	// socket under the lifecycle lock, but never keep that lock across Redis I/O.
+	// Replacement closes the old client's send channel, suppressing late replies.
+	if msg.Type == protocol.MsgGetStats || msg.Type == protocol.MsgGetLeaderboard {
+		c.server.connectionMu.Lock()
+		active := c.server.GetClientByID(c.GetID()) == c && !c.isClosed()
+		c.server.connectionMu.Unlock()
+		if active {
+			c.server.handler.Handle(c, msg)
+		}
+		return
+	}
+	// State changes must stay atomic against replacement, disconnect and matching.
+	c.server.connectionMu.Lock()
+	defer c.server.connectionMu.Unlock()
+	if c.server.GetClientByID(c.GetID()) == c && !c.isClosed() {
+		c.server.handler.Handle(c, msg)
 	}
 }
 

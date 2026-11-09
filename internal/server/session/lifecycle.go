@@ -2,7 +2,6 @@ package session
 
 import (
 	"cmp"
-	"context"
 	"crypto/rand"
 	"log"
 	"slices"
@@ -151,6 +150,8 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	gs.stopTimer()
 	gs.cancelBotTurn()
 	gs.finishRecording("completed", winner)
+	// Enqueue before exposing the ended state or releasing seats for a new game.
+	gs.recordGameResults(winner)
 	gs.state = GameStateEnded
 	gs.room.SetState(RoomStateEnded)
 
@@ -193,9 +194,6 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 			rp.Client.SetRoom("")
 		}
 	}
-
-	// 记录游戏结果到排行榜
-	gs.recordGameResults(winner)
 }
 
 // finalMultiplier 计算本局最终倍数：底倍 × 炸弹/王炸 × 春天/反春天
@@ -247,8 +245,6 @@ func (gs *GameSession) computeScores(winner *GamePlayer, mult int) []protocol.Pl
 
 // recordGameResults 记录游戏结果到排行榜
 func (gs *GameSession) recordGameResults(winner *GamePlayer) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 	gameID := gs.dealID
 	if gameID == "" {
 		gameID = rand.Text()
@@ -280,37 +276,13 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 			playerName = rp.Client.GetName()
 		}
 
-		// 记录结果
-		if err := leaderboard.RecordGameResultOnce(ctx, gameID, p.ID, playerName, p.IsLandlord, isWinner); err != nil {
-			log.Printf("记录游戏结果失败，将在进程内重试: %v", err)
-			go retryGameResult(leaderboard, gameID, p.ID, playerName, p.IsLandlord, isWinner)
-		}
+		leaderboard.QueueGameResult(storage.GameResult{
+			GameID: gameID, PlayerID: p.ID, PlayerName: playerName,
+			IsLandlord: p.IsLandlord, IsWinner: isWinner,
+		})
 	}
 }
 
 // BelongsToRoom distinguishes successive games that reuse the same room code.
 // The room pointer is immutable for the lifetime of a session.
 func (gs *GameSession) BelongsToRoom(r *room.Room) bool { return gs.room == r }
-
-// Bounded in-process retries survive a short Redis outage, not a server restart.
-// The 24h Redis marker outlives this 10m retry window by a wide margin.
-func retryGameResult(lb *storage.LeaderboardManager, gameID, id, name string, landlord, winner bool) {
-	deadline := time.NewTimer(10 * time.Minute)
-	defer deadline.Stop()
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-deadline.C:
-			log.Printf("战绩重试超时，game=%s player=%s", gameID, id)
-			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			err := lb.RecordGameResultOnce(ctx, gameID, id, name, landlord, winner)
-			cancel()
-			if err == nil {
-				return
-			}
-		}
-	}
-}
