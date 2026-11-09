@@ -927,31 +927,6 @@
   font-size: 13px;
 }
 
-.card__joker-corner,
-.card__joker-word,
-.card__joker-mark {
-  position: absolute;
-}
-
-.card__joker-corner {
-  left: 5px;
-  top: 5px;
-  font-size: 12px;
-}
-
-.card__joker-word {
-  left: 10px;
-  bottom: 10px;
-  writing-mode: vertical-rl;
-  font-size: 10px;
-}
-
-.card__joker-mark {
-  right: 10px;
-  bottom: 12px;
-  font-size: 24px;
-}
-
 .action-bar {
   display: flex;
   justify-content: center;
@@ -1859,68 +1834,40 @@
   font-size: 8px;
 }
 
+.card--mini .card__index--bottom {
+  display: none;
+}
+
 .card--mini .card__pip {
+  top: 72%;
   font-size: 17px;
+}
+
+/* Use the actual card dimensions in every context (including end-of-round review).
+   Keep the word and emblem in separate horizontal lanes as the card shrinks. */
+.card__joker-word {
+  position: absolute;
+  left: 10%;
+  bottom: 10%;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: .04em;
+  font-size: min(calc(var(--w) * .21), calc(var(--h) * .17));
+  line-height: 1;
+}
+
+.card__joker-star {
+  position: absolute;
+  right: 8%;
+  bottom: 10%;
+  font-size: min(calc(var(--w) * .40), calc(var(--h) * .40));
+  line-height: 1;
 }
 
 .card.is-joker {
   background:
     linear-gradient(155deg, #fff, #f2eee4 64%, #e9dfcf),
     #fff;
-}
-
-.card__joker-index,
-.card__joker-word,
-.card__joker-star {
-  position: absolute;
-}
-
-.card__joker-index {
-  left: 7px;
-  top: 7px;
-  font-size: 13px;
-}
-
-.card__joker-word {
-  left: 12px;
-  bottom: 9px;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  letter-spacing: .04em;
-  font-size: 14px;
-}
-
-.card__joker-star {
-  right: 10px;
-  bottom: 12px;
-  font-size: 32px;
-  line-height: 1;
-}
-
-.card--played .card__joker-word {
-  font-size: 11px;
-}
-
-.card--played .card__joker-star {
-  font-size: 24px;
-}
-
-.card--mini .card__joker-word {
-  left: 7px;
-  bottom: 5px;
-  font-size: 7px;
-}
-
-.card--mini .card__joker-index {
-  left: 4px;
-  top: 4px;
-  font-size: 8px;
-}
-
-.card--mini .card__joker-star {
-  right: 5px;
-  bottom: 6px;
-  font-size: 14px;
 }
 
 .clear-selection {
@@ -2017,6 +1964,8 @@
   .bottom-cards { gap: 3px; padding: 4px; border-radius: 8px; }
   .bottom-cards > span { font-size: 10px; }
   .bottom-cards .card--mini { --w: 22px; --h: 32px; }
+  .bottom-cards .card__index--top { top: 3px; left: 2px; }
+  .bottom-cards .card__pip { display: none; }
   .bottom-cards > div { gap: 2px; }
   .turn-banner { padding: 4px 8px; gap: 6px; }
   .turn-banner__copy strong { font-size: 15px; }
@@ -2026,7 +1975,7 @@
   .action-bar .primary-action, .action-bar .secondary-action { min-height: 44px; padding: 0 6px; border-radius: 10px; font-size: 16px; }
   .action-bar small { font-size: 11px; }
   .hand { height: 112px; border-radius: 14px; }
-  .card { --w: 58px; --h: 82px; }
+  .card--hand { --w: 58px; --h: 82px; }
   .card--played { --w: 38px; --h: 54px; }
   .card__index { font-size: 15px; }
   .card__pip { font-size: 32px; }
@@ -2051,20 +2000,6 @@
 
 .hand.is-dragging .card {
   cursor: grabbing;
-}
-
-.card__joker-index {
-  display: none;
-}
-
-.card__joker-word {
-  left: 11px;
-  bottom: 10px;
-}
-
-.card__joker-star {
-  right: 12px;
-  bottom: 12px;
 }
 
 .bottom-cards.is-hidden {
@@ -2148,18 +2083,6 @@
 
 .card--action .card__pip {
   font-size: 24px;
-}
-
-.card--action .card__joker-word {
-  left: 8px;
-  bottom: 6px;
-  font-size: 8px;
-}
-
-.card--action .card__joker-star {
-  right: 7px;
-  bottom: 8px;
-  font-size: 18px;
 }
 
 @media (max-width: 880px) {
@@ -2311,15 +2234,11 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
   .hand { height: 138px; }
   .hand .card { --h: 58px; }
   .hand__slot[data-row="0"] { bottom: 66px; }
-  .hand .card__joker-word { left: 6px; bottom: 5px; font-size: 10px; }
-  .hand .card__joker-star { right: 7px; bottom: 7px; font-size: 24px; }
   .felt-table .played-cards { --played-card-w: 28px; --played-card-h: 40px; --played-step: 18px; gap: 3px; }
   .felt-table .card--played .card__index { font-size: 9px; }
   .felt-table .card--played .card__index--top { top: 3px; left: 2px; }
   .felt-table .card--played .card__index i { font-size: 8px; }
   .felt-table .card--played .card__pip { font-size: 17px; }
-  .felt-table .card--played .card__joker-word { left: 3px; bottom: 3px; font-size: 7px; }
-  .felt-table .card--played .card__joker-star { right: 3px; bottom: 4px; font-size: 12px; }
 }
 
 @media (max-width: 360px) and (orientation: portrait) {
@@ -2335,10 +2254,6 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
   .felt-table .card--played .card__index--top { top: 3px; left: 2px; }
   .felt-table .card--played .card__index i { font-size: 7px; }
   .felt-table .card--played .card__pip { display: none; }
-  .felt-table .card--played .card__joker-word { left: 3px; bottom: 3px; font-size: 5px; }
-  .felt-table .card--played .card__joker-star { right: 2px; bottom: 3px; font-size: 9px; }
-  .hand .card__joker-word { left: 6px; bottom: 5px; font-size: 10px; }
-  .hand .card__joker-star { right: 7px; bottom: 7px; font-size: 24px; }
 }
 
 /* A bounded table-relative surface keeps card flights inside portrait/landscape tables. */
