@@ -18,7 +18,7 @@ it('includes exactly the 66 CLI assets and maps every single/pair/trio rank', ()
 
 it.each([
   ['三带一', ['type_trio_single']], ['三带二', ['type_trio_pair']],
-  ['顺子', ['type_straight', 'straight']], ['连对', ['type_pairstraight']],
+  ['顺子', ['type_straight']], ['连对', ['type_pairstraight']],
   ['飞机', ['type_plane', 'plane']], ['飞机带单', ['type_plane', 'plane']], ['飞机带对', ['type_plane', 'plane']],
   ['炸弹', ['type_bomb', 'bomb']], ['王炸', ['type_rocket', 'bomb']],
   ['四带二', ['type_four_two']], ['四带两对', ['type_four_twopair']],
