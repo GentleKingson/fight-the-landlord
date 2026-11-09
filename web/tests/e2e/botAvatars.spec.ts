@@ -4,6 +4,10 @@ const portraits = '.player-avatar img';
 const sources = (page: Page) => page.locator(portraits).evaluateAll(images => images.map(image => (image as HTMLImageElement).src));
 
 async function expectLayout(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
   for (const avatar of await page.locator('.player-avatar').all()) {
     await expect(avatar).toBeInViewport({ ratio: 1 });
     const box = (await avatar.boundingBox())!;
@@ -16,13 +20,20 @@ async function expectLayout(page: Page) {
     const right = bounds('.seat-panel--right .player-badge');
     const bottom = bounds('.bottom-cards');
     return { left: left.right, bottomLeft: bottom.left, bottomRight: bottom.right, right: right.left,
-      labels: [...row.querySelectorAll('.player-badge > div > span')].map(label => ({ text: label.textContent, scroll: label.scrollWidth, available: label.clientWidth })),
+      labels: [...row.querySelectorAll('.player-badge > div > span')].map(label => {
+        // scrollWidth/clientWidth round subpixel clipping away, even when the
+        // browser replaces the final card-count digits with an ellipsis.
+        const text = document.createRange();
+        text.selectNodeContents(label);
+        return { text: label.textContent, width: text.getBoundingClientRect().width, available: label.getBoundingClientRect().width };
+      }),
       width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
       height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) };
   });
   expect(geometry.left).toBeLessThanOrEqual(geometry.bottomLeft);
   expect(geometry.right).toBeGreaterThanOrEqual(geometry.bottomRight);
-  expect(geometry.labels.filter(label => label.scroll > label.available), `Role/card-count clipping at ${JSON.stringify(page.viewportSize())}`).toEqual([]);
+  expect(geometry.labels).toHaveLength(2);
+  expect(geometry.labels.filter(label => label.width > label.available + 0.1), `Role/card-count clipping at ${JSON.stringify(page.viewportSize())}`).toEqual([]);
   expect([geometry.width, geometry.height]).toEqual([page.viewportSize()!.width, page.viewportSize()!.height]);
 }
 
@@ -92,6 +103,13 @@ test('avatars, role and card count fit narrow portrait and landscape while rotat
   await expectLayout(page);
   expect(await sources(page)).toEqual(initial);
   await page.screenshot({ path: test.info().outputPath('bidding-long-names.png') });
+  await expectLayout(page);
+  for (const viewport of [{ width: 320, height: 844 }, { width: 375, height: 667 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await page.screenshot({ path: test.info().outputPath(`bidding-${viewport.width}x${viewport.height}.png`) });
+    await expectLayout(page);
+    expect(await sources(page)).toEqual(initial);
+  }
 });
 
 test('failed images retain initials and human opponents never request bot portraits', async ({ page }) => {

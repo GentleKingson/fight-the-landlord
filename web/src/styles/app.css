@@ -2309,6 +2309,8 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
   .player-badge .player-action { padding: 2px 4px; font-size: 10px; }
   .player-badge .player-offline { position: absolute; top: calc(100% + 3px); right: 6px; z-index: 2; }
   .seat-panel--right .player-offline { right: auto; left: 6px; }
+  .bottom-cards.is-hidden { padding: 4px; grid-template-columns: auto; }
+  .bottom-cards.is-hidden > span { display: none; }
 }
 
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
