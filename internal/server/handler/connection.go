@@ -106,17 +106,17 @@ func (h *Handler) RestoreConnection(client types.ClientInterface, playerID strin
 }
 
 // tryRestoreRoomState 尝试恢复房间状态
-func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *session.PlayerSession, payload *protocol.ReconnectedPayload) bool {
-	room := h.roomManager.GetRoom(session.RoomCode)
+func (h *Handler) tryRestoreRoomState(client types.ClientInterface, saved *session.PlayerSession, payload *protocol.ReconnectedPayload) bool {
+	room := h.roomManager.GetRoom(saved.RoomCode)
 	if room == nil {
 		client.SetRoom("")
 		return false
 	}
 
-	client.SetRoom(session.RoomCode)
+	client.SetRoom(saved.RoomCode)
 	// 重连到房间
 	var err error
-	if gameSession := h.GetGameSession(session.RoomCode); gameSession != nil {
+	if gameSession := h.GetGameSession(saved.RoomCode); gameSession != nil {
 		err = gameSession.ReconnectClient(h.roomManager, client, h.sessionManager, payload)
 		if err == nil {
 			return true
@@ -126,12 +126,16 @@ func (h *Handler) tryRestoreRoomState(client types.ClientInterface, session *ses
 	}
 	if err != nil {
 		log.Printf("重连到房间失败: %v", err)
+		if errors.Is(err, session.ErrPersistenceUnavailable) {
+			client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, err.Error()))
+			return true // Keep the game association while its write is unresolved.
+		}
 		client.SetRoom("")
 		return false
 	}
 
-	client.SetRoom(session.RoomCode)
-	payload.RoomCode = session.RoomCode
+	client.SetRoom(saved.RoomCode)
+	payload.RoomCode = saved.RoomCode
 
 	return false
 }

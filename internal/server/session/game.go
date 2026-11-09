@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
 	"sync"
 	"time"
 
@@ -36,13 +37,29 @@ type GamePlayer struct {
 
 // GameSession 游戏会话
 type GameSession struct {
-	room        *room.Room
-	leaderboard *storage.LeaderboardManager
-	gameConfig  config.GameConfig
-	publicPlays []protocol.PublicPlay // Only accepted, public play/pass actions; no training/private data.
-	lastResult  *protocol.Message     // Replay settlement if a reconnect races with game completion.
-	state       GameState
-	players     []*GamePlayer // 按座位顺序
+	presence        []presenceChange
+	store           *storage.RedisStore
+	gameID          string
+	revision        int64
+	pending         *storage.GameRecord
+	committed       *storage.GameRecord
+	inTransition    bool
+	effects         []func()
+	retryTimer      *time.Timer
+	stopped         bool
+	timerMode       string
+	offlineDeadline time.Time
+	allOfflineAt    time.Time
+	endedAt         time.Time
+	playToken       string
+	bidHistory      []protocol.BidResultPayload
+	room            *room.Room
+	leaderboard     *storage.LeaderboardManager
+	gameConfig      config.GameConfig
+	publicPlays     []protocol.PublicPlay // Only accepted, public play/pass actions; no training/private data.
+	lastResult      *protocol.Message     // Replay settlement if a reconnect races with game completion.
+	state           GameState
+	players         []*GamePlayer // 按座位顺序
 
 	deck        card.Deck
 	bottomCards []card.Card
@@ -102,7 +119,9 @@ func NewGameSession(r *room.Room, lb *storage.LeaderboardManager, gameCfg config
 		}
 	}
 
-	return &GameSession{
+	r.SetRetentionPolicy(gameCfg.OfflineRoomRetentionDuration(), gameCfg.ResultRetentionDuration())
+	gs := &GameSession{
+		gameID:            rand.Text(),
 		room:              r,
 		leaderboard:       lb,
 		gameConfig:        gameCfg,
@@ -112,4 +131,8 @@ func NewGameSession(r *room.Room, lb *storage.LeaderboardManager, gameCfg config
 		landlordCandidate: -1,
 		bidMultiplier:     1,
 	}
+	if lb != nil && lb.IsReady() {
+		gs.store = lb.GameStore()
+	}
+	return gs
 }

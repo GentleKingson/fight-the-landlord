@@ -53,7 +53,7 @@ func (lm *LeaderboardManager) RecordGameResultOnce(ctx context.Context, gameID, 
 				pipe.Expire(ctx, dailyKey, 48*time.Hour)
 				pipe.ZAdd(ctx, weeklyKey, rank)
 				pipe.Expire(ctx, weeklyKey, 8*24*time.Hour)
-				pipe.Set(ctx, marker, "1", 24*time.Hour)
+				pipe.Set(ctx, marker, "1", 0)
 				return nil
 			})
 			return err

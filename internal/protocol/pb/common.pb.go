@@ -400,6 +400,9 @@ func (x *PublicPlay) GetNewTrick() bool {
 
 type GameStateDTO struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	GameId        string                 `protobuf:"bytes,19,opt,name=game_id,json=gameId,proto3" json:"game_id,omitempty"`
+	StateVersion  int64                  `protobuf:"varint,20,opt,name=state_version,json=stateVersion,proto3" json:"state_version,omitempty"`
+	TurnToken     string                 `protobuf:"bytes,21,opt,name=turn_token,json=turnToken,proto3" json:"turn_token,omitempty"`
 	Multiplier    int64                  `protobuf:"varint,14,opt,name=multiplier,proto3" json:"multiplier,omitempty"`
 	PublicPlays   []*PublicPlay          `protobuf:"bytes,15,rep,name=public_plays,json=publicPlays,proto3" json:"public_plays,omitempty"`
 	TurnDeadline  int64                  `protobuf:"varint,16,opt,name=turn_deadline,json=turnDeadline,proto3" json:"turn_deadline,omitempty"`
@@ -450,6 +453,27 @@ func (x *GameStateDTO) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GameStateDTO.ProtoReflect.Descriptor instead.
 func (*GameStateDTO) Descriptor() ([]byte, []int) {
 	return file_internal_protocol_proto_common_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GameStateDTO) GetGameId() string {
+	if x != nil {
+		return x.GameId
+	}
+	return ""
+}
+
+func (x *GameStateDTO) GetStateVersion() int64 {
+	if x != nil {
+		return x.StateVersion
+	}
+	return 0
+}
+
+func (x *GameStateDTO) GetTurnToken() string {
+	if x != nil {
+		return x.TurnToken
+	}
+	return ""
 }
 
 func (x *GameStateDTO) GetMultiplier() int64 {
@@ -766,8 +790,12 @@ const file_internal_protocol_proto_common_proto_rawDesc = "" +
 	"playerName\x12(\n" +
 	"\x05cards\x18\x04 \x03(\v2\x12.protocol.CardInfoR\x05cards\x12\x1b\n" +
 	"\thand_type\x18\x05 \x01(\tR\bhandType\x12\x1b\n" +
-	"\tnew_trick\x18\x06 \x01(\bR\bnewTrick\"\xac\x05\n" +
-	"\fGameStateDTO\x12\x1e\n" +
+	"\tnew_trick\x18\x06 \x01(\bR\bnewTrick\"\x89\x06\n" +
+	"\fGameStateDTO\x12\x17\n" +
+	"\agame_id\x18\x13 \x01(\tR\x06gameId\x12#\n" +
+	"\rstate_version\x18\x14 \x01(\x03R\fstateVersion\x12\x1d\n" +
+	"\n" +
+	"turn_token\x18\x15 \x01(\tR\tturnToken\x12\x1e\n" +
 	"\n" +
 	"multiplier\x18\x0e \x01(\x03R\n" +
 	"multiplier\x127\n" +

@@ -43,7 +43,7 @@ services:
       - redis-data:/data
     environment:
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
-    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-}"
+    command: redis-server --appendonly yes --appendfsync always --requirepass "${REDIS_PASSWORD:-}"
     networks:
       - poker-network
     healthcheck:

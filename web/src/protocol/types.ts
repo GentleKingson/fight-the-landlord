@@ -101,6 +101,9 @@ export interface PublicPlay {
 }
 
 export interface GameStateDTO extends DealTiming {
+  game_id?: string;
+  state_version?: number;
+  turn_token?: string;
  multiplier?: number;
  public_plays?: PublicPlay[];
  turn_deadline?: number;
@@ -181,7 +184,7 @@ export interface IncomingPayloadMap {
   bid_turn: { bid_token?: string; player_id: string; timeout: number; is_grab: boolean; multiplier: number };
   bid_result: { player_id: string; player_name: string; bid: boolean; is_grab: boolean; multiplier: number };
   landlord: { player_id: string; player_name: string; bottom_cards: CardInfo[]; multiplier: number };
-  play_turn: { player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
+  play_turn: { turn_token?: string; player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
   card_played: { player_id: string; player_name: string; cards: CardInfo[]; cards_left: number; hand_type: string };
   player_pass: { player_id: string; player_name: string };
   game_over: { winner_id: string; winner_name: string; is_landlord: boolean; player_hands: PlayerHand[]; multiplier: number; scores: PlayerScore[] };

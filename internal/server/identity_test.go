@@ -31,6 +31,7 @@ func identityServer(t *testing.T, redis *miniredis.Miniredis) (gameServer *Serve
 	require.NoError(t, err)
 	httpServer = httptest.NewServer(s.routes())
 	t.Cleanup(func() {
+		s.SuspendRecovery()
 		httpServer.Close()
 		s.clientsMu.RLock()
 		clients := make([]*Client, 0, len(s.clients))

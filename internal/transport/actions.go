@@ -50,15 +50,24 @@ func (c *Client) Bid(bid bool, token string) error {
 }
 
 // PlayCards 出牌
-func (c *Client) PlayCards(cards []protocol.CardInfo) error {
+func (c *Client) PlayCards(cards []protocol.CardInfo, tokens ...string) error {
+	token := ""
+	if len(tokens) > 0 {
+		token = tokens[0]
+	}
 	return c.SendMessage(codec.MustNewMessage(protocol.MsgPlayCards, protocol.PlayCardsPayload{
-		Cards: cards,
+		TurnToken: token,
+		Cards:     cards,
 	}))
 }
 
 // Pass 不出
-func (c *Client) Pass() error {
-	return c.SendMessage(codec.MustNewMessage(protocol.MsgPass, nil))
+func (c *Client) Pass(tokens ...string) error {
+	token := ""
+	if len(tokens) > 0 {
+		token = tokens[0]
+	}
+	return c.SendMessage(codec.MustNewMessage(protocol.MsgPass, protocol.PlayCardsPayload{TurnToken: token}))
 }
 
 // GetStats 获取个人统计

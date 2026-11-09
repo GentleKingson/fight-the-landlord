@@ -38,6 +38,8 @@ var upgrader = websocket.Upgrader{
 
 // Server WebSocket 服务器
 type Server struct {
+	recoveryCancel context.CancelFunc
+	recoveryLoaded bool // Startup restoration is idempotent within this process.
 	config         *config.Config
 	redis          *redis.Client
 	redisStore     *storage.RedisStore
@@ -161,6 +163,17 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		s.handler.SetGameSession(r.Code, gs)
 		gs.Start()
 	})
+	if botEngine == nil {
+		botEngine = bot.NewHeuristicEngine()
+	}
+	if err := s.restoreGames(ctx, botEngine); err != nil {
+		s.SuspendRecovery()
+		_ = rdb.Close()
+		return nil, fmt.Errorf("restore games: %w", err)
+	}
+	recoveryCtx, recoveryCancel := context.WithCancel(context.Background())
+	s.recoveryCancel = recoveryCancel
+	go s.settlementLoop(recoveryCtx)
 
 	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 聊天限制=%d/s, 最大连接数=%d",
 		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)

@@ -51,6 +51,9 @@ message PublicPlay {
 }
 
 message GameStateDTO {
+ string game_id = 19;
+ int64 state_version = 20;
+ string turn_token = 21;
  int64 multiplier = 14;
  repeated PublicPlay public_plays = 15;
  int64 turn_deadline = 16;

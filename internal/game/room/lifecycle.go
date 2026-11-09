@@ -87,8 +87,8 @@ func (rm *RoomManager) ReconnectPlayer(oldClient, newClient types.ClientInterfac
 
 	room.mu.Lock()
 	if (room.State == RoomStateWaiting && time.Since(room.CreatedAt) > rm.roomTimeout) ||
-		(room.State == RoomStateEnded && time.Since(room.EndedAt) > rm.gameConfig.ResultRetentionDuration()) ||
-		(room.State != RoomStateEnded && !room.AllOfflineAt.IsZero() && time.Since(room.AllOfflineAt) > rm.gameConfig.OfflineRoomRetentionDuration()) {
+		(room.State == RoomStateEnded && time.Since(room.EndedAt) > room.resultRetentionDuration(rm.gameConfig.ResultRetentionDuration())) ||
+		(room.State != RoomStateEnded && !room.AllOfflineAt.IsZero() && time.Since(room.AllOfflineAt) > room.offlineRetentionDuration(rm.gameConfig.OfflineRoomRetentionDuration())) {
 		room.mu.Unlock()
 		return apperrors.ErrRoomNotFound
 	}
@@ -158,8 +158,8 @@ func (rm *RoomManager) cleanup() {
 	for code, r := range rm.rooms {
 		r.mu.Lock()
 		waitingExpired := r.State == RoomStateWaiting && now.Sub(r.CreatedAt) > rm.roomTimeout
-		endedExpired := r.State == RoomStateEnded && now.Sub(r.EndedAt) > rm.gameConfig.ResultRetentionDuration()
-		offlineExpired := r.State != RoomStateEnded && !r.AllOfflineAt.IsZero() && now.Sub(r.AllOfflineAt) > rm.gameConfig.OfflineRoomRetentionDuration()
+		endedExpired := r.State == RoomStateEnded && now.Sub(r.EndedAt) > r.resultRetentionDuration(rm.gameConfig.ResultRetentionDuration())
+		offlineExpired := r.State != RoomStateEnded && !r.AllOfflineAt.IsZero() && now.Sub(r.AllOfflineAt) > r.offlineRetentionDuration(rm.gameConfig.OfflineRoomRetentionDuration())
 		if waitingExpired || endedExpired || offlineExpired {
 			if waitingExpired {
 				r.Broadcast(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))

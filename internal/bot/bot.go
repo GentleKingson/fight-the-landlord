@@ -77,6 +77,14 @@ func NewBotClient(engine DecisionEngine) *BotClient {
 	}
 }
 
+// RestoreClient preserves the persisted identity; runtime inference state is
+// reconstructed from public history and the bot's own hand by the game session.
+func RestoreClient(id, name string, engine DecisionEngine) *BotClient {
+	b := NewBotClient(engine)
+	b.id, b.name = id, name
+	return b
+}
+
 // SetSession 在 GameSession 创建后注入（由 matcher 调用）
 func (b *BotClient) SetSession(s SessionInterface) {
 	b.sessionMu.Lock()

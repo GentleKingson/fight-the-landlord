@@ -33,6 +33,10 @@ const DealDuration = 3870 * time.Millisecond
 
 // startBiddingRound requires gs.mu.
 func (gs *GameSession) startBiddingRound() {
+	if gs.store != nil && !gs.inTransition {
+		_ = gs.transition(func() error { gs.startBiddingRound(); return nil })
+		return
+	}
 	gs.stopTimer()
 	gs.cancelBotTurn()
 	gs.stopDealTimer()
@@ -40,13 +44,16 @@ func (gs *GameSession) startBiddingRound() {
 	gs.bidToken = ""
 	gs.dealID = rand.Text()
 	gs.state = GameStateDealing
-	gs.room.SetState(RoomStateDealing)
+	gs.setRoomState(RoomStateDealing)
 	gs.dealStartAt = time.Now()
 	gs.dealEndAt = gs.dealStartAt.Add(DealDuration)
 	gs.currentBidder = securerand.New().IntN(3)
 	gs.dealNewRound()
 	dealID := gs.dealID
-	gs.dealTimer = time.AfterFunc(time.Until(gs.dealEndAt), func() { gs.finishDeal(dealID) })
+	gs.timerMode = "deal"
+	if !gs.inTransition {
+		gs.dealTimer = time.AfterFunc(time.Until(gs.dealEndAt), func() { gs.finishDeal(dealID) })
+	}
 }
 
 func (gs *GameSession) finishDeal(dealID string) {
@@ -55,10 +62,13 @@ func (gs *GameSession) finishDeal(dealID string) {
 	if gs.state != GameStateDealing || gs.dealID != dealID || gs.room.GetState() == RoomStateEnded {
 		return
 	}
-	gs.stopDealTimer()
-	gs.state = GameStateBidding
-	gs.room.SetState(RoomStateBidding)
-	gs.notifyBidTurn()
+	_ = gs.transition(func() error {
+		gs.stopDealTimer()
+		gs.state = GameStateBidding
+		gs.setRoomState(RoomStateBidding)
+		gs.notifyBidTurn()
+		return nil
+	})
 }
 
 // stopDealTimer requires gs.mu. State and dealID also fence callbacks already queued.
@@ -72,6 +82,7 @@ func (gs *GameSession) stopDealTimer() {
 // dealNewRound 重置本局状态并发牌（不进入叫地主流程；调用方需持有 gs.mu）
 func (gs *GameSession) dealNewRound() {
 	gs.publicPlays = nil
+	gs.bidHistory = nil
 	// 重置叫抢与倍数状态
 	gs.landlordCaller = -1
 	gs.landlordCandidate = -1
@@ -86,7 +97,7 @@ func (gs *GameSession) dealNewRound() {
 		p.Hand = nil
 		p.IsLandlord = false
 		if rp := gs.room.Players[p.ID]; rp != nil {
-			rp.IsLandlord = false
+			gs.effect(func() { rp.IsLandlord = false })
 		}
 	}
 
@@ -133,7 +144,7 @@ func (gs *GameSession) deal() {
 	for _, p := range gs.players {
 		rp := gs.room.Players[p.ID]
 		client := rp.Client
-		client.SendMessage(codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
+		gs.send(client, codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
 			DealID:      gs.dealID,
 			DealStartAt: gs.dealStartAt.UnixMilli(),
 			DealEndAt:   gs.dealEndAt.UnixMilli(),
@@ -152,8 +163,9 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	gs.finishRecording("completed", winner)
 	// Enqueue before exposing the ended state or releasing seats for a new game.
 	gs.recordGameResults(winner)
+	gs.endedAt = time.Now()
 	gs.state = GameStateEnded
-	gs.room.SetState(RoomStateEnded)
+	gs.setRoomState(RoomStateEnded)
 
 	// 计算最终倍数与各玩家得分
 	multiplier := gs.finalMultiplier(winner)
@@ -178,7 +190,7 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 		Multiplier:  multiplier,
 		Scores:      scores,
 	})
-	gs.room.Broadcast(gs.lastResult)
+	gs.broadcast(gs.lastResult)
 
 	role := "农民"
 	if winner.IsLandlord {
@@ -191,7 +203,7 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	for _, p := range gs.players {
 		rp := gs.room.Players[p.ID]
 		if rp != nil {
-			rp.Client.SetRoom("")
+			gs.effect(func() { rp.Client.SetRoom("") })
 		}
 	}
 }
@@ -245,6 +257,9 @@ func (gs *GameSession) computeScores(winner *GamePlayer, mult int) []protocol.Pl
 
 // recordGameResults 记录游戏结果到排行榜
 func (gs *GameSession) recordGameResults(winner *GamePlayer) {
+	if gs.store != nil {
+		return
+	} // The terminal snapshot contains the durable outbox.
 	gameID := gs.dealID
 	if gameID == "" {
 		gameID = rand.Text()

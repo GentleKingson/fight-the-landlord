@@ -2,6 +2,7 @@ package session
 
 import (
 	"cmp"
+	"crypto/rand"
 	"slices"
 	"time"
 
@@ -14,6 +15,24 @@ import (
 )
 
 // HandlePlayCards 处理出牌
+func (gs *GameSession) HandlePlayCardsTurn(playerID string, cards []protocol.CardInfo, token string) error {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	if gs.store != nil && (token == "" || token != gs.playToken) {
+		return apperrors.ErrNotYourTurn
+	}
+	return gs.handlePlayCardsLocked(playerID, cards, "")
+}
+
+func (gs *GameSession) HandlePassTurn(playerID, token string) error {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	if gs.store != nil && (token == "" || token != gs.playToken) {
+		return apperrors.ErrNotYourTurn
+	}
+	return gs.handlePassLocked(playerID, "")
+}
+
 func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.CardInfo) error {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
@@ -21,6 +40,9 @@ func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.Car
 }
 
 func (gs *GameSession) handlePlayCardsLocked(playerID string, cardInfos []protocol.CardInfo, source string) error {
+	if gs.store != nil && !gs.inTransition {
+		return gs.transition(func() error { return gs.handlePlayCardsLocked(playerID, cardInfos, source) })
+	}
 	if gs.state != GameStatePlaying {
 		return apperrors.ErrGameNotStart
 	}
@@ -82,7 +104,7 @@ func (gs *GameSession) handlePlayCardsLocked(playerID string, cardInfos []protoc
 
 	gs.publicPlays = append(gs.publicPlays, protocol.PublicPlay{Type: "play", PlayerID: playerID, PlayerName: currentPlayer.Name, Cards: convert.CardsToInfos(sortedCards), HandType: handToPlay.Type.String(), NewTrick: isNewRound})
 	// 广播出牌信息
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
+	gs.broadcast(codec.MustNewMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
 		PlayerID:   playerID,
 		PlayerName: currentPlayer.Name,
 		Cards:      convert.CardsToInfos(sortedCards), // 使用排序后的牌
@@ -111,6 +133,9 @@ func (gs *GameSession) HandlePass(playerID string) error {
 }
 
 func (gs *GameSession) handlePassLocked(playerID, source string) error {
+	if gs.store != nil && !gs.inTransition {
+		return gs.transition(func() error { return gs.handlePassLocked(playerID, source) })
+	}
 	if gs.state != GameStatePlaying {
 		return apperrors.ErrGameNotStart
 	}
@@ -135,7 +160,7 @@ func (gs *GameSession) handlePassLocked(playerID, source string) error {
 
 	gs.publicPlays = append(gs.publicPlays, protocol.PublicPlay{Type: "pass", PlayerID: playerID, PlayerName: currentPlayer.Name})
 	// 广播不出
-	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
+	gs.broadcast(codec.MustNewMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
 		PlayerID:   playerID,
 		PlayerName: currentPlayer.Name,
 	}))
@@ -190,6 +215,7 @@ func (gs *GameSession) GetPlayerCardsCount(playerID string) int {
 
 // notifyPlayTurn 通知当前玩家出牌
 func (gs *GameSession) notifyPlayTurn() {
+	gs.playToken = rand.Text()
 	gs.decisionStarted = time.Now()
 	gs.turnID++
 	player := gs.players[gs.currentPlayer]
@@ -203,10 +229,11 @@ func (gs *GameSession) notifyPlayTurn() {
 	}
 
 	gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
-		PlayerID: player.ID,
-		Timeout:  gs.gameConfig.TurnTimeout,
-		MustPlay: mustPlay,
-		CanBeat:  canBeat,
+		TurnToken: gs.playToken,
+		PlayerID:  player.ID,
+		Timeout:   gs.gameConfig.TurnTimeout,
+		MustPlay:  mustPlay,
+		CanBeat:   canBeat,
 	}))
 	gs.startPlayTimer()
 }

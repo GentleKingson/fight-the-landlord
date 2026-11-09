@@ -74,13 +74,22 @@ func (h *Handler) handlePlayCards(client types.ClientInterface, msg *protocol.Me
 		return
 	}
 
-	if err := gameSession.HandlePlayCards(client.GetID(), payload.Cards); err != nil {
+	if err := gameSession.HandlePlayCardsTurn(client.GetID(), payload.Cards, payload.TurnToken); err != nil {
 		sendGameError(client, err)
 	}
 }
 
 // handlePass 处理不出
-func (h *Handler) handlePass(client types.ClientInterface) {
+func (h *Handler) handlePass(client types.ClientInterface, messages ...*protocol.Message) {
+	var payload protocol.PlayCardsPayload
+	if len(messages) > 0 {
+		parsed, err := codec.ParsePayload[protocol.PlayCardsPayload](messages[0])
+		if err != nil {
+			client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+			return
+		}
+		payload = *parsed
+	}
 	if h.roomManager == nil {
 		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameNotStart))
 		return
@@ -98,7 +107,7 @@ func (h *Handler) handlePass(client types.ClientInterface) {
 		return
 	}
 
-	if err := gameSession.HandlePass(client.GetID()); err != nil {
+	if err := gameSession.HandlePassTurn(client.GetID(), payload.TurnToken); err != nil {
 		sendGameError(client, err)
 	}
 }

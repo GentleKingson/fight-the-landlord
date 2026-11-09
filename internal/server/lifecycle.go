@@ -165,6 +165,7 @@ func (s *Server) Shutdown() {
 	s.clientsMu.Unlock()
 
 	// 关闭 Redis
+	s.SuspendRecovery()
 	_ = s.redis.Close()
 
 	log.Println("服务器已关闭")

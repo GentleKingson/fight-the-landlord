@@ -82,6 +82,7 @@ message LandlordPayload {
 
 // PlayTurnPayload 轮到出牌通知
 message PlayTurnPayload {
+  string turn_token = 5;
   string player_id = 1;
   int64 timeout = 2;
   bool must_play = 3;

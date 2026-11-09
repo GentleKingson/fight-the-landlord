@@ -11,6 +11,10 @@ import (
 // This is an in-process interface only; human clients receive the existing message.
 // The caller holds gs.mu. SendTurn must only capture state and launch work, not wait.
 func (gs *GameSession) broadcastBotTurn(msg *protocol.Message) {
+	if gs.inTransition {
+		gs.effect(func() { gs.broadcastBotTurn(msg) })
+		return
+	}
 	gs.cancelBotTurn()
 	ctx, cancel := context.WithCancel(context.Background())
 	gs.botTurnCancel = cancel

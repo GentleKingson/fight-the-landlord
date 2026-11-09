@@ -321,3 +321,25 @@ func TestOfflineRoomRetentionIgnoresBotsAndResultHasOwnDeadline(t *testing.T) {
 	rm.cleanup()
 	require.Nil(t, rm.GetRoom(r.Code))
 }
+
+func TestRecoveredRoomUsesOriginalRetentionPolicy(t *testing.T) {
+	for _, ended := range []bool{false, true} {
+		rm := NewRoomManager(nil, config.GameConfig{OfflineRoomRetention: 1, ResultRetention: 1})
+		client := testutil.NewSimpleClient("player", "Player")
+		r, err := rm.CreateRoom(client)
+		require.NoError(t, err)
+		r.SetRetentionPolicy(time.Minute, time.Minute)
+		r.SetState(RoomStatePlaying)
+		if ended {
+			r.SetState(RoomStateEnded)
+		}
+		r.SyncRetentionTimes(time.Now().Add(-10*time.Second), time.Now().Add(-10*time.Second))
+		rm.cleanup()
+		require.Same(t, r, rm.GetRoom(r.Code))
+		require.NoError(t, rm.ReconnectPlayer(client, client))
+		r.SyncRetentionTimes(time.Now().Add(-2*time.Minute), time.Now().Add(-2*time.Minute))
+		require.ErrorIs(t, rm.ReconnectPlayer(client, client), apperrors.ErrRoomNotFound)
+		rm.cleanup()
+		require.Nil(t, rm.GetRoom(r.Code))
+	}
+}
