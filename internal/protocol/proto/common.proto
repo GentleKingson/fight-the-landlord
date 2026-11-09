@@ -22,6 +22,7 @@ message PlayerInfo {
   bool is_landlord = 5;  // 是否是地主
   int64 cards_count = 6; // 手牌数量
   bool online = 7;       // 是否在线
+  bool is_bot = 8;       // 是否是机器人
 }
 
 // PlayerHand 玩家手牌信息（用于游戏结束展示）

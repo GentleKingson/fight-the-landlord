@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DealAnimation } from './DealAnimation';
 import { useDealPresentation } from './useDealPresentation';
+import { assignBotAvatars } from './botAvatars';
+import { PlayerAvatar } from './PlayerAvatar';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
@@ -37,6 +39,7 @@ export function GameTable({ socket }: GameTableProps) {
   const setSelection = useAppStore((state) => state.setSelection);
   const isMyTurn = currentTurn === playerId;
   const seats = useMemo(() => arrangeSeats(players, playerId), [players, playerId]);
+  const botAvatars = useMemo(() => assignBotAvatars(players), [players]);
 
   return (
     <main className="table-screen">
@@ -63,9 +66,9 @@ export function GameTable({ socket }: GameTableProps) {
 
       <section className="table-arena" aria-label="斗地主牌桌">
         <div className="opponent-row">
-          <SeatPanel player={seats.left} side="left" active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
+          <SeatPanel player={seats.left} avatarSrc={seats.left ? botAvatars.get(seats.left.id) : undefined} side="left" active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
           <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
-          <SeatPanel player={seats.right} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
+          <SeatPanel player={seats.right} avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
         </div>
 
         <div className={`felt-table ${phase === 'playing' ? 'felt-table--seats' : ''}`}>
@@ -148,24 +151,24 @@ function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: str
   );
 }
 
-function SeatPanel({ player, side, active, action }: { player?: PlayerInfo; side: 'left' | 'right'; active: boolean; action?: SeatAction }) {
+function SeatPanel({ player, avatarSrc, side, active, action }: { player?: PlayerInfo; avatarSrc?: string; side: 'left' | 'right'; active: boolean; action?: SeatAction }) {
   if (!player) {
     return <aside className={`seat-panel seat-panel--${side}`} aria-hidden="true" />;
   }
   return (
     <aside className={`seat-panel seat-panel--${side} ${active ? 'is-active' : ''}`}>
-      <PlayerBadge player={player} active={active} action={action} />
+      <PlayerBadge player={player} avatarSrc={avatarSrc} active={active} action={action} />
     </aside>
   );
 }
 
-function PlayerBadge({ player, active, action }: { player: PlayerInfo; active: boolean; action?: SeatAction }) {
+function PlayerBadge({ player, avatarSrc, active, action }: { player: PlayerInfo; avatarSrc?: string; active: boolean; action?: SeatAction }) {
   const actionLabel = action?.type === 'bid' ? action.label : action?.type === 'pass' ? '不出' : '';
   return (
     <div className={`player-badge ${active ? 'is-active' : ''}`}>
-      <span className="player-avatar" aria-hidden="true">{player.name.slice(0, 1)}</span>
+      <PlayerAvatar name={player.name} src={avatarSrc} />
       <div>
-        <strong>{player.name}</strong>
+        <strong title={player.name}>{player.name}</strong>
         <span>{player.is_landlord ? '地主' : '农民'} · 剩余 {player.cards_count || 0}</span>
       </div>
       {actionLabel ? <em className="player-action" title={actionLabel}>{actionLabel}</em> : null}

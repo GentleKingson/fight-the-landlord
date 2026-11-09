@@ -16,7 +16,11 @@ const hand: CardInfo[] = [
 export function seedDemoState(mode: string): void {
   const sortedHand = sortCards(hand);
   const isBidding = mode === 'bidding';
-  const demoPlayers = isBidding ? players.map((player) => ({ ...player, is_landlord: false })) : players;
+  const demoPlayers = players.map(player => ({
+    ...player,
+    is_landlord: !isBidding && player.is_landlord,
+    is_bot: mode === 'practice' && player.id !== 'p1'
+  }));
   useChatStore.setState({
     messages: [
       { sender_name: '山月', content: '这局节奏很快。', scope: 'room', time: Date.now() / 1000 },

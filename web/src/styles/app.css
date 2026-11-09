@@ -1967,6 +1967,25 @@
 
 .player-badge .player-avatar, .player-offline { flex: none; }
 
+.player-badge .player-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin-top: 0;
+  overflow: hidden;
+  color: #fff7de;
+  font-size: 18px;
+}
+
+.player-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
 .player-badge .player-action { position: absolute; top: calc(100% + 3px); left: 6px; z-index: 2; }
 
 .seat-panel--right .player-action { left: auto; right: 6px; }
@@ -2171,13 +2190,17 @@
   .seat-panel .card-back-stack { display: none; }
 }
 
-@media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
+/* Narrow tall phones need the same room for avatars and remaining-card counts. */
+@media (max-width: 600px) and (max-height: 700px) and (orientation: portrait),
+       (max-width: 360px) and (orientation: portrait) {
   .bottom-cards { padding: 3px; }
   .bottom-cards > span { display: none; }
   .bottom-cards .card--mini, .bottom-cards.is-hidden .mini-card-placeholder { --w: 16px; --h: 24px; width: 16px; height: 24px; }
   .bottom-cards .card__index--top { left: 2px; top: 3px; font-size: 9px; }
   .bottom-cards .card__index--bottom, .bottom-cards .card__pip { display: none; }
-  .player-badge .player-avatar { display: none; }
+}
+
+@media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
   .player-badge { min-height: 38px; }
   .turn-banner { padding: 3px 6px; }
   .turn-banner__copy span { display: none; }
@@ -2279,11 +2302,15 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
   .played-seat--right { grid-column: 2; grid-row: 1; }
   .played-seat--me { grid-column: 1 / -1; grid-row: 2; }
   .opponent-row { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px; }
-  .player-badge .player-avatar { display: none; }
+  .player-badge .player-avatar { width: 28px; height: 28px; font-size: 14px; border-width: 1px; }
   .player-badge { padding: 4px; gap: 3px; }
   .player-badge strong { font-size: 12px; }
   .player-badge span { font-size: 10px; }
   .player-badge .player-action { padding: 2px 4px; font-size: 10px; }
+  .player-badge .player-offline { position: absolute; top: calc(100% + 3px); right: 6px; z-index: 2; }
+  .seat-panel--right .player-offline { right: auto; left: 6px; }
+  .bottom-cards.is-hidden { padding: 4px; grid-template-columns: auto; }
+  .bottom-cards.is-hidden > span { display: none; }
 }
 
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
@@ -2303,6 +2330,10 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
   .felt-table .card--played .card__pip { font-size: 17px; }
   .felt-table .card--played .card__joker-word { left: 3px; bottom: 3px; font-size: 7px; }
   .felt-table .card--played .card__joker-star { right: 3px; bottom: 4px; font-size: 12px; }
+}
+
+@media (max-width: 360px) and (orientation: portrait) {
+  .table-arena { padding-inline: 4px; }
 }
 
 @media (orientation: landscape) and (max-height: 520px) {

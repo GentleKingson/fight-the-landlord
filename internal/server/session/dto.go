@@ -48,13 +48,15 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 	}
 	players := make([]protocol.PlayerInfo, len(gs.players))
 	for i, p := range gs.players {
+		isBot := gs.room.Players[p.ID].Client.IsBot()
 		players[i] = protocol.PlayerInfo{
 			ID:         p.ID,
 			Name:       p.Name,
 			Seat:       p.Seat,
 			IsLandlord: p.IsLandlord,
 			CardsCount: len(p.Hand),
-			Online:     sessionManager.IsOnline(p.ID) || gs.room.Players[p.ID].Client.IsBot(),
+			Online:     sessionManager.IsOnline(p.ID) || isBot,
+			IsBot:      isBot,
 		}
 	}
 	phase := "waiting"

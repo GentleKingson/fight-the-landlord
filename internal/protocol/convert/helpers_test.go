@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/pb"
@@ -37,7 +38,7 @@ func TestPlayerInfosRoundTrip(t *testing.T) {
 
 	players := []protocol.PlayerInfo{
 		{ID: "p1", Name: "Player1", Seat: 0, Ready: true, IsLandlord: false, CardsCount: 17, Online: true},
-		{ID: "p2", Name: "Player2", Seat: 1, Ready: true, IsLandlord: true, CardsCount: 20, Online: true},
+		{ID: "p2", Name: "Player2", Seat: 1, IsBot: true, Ready: true, IsLandlord: true, CardsCount: 20, Online: true},
 		{ID: "p3", Name: "Player3", Seat: 2, Ready: true, IsLandlord: false, CardsCount: 17, Online: false},
 	}
 
@@ -59,7 +60,7 @@ func TestGameStateDTORoundTrip(t *testing.T) {
 		Phase: "playing",
 		Players: []protocol.PlayerInfo{
 			{ID: "p1", Name: "Player1", Seat: 0, IsLandlord: true, CardsCount: 18, Online: true},
-			{ID: "p2", Name: "Player2", Seat: 1, IsLandlord: false, CardsCount: 17, Online: true},
+			{ID: "p2", Name: "Player2", Seat: 1, IsBot: true, IsLandlord: false, CardsCount: 17, Online: true},
 		},
 		Hand: []protocol.CardInfo{
 			{Suit: 0, Rank: 3, Color: 0},
@@ -83,7 +84,7 @@ func TestGameStateDTORoundTrip(t *testing.T) {
 	assert.Equal(t, gs.LastPlayerID, result.LastPlayerID)
 	assert.Equal(t, gs.MustPlay, result.MustPlay)
 	assert.Equal(t, gs.CanBeat, result.CanBeat)
-	assert.Len(t, result.Players, len(gs.Players))
+	assert.Equal(t, gs.Players, result.Players)
 	assert.Len(t, result.Hand, len(gs.Hand))
 	assert.Len(t, result.BottomCards, len(gs.BottomCards))
 	assert.Len(t, result.LastPlayed, len(gs.LastPlayed))
@@ -185,4 +186,14 @@ func TestRoomListItemsEmpty(t *testing.T) {
 
 	result := ProtoToRoomListItems([]*pb.RoomListItem{})
 	assert.Empty(t, result)
+}
+
+// Old clients omit field 8; absent bot identity must retain the human default.
+func TestPlayerInfoLegacyWireDefaultsToHuman(t *testing.T) {
+	t.Parallel()
+	var player pb.PlayerInfo
+	require.NoError(t, proto.Unmarshal([]byte{0x0a, 0x02, 'p', '1'}, &player))
+	result := ProtoToPlayerInfo(&player)
+	assert.Equal(t, "p1", result.ID)
+	assert.False(t, result.IsBot)
 }

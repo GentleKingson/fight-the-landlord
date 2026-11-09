@@ -10,8 +10,13 @@ test('human practice survives reload and finishes a recorded game', async ({ pag
   const identity = await page.evaluate(() => sessionStorage.getItem('ddz_next_reconnect'));
   await page.getByRole('button', { name: /人机练习/ }).click();
   await expect(page.getByLabel('斗地主牌桌')).toBeVisible();
+  await expect(page.locator('.player-avatar img')).toHaveCount(2);
+  const avatars = await page.locator('.player-avatar img').evaluateAll(images => images.map(image => (image as HTMLImageElement).src));
+  expect(new Set(avatars).size).toBe(2);
   await page.reload();
   await expect(page.getByLabel('斗地主牌桌')).toBeVisible();
+  await expect(page.locator('.player-avatar img')).toHaveCount(2);
+  expect(await page.locator('.player-avatar img').evaluateAll(images => images.map(image => (image as HTMLImageElement).src))).toEqual(avatars);
   expect(await page.evaluate(() => sessionStorage.getItem('ddz_next_reconnect'))).toBe(identity);
   let plays = 0;
   for (let step = 0; step < 1000; step++) {

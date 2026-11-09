@@ -92,6 +92,7 @@ type PlayerInfo struct {
 	IsLandlord    bool                   `protobuf:"varint,5,opt,name=is_landlord,json=isLandlord,proto3" json:"is_landlord,omitempty"` // 是否是地主
 	CardsCount    int64                  `protobuf:"varint,6,opt,name=cards_count,json=cardsCount,proto3" json:"cards_count,omitempty"` // 手牌数量
 	Online        bool                   `protobuf:"varint,7,opt,name=online,proto3" json:"online,omitempty"`                           // 是否在线
+	IsBot         bool                   `protobuf:"varint,8,opt,name=is_bot,json=isBot,proto3" json:"is_bot,omitempty"`                // 是否是机器人
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -171,6 +172,13 @@ func (x *PlayerInfo) GetCardsCount() int64 {
 func (x *PlayerInfo) GetOnline() bool {
 	if x != nil {
 		return x.Online
+	}
+	return false
+}
+
+func (x *PlayerInfo) GetIsBot() bool {
+	if x != nil {
+		return x.IsBot
 	}
 	return false
 }
@@ -600,7 +608,7 @@ const file_internal_protocol_proto_common_proto_rawDesc = "" +
 	"\bCardInfo\x12\x12\n" +
 	"\x04suit\x18\x01 \x01(\x03R\x04suit\x12\x12\n" +
 	"\x04rank\x18\x02 \x01(\x03R\x04rank\x12\x14\n" +
-	"\x05color\x18\x03 \x01(\x03R\x05color\"\xb4\x01\n" +
+	"\x05color\x18\x03 \x01(\x03R\x05color\"\xcb\x01\n" +
 	"\n" +
 	"PlayerInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -611,7 +619,8 @@ const file_internal_protocol_proto_common_proto_rawDesc = "" +
 	"isLandlord\x12\x1f\n" +
 	"\vcards_count\x18\x06 \x01(\x03R\n" +
 	"cardsCount\x12\x16\n" +
-	"\x06online\x18\a \x01(\bR\x06online\"t\n" +
+	"\x06online\x18\a \x01(\bR\x06online\x12\x15\n" +
+	"\x06is_bot\x18\b \x01(\bR\x05isBot\"t\n" +
 	"\n" +
 	"PlayerHand\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1f\n" +
