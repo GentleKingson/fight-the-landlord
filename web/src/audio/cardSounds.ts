@@ -20,7 +20,7 @@ const ranks: Record<number, string> = {
 const prefixes: Record<string, string> = { 单张: 'single', 对子: 'pair', 三张: 'trio' };
 const combinations: Record<string, string[]> = {
   三带一: ['type_trio_single'], 三带二: ['type_trio_pair'],
-  顺子: ['type_straight', 'straight'], 连对: ['type_pairstraight'],
+  顺子: ['type_straight'], 连对: ['type_pairstraight'],
   飞机: ['type_plane', 'plane'], 飞机带单: ['type_plane', 'plane'], 飞机带对: ['type_plane', 'plane'],
   四带二: ['type_four_two'], 四带两对: ['type_four_twopair'],
   炸弹: ['type_bomb', 'bomb'], 王炸: ['type_rocket', 'bomb'],
