@@ -1118,20 +1118,6 @@
   color: #ff9b92;
 }
 
-.remaining-hands {
-  min-height: 0;
-}
-
-.result-hands { min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.winning-hand { display: grid; gap: 8px; padding: 8px 0; }
-.winning-hand h2 { margin: 0; font-size: 16px; color: #ffe092; }
-.winning-hand .played-cards { min-width: 0; }
-.winning-hand .played-cards__row { max-width: 100%; }
-
-.remaining-hands summary { padding: 8px; cursor: pointer; color: #ffe092; }
-.remaining-hands__list { display: grid; gap: 12px; padding: 8px 0; }
-.remaining-hands .played-cards__row { max-width: 100%; }
-
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
@@ -2376,7 +2362,3 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
 @media (prefers-reduced-motion: reduce) { .deal-card:not(.deal-card--deck) { display: none; animation: none; } }
 
 .action-bar--dealing { display: flex; justify-content: center; align-items: center; font-size: 14px; white-space: nowrap; }
-
-.action-bar--result { grid-template-columns: minmax(0, 1fr) auto; }
-.action-bar--result > span { text-align: center; font-size: 14px; font-variant-numeric: tabular-nums; }
-.action-bar--result .primary-action { min-height: 44px; padding: 0 16px; white-space: nowrap; }

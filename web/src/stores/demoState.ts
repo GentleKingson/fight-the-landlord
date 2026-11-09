@@ -14,6 +14,7 @@ const hand: CardInfo[] = [
 ];
 
 export function seedDemoState(mode: string): void {
+  useAppStore.getState().leaveLocalRoom();
   const sortedHand = sortCards(hand);
   const isBidding = mode === 'bidding';
   const demoPlayers = players.map(player => ({
@@ -29,7 +30,7 @@ export function seedDemoState(mode: string): void {
   });
   useAppStore.setState({
     connected: true,
-    phase: mode === 'lobby' ? 'lobby' : mode === 'result' ? 'game_over' : isBidding ? 'bidding' : 'playing',
+    phase: mode === 'lobby' ? 'lobby' : isBidding ? 'bidding' : 'playing',
     playerId: 'p1',
     playerName: '青竹',
     roomCode: '836219',
@@ -76,6 +77,19 @@ export function seedDemoState(mode: string): void {
     winnerIsLandlord: false,
     finalMultiplier: 3
   });
+  if (['result', 'reveal', 'review'].includes(mode)) {
+    const state = useAppStore.getState();
+    state.handleMessage({ type: 'game_over', payload: {
+      winner_id: 'p3', winner_name: '松风', is_landlord: false, multiplier: 3, scores: state.scores,
+      player_hands: [
+        { player_id: 'p1', player_name: '青竹', cards: sortedHand },
+        { player_id: 'p2', player_name: '山月', cards: [c(1, 4), c(2, 4), c(3, 7)] },
+        { player_id: 'p3', player_name: '松风', cards: [] }
+      ]
+    } });
+    if (mode === 'result') state.showSettlement();
+    if (mode === 'review') state.reviewEndTable();
+  }
 }
 
 function c(suit: number, rank: number): CardInfo {

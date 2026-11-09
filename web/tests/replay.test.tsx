@@ -14,7 +14,7 @@ it('replays practice after reloading and reconnecting, then allows switching to 
   const restoredMode = loadMatchMode();
   expect(restoredMode).toBe('practice');
   useAppStore.setState({ matchMode: restoredMode });
-  useAppStore.getState().handleMessage({ type: MsgType.Reconnected, payload: { player_id: 'p1', room_code: '123456' } });
+  useAppStore.getState().handleMessage({ type: MsgType.Reconnected, payload: { player_id: 'p1', room_code: '123456', game_state: { phase: 'ended', players: [], hand: [] } } });
   useAppStore.getState().handleMessage({ type: MsgType.GameOver, payload: { winner_name: 'p1' } });
   const send = vi.fn();
   render(<GameResult socket={{ send } as unknown as GameSocket} />);

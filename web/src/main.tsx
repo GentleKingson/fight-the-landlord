@@ -4,6 +4,7 @@ import { App } from './App';
 import './styles/reset.css';
 import './styles/tokens.css';
 import './styles/app.css';
+import './styles/endGame.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,0 +1,110 @@
+.table-screen.end-table {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.end-table__heading,
+.end-table__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border: 1px solid rgba(255, 224, 138, .25);
+  border-radius: 12px;
+  background: rgba(12, 29, 24, .95);
+}
+
+.end-table__heading h1 { margin: 4px 0 0; font-size: 24px; }
+.end-table__eyebrow { color: #e2cf9e; font-size: 13px; }
+.end-table__tools { display: flex; align-items: center; gap: 12px; color: #f4dfaa; text-align: right; }
+.end-table__footer p { margin: 0; line-height: 1.6; }
+.end-table__footer button { flex: 0 0 auto; min-height: 44px; min-width: 120px; }
+
+.table-arena.end-table__board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto auto auto;
+  grid-template-areas: "left right" "winning winning" "me me";
+  align-content: start;
+  align-items: stretch;
+  justify-items: stretch;
+  gap: 16px;
+  padding: 22px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.end-table__board::before { display: none; }
+.end-table__winning { grid-area: winning; }
+.end-table__hand--left { grid-area: left; }
+.end-table__hand--right { grid-area: right; }
+.end-table__hand--me { grid-area: me; }
+
+.end-table__hand,
+.end-table__winning {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  background: rgba(4, 34, 24, .7);
+}
+
+.end-table__winning {
+  border-color: rgba(255, 224, 138, .65);
+  background: rgba(35, 47, 19, .8);
+}
+
+.end-table__board h2 { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+.end-table__board h2 span { font-size: 14px; font-weight: 500; }
+.end-table__board p { margin: 6px 0 10px; color: #f0e0b6; font-size: 14px; }
+.end-table__empty { padding: 12px 0; color: #c6f5d5; font-weight: 700; }
+.end-table__cards { display: flex; flex-wrap: wrap; gap: 8px 6px; }
+.end-table__cards .card { --w: 50px; --h: 72px; opacity: 1; cursor: default; }
+.end-table__cards .card__index--bottom { display: none; }
+.end-table__cards .card__pip { top: 65%; font-size: 25px; }
+.end-table__winning .end-table__cards,
+.end-table__hand--me .end-table__cards { justify-content: center; }
+.end-table__winning,
+.end-table__hand--me { text-align: center; }
+
+.result-panel { grid-template-rows: auto; overflow: auto; }
+.end-recovery h1 { margin: 0; font-size: 22px; }
+
+@media (max-width: 600px) and (orientation: portrait) {
+  .table-screen.end-table { gap: 8px; }
+  .end-table__heading { padding: 10px 12px; }
+  .end-table__heading h1 { font-size: 20px; }
+  .end-table__tools { flex-direction: column; gap: 4px; align-items: flex-end; font-size: 12px; }
+  .table-arena.end-table__board {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "winning" "left" "right" "me";
+    gap: 10px;
+    padding: 10px;
+  }
+  .end-table__hand,
+  .end-table__winning { padding: 10px; text-align: left; }
+  .end-table__board h2 { font-size: 16px; }
+  .end-table__cards { gap: 6px 4px; }
+  .end-table__cards .card { --w: 44px; --h: 64px; }
+  .end-table__winning .end-table__cards,
+  .end-table__hand--me .end-table__cards { justify-content: flex-start; }
+  .end-table__footer { padding: 8px 10px; gap: 8px; }
+  .end-table__footer p { font-size: 12px; }
+  .end-table__footer button { min-width: 100px; }
+  .end-table__review-hint { display: block; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .table-screen.end-table { gap: 4px; }
+  .end-table__heading,
+  .end-table__footer { padding: 4px 12px; }
+  .end-table__heading h1 { font-size: 18px; margin: 0; }
+  .end-table__eyebrow { font-size: 11px; }
+  .end-table__footer p { font-size: 13px; }
+  .table-arena.end-table__board { padding: 8px; gap: 8px; }
+  .end-table__hand,
+  .end-table__winning { padding: 10px; }
+  .end-table__cards .card { --w: 44px; --h: 64px; }
+}
