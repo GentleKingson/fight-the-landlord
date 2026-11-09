@@ -80,6 +80,7 @@ func (gs *GameSession) handlePlayCardsLocked(playerID string, cardInfos []protoc
 		return cmp.Compare(b.Rank, a.Rank)
 	})
 
+	gs.publicPlays = append(gs.publicPlays, protocol.PublicPlay{Type: "play", PlayerID: playerID, PlayerName: currentPlayer.Name, Cards: convert.CardsToInfos(sortedCards), HandType: handToPlay.Type.String(), NewTrick: isNewRound})
 	// 广播出牌信息
 	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
 		PlayerID:   playerID,
@@ -132,6 +133,7 @@ func (gs *GameSession) handlePassLocked(playerID, source string) error {
 
 	gs.consecutivePasses++
 
+	gs.publicPlays = append(gs.publicPlays, protocol.PublicPlay{Type: "pass", PlayerID: playerID, PlayerName: currentPlayer.Name})
 	// 广播不出
 	gs.room.Broadcast(codec.MustNewMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
 		PlayerID:   playerID,

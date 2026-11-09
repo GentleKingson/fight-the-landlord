@@ -49,7 +49,7 @@ func (rm *RoomManager) NotifyPlayerOffline(client types.ClientInterface) {
 	// 检查所有玩家是否都离线
 	allOffline := true
 	for _, player := range room.Players {
-		if player.Client != nil && !player.Offline {
+		if player.Client != nil && !player.Client.IsBot() && !player.Offline {
 			allOffline = false
 			// 通知其他在线玩家
 			player.Client.SendMessage(codec.MustNewMessage(protocol.MsgPlayerOffline, protocol.PlayerOfflinePayload{
@@ -60,19 +60,9 @@ func (rm *RoomManager) NotifyPlayerOffline(client types.ClientInterface) {
 		}
 	}
 
-	// 如果所有玩家都离线，清理房间
-	if allOffline {
-		log.Printf("🧹 房间 %s 所有玩家已断开连接，清理房间", roomCode)
-		room.State = RoomStateEnded
-		room.EndedAt = time.Now()
-		room.mu.Unlock()
-
-		// 删除房间
-		rm.mu.Lock()
-		delete(rm.rooms, roomCode)
-		rm.mu.Unlock()
-		rm.finishRemoval(room)
-		return
+	// Keep timers running: after the reconnect grace period, normal auto-play continues.
+	if allOffline && room.AllOfflineAt.IsZero() {
+		room.AllOfflineAt = time.Now()
 	}
 
 	// 如果游戏进行中，通知 GameSession 暂停该玩家的计时器（由外部调用者处理）
@@ -90,12 +80,18 @@ func (rm *RoomManager) ReconnectPlayer(oldClient, newClient types.ClientInterfac
 
 	rm.mu.RLock()
 	room, exists := rm.rooms[roomCode]
-	rm.mu.RUnlock()
+	defer rm.mu.RUnlock()
 	if !exists {
 		return apperrors.ErrRoomNotFound
 	}
 
 	room.mu.Lock()
+	if (room.State == RoomStateWaiting && time.Since(room.CreatedAt) > rm.roomTimeout) ||
+		(room.State == RoomStateEnded && time.Since(room.EndedAt) > rm.gameConfig.ResultRetentionDuration()) ||
+		(room.State != RoomStateEnded && !room.AllOfflineAt.IsZero() && time.Since(room.AllOfflineAt) > rm.gameConfig.OfflineRoomRetentionDuration()) {
+		room.mu.Unlock()
+		return apperrors.ErrRoomNotFound
+	}
 
 	player, exists := room.Players[oldClient.GetID()]
 	if !exists {
@@ -106,6 +102,7 @@ func (rm *RoomManager) ReconnectPlayer(oldClient, newClient types.ClientInterfac
 	// 更新客户端引用
 	player.Client = newClient
 	player.Offline = false
+	room.AllOfflineAt = time.Time{}
 	newClient.SetRoom(roomCode)
 
 	// 通知其他玩家该玩家已上线
@@ -142,7 +139,7 @@ func (rm *RoomManager) generateRoomCode() string {
 
 // cleanupLoop 定期清理超时房间
 func (rm *RoomManager) cleanupLoop() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -161,8 +158,9 @@ func (rm *RoomManager) cleanup() {
 	for code, r := range rm.rooms {
 		r.mu.Lock()
 		waitingExpired := r.State == RoomStateWaiting && now.Sub(r.CreatedAt) > rm.roomTimeout
-		endedExpired := r.State == RoomStateEnded && now.Sub(r.EndedAt) > endedRoomRetention
-		if waitingExpired || endedExpired {
+		endedExpired := r.State == RoomStateEnded && now.Sub(r.EndedAt) > rm.gameConfig.ResultRetentionDuration()
+		offlineExpired := r.State != RoomStateEnded && !r.AllOfflineAt.IsZero() && now.Sub(r.AllOfflineAt) > rm.gameConfig.OfflineRoomRetentionDuration()
+		if waitingExpired || endedExpired || offlineExpired {
 			if waitingExpired {
 				r.Broadcast(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))
 			}

@@ -170,25 +170,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     switch (message.type) {
       case MsgType.Connected: {
         const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
-        persistReconnect(payload.player_id, payload.reconnect_token);
         set({
           connected: true,
           error: '',
           phase: 'lobby',
           playerId: payload.player_id,
           playerName: payload.player_name,
-          matchMode: 'online',
           reconnectToken: payload.reconnect_token
         });
         break;
       }
       case MsgType.Reconnected: {
         const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO };
-        persistReconnect(payload.player_id, state.reconnectToken);
         if (payload.game_state) {
-          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state, state.multiplier) });
+          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
         } else {
-          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
+          set({ ...initialTable, players: [], playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
         }
         break;
       }
@@ -306,6 +303,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           hand_type: payload.hand_type
         };
         set({
+          multiplier: ['炸弹', '王炸'].includes(payload.hand_type) ? state.multiplier * 2 : state.multiplier,
           lastPlayed: payload.cards ?? [],
           lastPlayedBy: payload.player_id,
           lastPlayedName: payload.player_name,
@@ -386,20 +384,6 @@ useAppStore.subscribe((state, previous) => {
   }
 });
 
-export function loadReconnect(): { id: string; token: string } | null {
-  try {
-    const raw = sessionStorage.getItem('ddz_next_reconnect');
-    return raw ? JSON.parse(raw) as { id: string; token: string } : null;
-  } catch {
-    return null;
-  }
-}
-
-function persistReconnect(id: string, token: string): void {
-  if (!id || !token) return;
-  sessionStorage.setItem('ddz_next_reconnect', JSON.stringify({ id, token }));
-}
-
 function mergePlayer(players: PlayerInfo[], next: PlayerInfo): PlayerInfo[] {
   return players.some((player) => player.id === next.id)
     ? players.map((player) => player.id === next.id ? next : player)
@@ -443,17 +427,25 @@ function syncLandlordCounts(players: PlayerInfo[], currentPlayerId: string, land
   });
 }
 
-function restoreSnapshot(dto: GameStateDTO, knownMultiplier: number): Partial<AppState> {
+function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
   const isPlaying = dto.phase === 'playing' || dto.phase === 'ended';
   const hasLandlord = (dto.players ?? []).some((player) => player.is_landlord);
   const hand = sortCards(dto.hand ?? []);
-  const seatActions = dto.last_played?.length && dto.last_player_id
+  let seatActions: Record<string, SeatAction> = dto.last_played?.length && dto.last_player_id
     ? { [dto.last_player_id]: { type: 'play' as const, player_id: dto.last_player_id, cards: dto.last_played } }
     : {};
+  const plays = dto.public_plays ?? [];
+  for (const play of plays) {
+    if (play.new_trick) seatActions = {};
+    seatActions = setSeatAction(seatActions, { ...play, label: play.type === 'pass' ? '不出' : undefined });
+  }
+  // Current hand + every public play reconstructs all cards no longer held by opponents.
+  const cardCounter = deductCounter(initialCounter(hand), plays.flatMap(play => play.cards ?? []));
   return {
     ...initialTable,
-    // Playing snapshots and turn replays omit the multiplier; retain the known value.
-    multiplier: isPlaying ? knownMultiplier : initialTable.multiplier,
+    multiplier: dto.multiplier || 1,
+    timeout: dto.turn_paused ? 0 : Math.max(0, Math.ceil(((dto.turn_deadline ?? 0) - (dto.server_time ?? 0)) / 1000)),
+    timerStart: Date.now(),
     deal: dto.phase === 'dealing' ? restoreDeal(dto) : null,
     selectedCards: new Set(),
     phase: dto.phase === 'dealing' ? 'dealing' : dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : 'lobby',
@@ -467,13 +459,12 @@ function restoreSnapshot(dto: GameStateDTO, knownMultiplier: number): Partial<Ap
     lastPlayedName: dto.last_played?.length
       ? dto.players?.find((player) => player.id === dto.last_player_id)?.name ?? ''
       : '',
-    // Snapshots do not include the server's hand type; discard the pre-reconnect label.
-    lastHandType: '',
+    lastHandType: dto.last_hand_type ?? '',
     seatActions,
     mustPlay: dto.must_play,
     canBeat: dto.can_beat,
-    cardCounter: dto.phase === 'dealing' || dto.phase === 'bidding' ? initialCounter(hand) : {},
-    recentActions: dto.last_played?.length ? [{ type: 'play', player_id: dto.last_player_id, cards: dto.last_played, label: '上一手' }] : []
+    cardCounter: dto.public_plays !== undefined || !isPlaying ? cardCounter : {},
+    recentActions: plays.slice(-10).map(play => ({ ...play, label: play.type === 'pass' ? '不出' : undefined }))
   };
 }
 

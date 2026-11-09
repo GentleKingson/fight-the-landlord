@@ -111,7 +111,7 @@ func TestLoad_AppliesDefaults(t *testing.T) {
 	assert.Equal(t, defaultRedisAddr, cfg.Redis.Addr)
 	assert.Equal(t, defaultTurnTimeout, cfg.Game.TurnTimeout)
 	assert.Equal(t, defaultBidTimeout, cfg.Game.BidTimeout)
-	assert.Equal(t, []string{"*"}, cfg.Security.AllowedOrigins)
+	assert.Empty(t, cfg.Security.AllowedOrigins)
 }
 
 func TestDefault(t *testing.T) {

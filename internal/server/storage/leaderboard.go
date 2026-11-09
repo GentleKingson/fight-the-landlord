@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -73,7 +74,9 @@ type LeaderboardEntry struct {
 
 // LeaderboardManager 排行榜管理器
 type LeaderboardManager struct {
-	redis *redis.Client
+	redis     *redis.Client
+	resultsMu sync.Mutex
+	results   map[string][]queuedResult
 }
 
 // NewLeaderboardManager 创建排行榜管理器

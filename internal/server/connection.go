@@ -55,7 +55,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	identity, token, headers, err := s.resolveIdentity(r)
+	if err != nil {
+		http.Error(w, "Identity service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	upgrade := upgrader
+	upgrade.CheckOrigin = s.originChecker.Check
+	conn, err := upgrade.Upgrade(w, r, headers)
 	if err != nil {
 		log.Printf("WebSocket 升级失败: %v", err)
 		return
@@ -64,17 +71,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 创建客户端
 	client := NewClient(s, conn)
 	client.IP = clientIP // 记录客户端 IP
-	s.registerClient(client)
-
-	// 创建会话
-	session := s.sessionManager.CreateSession(client.ID, client.Name)
-
-	// 发送连接成功消息（包含重连令牌）
-	client.SendMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
-		PlayerID:       client.ID,
-		PlayerName:     client.Name,
-		ReconnectToken: session.ReconnectToken,
-	}))
+	client.ID, client.Name = identity.ID, identity.Name
+	client.browser = r.Header.Get("Origin") != ""
+	s.sessionManager.EnsureSession(client.ID, client.Name)
+	s.RestoreClient(client.ID, client, func() {
+		client.SendMessage(codec.MustNewMessage(protocol.MsgConnected, protocol.ConnectedPayload{
+			PlayerID: client.ID, PlayerName: client.Name, ReconnectToken: token,
+		}))
+		if client.browser {
+			s.handler.RestoreConnection(client, client.ID)
+		} else {
+			s.sessionManager.SetOnline(client.ID)
+		}
+	})
 
 	log.Printf("✅ 玩家 %s (%s) 已连接", client.Name, client.ID)
 
@@ -153,6 +162,10 @@ func (s *Server) RestoreClient(id string, client types.ClientInterface, restore 
 		if closed {
 			return
 		}
+		if c.GetRoom() != "" && c.GetID() != id {
+			c.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameStarted))
+			return
+		}
 	}
 	s.registerIdentity(id, client)
 	restore()
@@ -197,4 +210,21 @@ func (s *Server) UnregisterClient(id string) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 	delete(s.clients, id)
+}
+
+// Matching commits seats under the same lock as socket replacement. A queued
+// request from a replaced/disconnected client cannot create an orphaned game.
+func (s *Server) withActiveClients(clients []types.ClientInterface, create func()) bool {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+	for _, c := range clients {
+		if !c.IsBot() && s.GetClientByID(c.GetID()) != c {
+			return false
+		}
+		if client, ok := c.(*Client); ok && client.isClosed() {
+			return false
+		}
+	}
+	create()
+	return true
 }

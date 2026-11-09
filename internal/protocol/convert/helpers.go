@@ -87,6 +87,8 @@ func ProtoToPlayerInfos(pbs []*pb.PlayerInfo) []protocol.PlayerInfo {
 
 func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 	return &pb.GameStateDTO{
+		Multiplier: int64(gs.Multiplier), PublicPlays: PublicPlaysToProto(gs.PublicPlays),
+		TurnDeadline: gs.TurnDeadline, TurnPaused: gs.TurnPaused, LastHandType: gs.LastHandType,
 		DealId:       gs.DealID,
 		DealStartAt:  gs.DealStartAt,
 		DealEndAt:    gs.DealEndAt,
@@ -105,6 +107,8 @@ func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 
 func ProtoToGameStateDTO(pb *pb.GameStateDTO) *protocol.GameStateDTO {
 	return &protocol.GameStateDTO{
+		Multiplier: int(pb.Multiplier), PublicPlays: ProtoToPublicPlays(pb.PublicPlays),
+		TurnDeadline: pb.TurnDeadline, TurnPaused: pb.TurnPaused, LastHandType: pb.LastHandType,
 		DealID:       pb.DealId,
 		DealStartAt:  pb.DealStartAt,
 		DealEndAt:    pb.DealEndAt,
@@ -229,6 +233,21 @@ func ProtoToRoomListItems(pbs []*pb.RoomListItem) []protocol.RoomListItem {
 			PlayerCount: int(pb.PlayerCount),
 			MaxPlayers:  int(pb.MaxPlayers),
 		}
+	}
+	return result
+}
+
+func PublicPlaysToProto(plays []protocol.PublicPlay) []*pb.PublicPlay {
+	result := make([]*pb.PublicPlay, len(plays))
+	for i, p := range plays {
+		result[i] = &pb.PublicPlay{Type: p.Type, PlayerId: p.PlayerID, PlayerName: p.PlayerName, Cards: CardsToProto(p.Cards), HandType: p.HandType, NewTrick: p.NewTrick}
+	}
+	return result
+}
+func ProtoToPublicPlays(plays []*pb.PublicPlay) []protocol.PublicPlay {
+	result := make([]protocol.PublicPlay, len(plays))
+	for i, p := range plays {
+		result[i] = protocol.PublicPlay{Type: p.Type, PlayerID: p.PlayerId, PlayerName: p.PlayerName, Cards: ProtoToCards(p.Cards), HandType: p.HandType, NewTrick: p.NewTrick}
 	}
 	return result
 }

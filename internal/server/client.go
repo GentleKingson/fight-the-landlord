@@ -47,10 +47,11 @@ func GenerateNickname() string {
 
 // Client 代表一个连接的玩家
 type Client struct {
-	ID     string // 玩家唯一 ID
-	Name   string // 玩家昵称
-	RoomID string // 当前所在房间 ID
-	IP     string // 客户端 IP 地址
+	browser bool   // Browser identities are authenticated exclusively by HttpOnly cookies.
+	ID      string // 玩家唯一 ID
+	Name    string // 玩家昵称
+	RoomID  string // 当前所在房间 ID
+	IP      string // 客户端 IP 地址
 
 	server *Server
 	conn   *websocket.Conn
@@ -95,6 +96,9 @@ func (c *Client) ReadPump() {
 			break
 		}
 
+		if c.isClosed() {
+			break
+		}
 		// 消息速率限制检查
 		allowed, warning := c.server.messageLimiter.AllowMessage(c.GetID())
 		if !allowed {
@@ -120,8 +124,35 @@ func (c *Client) ReadPump() {
 		}
 
 		// 交给处理器处理，处理完后归还到池
-		c.server.handler.Handle(c, msg)
+		c.handleMessage(msg)
 		codec.PutMessage(msg)
+	}
+}
+
+func (c *Client) handleMessage(msg *protocol.Message) {
+	if msg.Type == protocol.MsgReconnect {
+		if !c.browser {
+			c.server.handler.Handle(c, msg)
+		}
+		return
+	}
+	// These queries do not change room, game, or identity state. Validate the
+	// socket under the lifecycle lock, but never keep that lock across Redis I/O.
+	// Replacement closes the old client's send channel, suppressing late replies.
+	if msg.Type == protocol.MsgGetStats || msg.Type == protocol.MsgGetLeaderboard {
+		c.server.connectionMu.Lock()
+		active := c.server.GetClientByID(c.GetID()) == c && !c.isClosed()
+		c.server.connectionMu.Unlock()
+		if active {
+			c.server.handler.Handle(c, msg)
+		}
+		return
+	}
+	// State changes must stay atomic against replacement, disconnect and matching.
+	c.server.connectionMu.Lock()
+	defer c.server.connectionMu.Unlock()
+	if c.server.GetClientByID(c.GetID()) == c && !c.isClosed() {
+		c.server.handler.Handle(c, msg)
 	}
 }
 
@@ -255,3 +286,9 @@ func (c *Client) GetRoom() string {
 func (c *Client) GetID() string   { c.mu.RLock(); defer c.mu.RUnlock(); return c.ID }
 func (c *Client) GetName() string { c.mu.RLock(); defer c.mu.RUnlock(); return c.Name }
 func (c *Client) IsBot() bool     { return false }
+
+func (c *Client) isClosed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.closed
+}

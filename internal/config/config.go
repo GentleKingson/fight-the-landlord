@@ -55,7 +55,9 @@ type BotConfig struct {
 
 // ServerConfig WebSocket 服务器配置
 type ServerConfig struct {
-	WebDir         string `yaml:"web_dir"` // Vite build directory; empty disables web hosting
+	IdentityTTL    int    `yaml:"identity_ttl"`  // 持久身份有效期（秒）
+	CookieSecure   bool   `yaml:"cookie_secure"` // HTTPS 反向代理部署必须开启
+	WebDir         string `yaml:"web_dir"`       // Vite build directory; empty disables web hosting
 	Host           string `yaml:"host"`
 	Port           int    `yaml:"port"`
 	MaxConnections int    `yaml:"max_connections"` // 最大并发连接数，0 表示无限制
@@ -73,6 +75,8 @@ type RedisConfig struct {
 
 // GameConfig 游戏配置
 type GameConfig struct {
+	OfflineRoomRetention  int    `yaml:"offline_room_retention"` // 全部真人离线后的房间保留期（秒）
+	ResultRetention       int    `yaml:"result_retention"`       // 结算保留期（秒）
 	CollectTrainingData   bool   `yaml:"collect_training_data"`
 	TrainingDataDir       string `yaml:"training_data_dir"`
 	TurnTimeout           int    `yaml:"turn_timeout"`            // 出牌超时（秒）
@@ -112,6 +116,24 @@ type ChatLimitConfig struct {
 }
 
 // Duration 方法
+func (c *ServerConfig) IdentityTTLDuration() time.Duration {
+	if c.IdentityTTL <= 0 {
+		return 30 * 24 * time.Hour
+	}
+	return time.Duration(c.IdentityTTL) * time.Second
+}
+func (c *GameConfig) OfflineRoomRetentionDuration() time.Duration {
+	if c.OfflineRoomRetention <= 0 {
+		return 10 * time.Minute
+	}
+	return time.Duration(c.OfflineRoomRetention) * time.Second
+}
+func (c *GameConfig) ResultRetentionDuration() time.Duration {
+	if c.ResultRetention <= 0 {
+		return 2 * time.Minute
+	}
+	return time.Duration(c.ResultRetention) * time.Second
+}
 func (c *GameConfig) TurnTimeoutDuration() time.Duration {
 	return time.Duration(c.TurnTimeout) * time.Second
 }
@@ -203,6 +225,10 @@ func loadFromEnv(cfg *Config) {
 	getEnvInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
 	getEnvStr("SERVER_MIN_CLIENT_VERSION", &cfg.Server.MinClientVersion)
 
+	getEnvInt("IDENTITY_TTL", &cfg.Server.IdentityTTL)
+	if v := os.Getenv("COOKIE_SECURE"); v != "" {
+		cfg.Server.CookieSecure, _ = strconv.ParseBool(v)
+	}
 	// Redis
 	getEnvStr("REDIS_ADDR", &cfg.Redis.Addr)
 	getEnvStr("REDIS_PASSWORD", &cfg.Redis.Password)
@@ -220,6 +246,9 @@ func loadFromEnv(cfg *Config) {
 	getEnvInt("GAME_SHUTDOWN_CHECK_INTERVAL", &cfg.Game.ShutdownCheckInterval)
 	getEnvInt("GAME_ROOM_CLEANUP_DELAY", &cfg.Game.RoomCleanupDelay)
 
+	getEnvInt("GAME_OFFLINE_WAIT_TIMEOUT", &cfg.Game.OfflineWaitTimeout)
+	getEnvInt("GAME_OFFLINE_ROOM_RETENTION", &cfg.Game.OfflineRoomRetention)
+	getEnvInt("GAME_RESULT_RETENTION", &cfg.Game.ResultRetention)
 	// BOT
 	if v := os.Getenv("BOT_ENABLED"); v == "true" || v == "1" {
 		cfg.BOT.Enabled = true
@@ -277,7 +306,7 @@ func setDefaults(cfg *Config) {
 	setDefaultInt(&cfg.Game.OfflineWaitTimeout, defaultOfflineWaitTimeout)
 
 	// Security
-	setDefaultStrSlice(&cfg.Security.AllowedOrigins, []string{"*"})
+	setDefaultStrSlice(&cfg.Security.AllowedOrigins, []string{})
 	setDefaultInt(&cfg.Security.RateLimit.MaxPerSecond, defaultRateLimitPerSecond)
 	setDefaultInt(&cfg.Security.RateLimit.MaxPerMinute, defaultRateLimitPerMinute)
 	setDefaultInt(&cfg.Security.RateLimit.BanDuration, defaultBanDuration)

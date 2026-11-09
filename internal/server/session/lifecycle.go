@@ -2,7 +2,6 @@ package session
 
 import (
 	"cmp"
-	"context"
 	"crypto/rand"
 	"log"
 	"slices"
@@ -14,6 +13,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 	"github.com/palemoky/fight-the-landlord/internal/securerand"
+	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 )
 
 // Start 开始游戏
@@ -71,6 +71,7 @@ func (gs *GameSession) stopDealTimer() {
 
 // dealNewRound 重置本局状态并发牌（不进入叫地主流程；调用方需持有 gs.mu）
 func (gs *GameSession) dealNewRound() {
+	gs.publicPlays = nil
 	// 重置叫抢与倍数状态
 	gs.landlordCaller = -1
 	gs.landlordCandidate = -1
@@ -149,6 +150,8 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	gs.stopTimer()
 	gs.cancelBotTurn()
 	gs.finishRecording("completed", winner)
+	// Enqueue before exposing the ended state or releasing seats for a new game.
+	gs.recordGameResults(winner)
 	gs.state = GameStateEnded
 	gs.room.SetState(RoomStateEnded)
 
@@ -191,9 +194,6 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 			rp.Client.SetRoom("")
 		}
 	}
-
-	// 记录游戏结果到排行榜
-	gs.recordGameResults(winner)
 }
 
 // finalMultiplier 计算本局最终倍数：底倍 × 炸弹/王炸 × 春天/反春天
@@ -245,7 +245,10 @@ func (gs *GameSession) computeScores(winner *GamePlayer, mult int) []protocol.Pl
 
 // recordGameResults 记录游戏结果到排行榜
 func (gs *GameSession) recordGameResults(winner *GamePlayer) {
-	ctx := context.Background()
+	gameID := gs.dealID
+	if gameID == "" {
+		gameID = rand.Text()
+	}
 	leaderboard := gs.leaderboard
 	if leaderboard == nil || !leaderboard.IsReady() {
 		return
@@ -273,10 +276,10 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 			playerName = rp.Client.GetName()
 		}
 
-		// 记录结果
-		if err := leaderboard.RecordGameResult(ctx, p.ID, playerName, p.IsLandlord, isWinner); err != nil {
-			log.Printf("记录游戏结果失败: %v", err)
-		}
+		leaderboard.QueueGameResult(storage.GameResult{
+			GameID: gameID, PlayerID: p.ID, PlayerName: playerName,
+			IsLandlord: p.IsLandlord, IsWinner: isWinner,
+		})
 	}
 }
 

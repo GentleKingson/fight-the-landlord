@@ -9,6 +9,8 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
@@ -19,6 +21,7 @@ type SessionRegistrationFunc func(roomCode string, gs *session.GameSession)
 
 // Matcher 匹配系统
 type Matcher struct {
+	withClients     func([]types.ClientInterface, func()) bool
 	roomManager     *room.RoomManager
 	redisStore      *storage.RedisStore
 	leaderboard     *storage.LeaderboardManager
@@ -34,6 +37,7 @@ type Matcher struct {
 
 // MatcherDeps 匹配器依赖
 type MatcherDeps struct {
+	WithClients     func([]types.ClientInterface, func()) bool
 	RoomManager     *room.RoomManager
 	RedisStore      *storage.RedisStore
 	Leaderboard     *storage.LeaderboardManager
@@ -47,6 +51,7 @@ type MatcherDeps struct {
 func NewMatcher(deps MatcherDeps) *Matcher {
 	return &Matcher{
 		roomManager:     deps.RoomManager,
+		withClients:     deps.WithClients,
 		redisStore:      deps.RedisStore,
 		leaderboard:     deps.Leaderboard,
 		gameConfig:      deps.GameConfig,
@@ -143,6 +148,22 @@ func (m *Matcher) tryMatch() {
 
 // createMatchRoom 创建匹配房间
 func (m *Matcher) createMatchRoom(players []types.ClientInterface) {
+	if m.withClients != nil {
+		if !m.withClients(players, func() { m.createMatchRoomLocked(players) }) {
+			for _, p := range players {
+				if p.IsBot() {
+					p.Close()
+				} else {
+					p.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "匹配玩家已离线，请重新匹配"))
+				}
+			}
+		}
+		return
+	}
+	m.createMatchRoomLocked(players)
+}
+
+func (m *Matcher) createMatchRoomLocked(players []types.ClientInterface) {
 	// Reserve all seats and send the lobby/start messages in one room transaction.
 	room, err := m.roomManager.CreateMatchedRoom(players)
 	if err != nil {

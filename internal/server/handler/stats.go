@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
@@ -12,7 +13,8 @@ import (
 
 // handleGetStats 获取个人统计
 func (h *Handler) handleGetStats(client types.ClientInterface) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	playerStats, err := h.leaderboard.GetPlayerStats(ctx, client.GetID())
 	if err != nil {
 		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "获取统计失败"))
@@ -74,7 +76,9 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 		payload.Offset = 0
 	}
 
-	entries, err := h.leaderboard.GetLeaderboard(context.Background(), payload.Limit)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	entries, err := h.leaderboard.GetLeaderboard(ctx, payload.Limit)
 	if err != nil {
 		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "获取排行榜失败"))
 		return

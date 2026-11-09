@@ -40,12 +40,63 @@ func (gs *GameSession) BuildGameStateDTO(playerID string, sessionManager *Sessio
 
 func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *SessionManager) *protocol.GameStateDTO {
 	var hand []card.Card
+	found := false
 	for _, p := range gs.players {
 		if p.ID == playerID {
+			found = true
 			hand = p.Hand
 			break
 		}
 	}
+	if !found {
+		return nil
+	}
+	players := gs.snapshotPlayersLocked(sessionManager)
+	phase, currentTurnID := gs.snapshotPhaseAndTurnLocked()
+	var lastPlayed []card.Card
+	lastPlayerID := ""
+	lastType := ""
+	if !gs.lastPlayedHand.IsEmpty() {
+		lastPlayed = gs.lastPlayedHand.Cards
+		lastPlayerID = gs.players[gs.lastPlayerIdx].ID
+		lastType = gs.lastPlayedHand.Type.String()
+	}
+	bottomCards := gs.bottomCards
+	if gs.state == GameStateBidding || gs.state == GameStateDealing {
+		bottomCards = nil
+	}
+	mustPlay := gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty()
+	canBeat := false
+	if gs.state == GameStatePlaying && currentTurnID == playerID {
+		canBeat = mustPlay || rule.CanBeatWithHand(hand, gs.lastPlayedHand)
+	}
+	deadline, paused := gs.snapshotTurnTiming()
+	plays := make([]protocol.PublicPlay, len(gs.publicPlays))
+	for i, p := range gs.publicPlays {
+		plays[i] = p
+		plays[i].Cards = append([]protocol.CardInfo{}, p.Cards...)
+	}
+	return &protocol.GameStateDTO{
+		Multiplier: max(gs.bidMultiplier, 1) << gs.bombCount, PublicPlays: plays,
+		TurnDeadline: deadline, TurnPaused: paused, LastHandType: lastType,
+		DealID:       gs.dealID,
+		DealStartAt:  gs.dealStartAt.UnixMilli(),
+		DealEndAt:    gs.dealEndAt.UnixMilli(),
+		ServerTime:   time.Now().UnixMilli(),
+		Phase:        phase,
+		Players:      players,
+		Hand:         convert.CardsToInfos(hand),
+		BottomCards:  convert.CardsToInfos(bottomCards),
+		CurrentTurn:  currentTurnID,
+		LastPlayed:   convert.CardsToInfos(lastPlayed),
+		LastPlayerID: lastPlayerID,
+		MustPlay:     mustPlay,
+		CanBeat:      canBeat,
+	}
+}
+
+// Snapshot helpers run with gs.mu held, preserving one consistent game view.
+func (gs *GameSession) snapshotPlayersLocked(sessionManager *SessionManager) []protocol.PlayerInfo {
 	players := make([]protocol.PlayerInfo, len(gs.players))
 	for i, p := range gs.players {
 		isBot := gs.room.Players[p.ID].Client.IsBot()
@@ -59,49 +110,31 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 			IsBot:      isBot,
 		}
 	}
-	phase := "waiting"
+	return players
+}
+
+func (gs *GameSession) snapshotPhaseAndTurnLocked() (phase, currentTurn string) {
 	switch gs.state {
 	case GameStateDealing:
-		phase = "dealing"
+		return "dealing", ""
 	case GameStateBidding:
-		phase = "bidding"
+		return "bidding", gs.players[gs.currentBidder].ID
 	case GameStatePlaying:
-		phase = "playing"
+		return "playing", gs.players[gs.currentPlayer].ID
 	case GameStateEnded:
-		phase = "ended"
+		return "ended", ""
+	default:
+		return "waiting", ""
 	}
-	currentTurnID := ""
-	switch gs.state {
-	case GameStateBidding:
-		currentTurnID = gs.players[gs.currentBidder].ID
-	case GameStatePlaying:
-		currentTurnID = gs.players[gs.currentPlayer].ID
+}
+
+func (gs *GameSession) snapshotTurnTiming() (deadline int64, paused bool) {
+	gs.timerMu.Lock()
+	defer gs.timerMu.Unlock()
+	if gs.turnTimer != nil {
+		deadline = gs.timerStartTime.Add(gs.remainingTime).UnixMilli()
 	}
-	var lastPlayed []card.Card
-	lastPlayerID := ""
-	if !gs.lastPlayedHand.IsEmpty() {
-		lastPlayed = gs.lastPlayedHand.Cards
-		lastPlayerID = gs.players[gs.lastPlayerIdx].ID
-	}
-	bottomCards := gs.bottomCards
-	if gs.state == GameStateBidding || gs.state == GameStateDealing {
-		bottomCards = nil
-	}
-	return &protocol.GameStateDTO{
-		DealID:       gs.dealID,
-		DealStartAt:  gs.dealStartAt.UnixMilli(),
-		DealEndAt:    gs.dealEndAt.UnixMilli(),
-		ServerTime:   time.Now().UnixMilli(),
-		Phase:        phase,
-		Players:      players,
-		Hand:         convert.CardsToInfos(hand),
-		BottomCards:  convert.CardsToInfos(bottomCards),
-		CurrentTurn:  currentTurnID,
-		LastPlayed:   convert.CardsToInfos(lastPlayed),
-		LastPlayerID: lastPlayerID,
-		MustPlay:     gs.lastPlayerIdx == gs.currentPlayer || gs.lastPlayedHand.IsEmpty(),
-		CanBeat:      true,
-	}
+	return deadline, gs.offlineWaitTimer != nil
 }
 
 // ResendTurnTo 在重连后向指定玩家补发"当前回合"通知（叫地主/出牌），携带计时器的剩余时间。它只向单个客户端发送、不广播、不重启计时器，用于恢复重连玩家的操作提示（按钮、倒计时、叫/抢区分）。
@@ -134,7 +167,7 @@ func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 			PlayerID: player.ID,
 			Timeout:  gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout),
 			MustPlay: mustPlay,
-			CanBeat:  canBeat,
+			CanBeat:  canBeat && client.GetID() == player.ID,
 		}))
 	}
 }
@@ -144,6 +177,9 @@ func (gs *GameSession) remainingTurnSeconds(fallback int) int {
 	gs.timerMu.Lock()
 	defer gs.timerMu.Unlock()
 
+	if gs.offlineWaitTimer != nil {
+		return 0
+	}
 	if gs.turnTimer == nil || gs.timerStartTime.IsZero() {
 		return fallback
 	}
@@ -151,7 +187,7 @@ func (gs *GameSession) remainingTurnSeconds(fallback int) int {
 	if remaining <= 0 {
 		return 0
 	}
-	return int(remaining.Seconds())
+	return int((remaining + time.Second - 1) / time.Second)
 }
 
 // SerializeForRedis 为Redis序列化准备数据（提供只读访问）

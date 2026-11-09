@@ -20,11 +20,13 @@ type HandlerDeps struct {
 	Matcher        *match.Matcher
 	ChatLimiter    types.ChatLimiter
 	Leaderboard    *storage.LeaderboardManager
+	Authenticate   func(playerID, token string) (string, error)
 	SessionManager *session.SessionManager
 }
 
 // Handler 消息处理器
 type Handler struct {
+	authenticate   func(playerID, token string) (string, error)
 	server         types.ServerInterface
 	roomManager    *room.RoomManager
 	matcher        *match.Matcher
@@ -43,6 +45,7 @@ type handlerFunc func(client types.ClientInterface, msg *protocol.Message)
 func NewHandler(deps HandlerDeps) *Handler {
 	h := &Handler{
 		server:         deps.Server,
+		authenticate:   deps.Authenticate,
 		roomManager:    deps.RoomManager,
 		matcher:        deps.Matcher,
 		chatLimiter:    deps.ChatLimiter,

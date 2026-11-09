@@ -45,10 +45,12 @@ type Client struct {
 	OnReconnect     func()                      // 重连成功回调
 	OnLatencyUpdate func(int64)                 // 延迟更新回调
 
-	mu             sync.RWMutex
-	closed         bool
-	reconnecting   atomic.Bool
-	reconnectCount int
+	mu              sync.RWMutex
+	closed          bool
+	reconnecting    atomic.Bool
+	replaced        atomic.Bool
+	pendingIdentity *protocol.Message
+	reconnectCount  int
 }
 
 // NewClient 创建客户端

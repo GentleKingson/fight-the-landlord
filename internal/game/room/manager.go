@@ -92,6 +92,9 @@ func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Roo
 		Ready:  false,
 	}
 	room.Players[client.GetID()] = player
+	if !client.IsBot() {
+		room.AllOfflineAt = time.Time{}
+	}
 	room.PlayerOrder = append(room.PlayerOrder, client.GetID())
 	slices.SortFunc(room.PlayerOrder, func(a, b string) int {
 		return cmp.Compare(room.Players[a].Seat, room.Players[b].Seat)
@@ -150,6 +153,16 @@ func (rm *RoomManager) leaveRoomLocked(client types.ClientInterface) (*Room, err
 	if len(r.Players) == 0 {
 		delete(rm.rooms, code)
 		return r, nil
+	}
+	allOffline := true
+	for _, p := range r.Players {
+		if !p.Client.IsBot() && !p.Offline {
+			allOffline = false
+			break
+		}
+	}
+	if allOffline && r.AllOfflineAt.IsZero() {
+		r.AllOfflineAt = time.Now()
 	}
 	if rm.redisStore != nil && rm.redisStore.IsReady() {
 		go func() { _ = rm.redisStore.SaveRoom(context.Background(), r.Code, r.ToRoomData()) }()

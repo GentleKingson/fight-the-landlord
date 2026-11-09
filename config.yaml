@@ -1,6 +1,8 @@
 # 斗地主服务端配置
 
 server:
+  identity_ttl: 2592000 # 30 天，秒
+  cookie_secure: false # HTTPS/反向代理生产部署改为 true
   # 构建网页后设为 web/dist；留空仅提供 WebSocket
   web_dir: ""
   # WebSocket 监听地址
@@ -18,6 +20,9 @@ redis:
   db: 0
 
 game:
+  offline_wait_timeout: 30 # 当前回合断线后等待重连，随后托管（秒）
+  offline_room_retention: 600 # 所有真人离线后保留房间（秒）
+  result_retention: 120 # 结束后保留结算（秒），独立于离线房间保留期
   # 采集匿名对局，仅保存在服务器磁盘
   collect_training_data: false
   training_data_dir: "data/games"
@@ -35,9 +40,9 @@ game:
   room_cleanup_delay: 30
 
 security:
-  # 允许的来源（设置为 ["*"] 允许所有）
-  allowed_origins:
-    - "*"
+  # 默认仅允许同源浏览器和无 Origin 的终端；代理部署显式填写公网 HTTPS Origin。
+  # 不支持通配符。例如 ["https://cards.example.com"]
+  allowed_origins: []
   # 连接速率限制
   rate_limit:
     # 每秒最大连接数（per IP）

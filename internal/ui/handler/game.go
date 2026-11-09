@@ -64,16 +64,13 @@ func restoreGameState(m model.Model, dto *protocol.GameStateDTO) {
 		}
 	}
 
-	// 记牌器：快照不含完整出牌历史，只能按可见信息尽力重建
-	// （自己的手牌、底牌(若为地主)、可见的上家牌）；后续出牌事件会继续修正。
+	// All exposed cards and the current hand suffice; never deduct bottom cards twice.
 	st.CardCounter.Reset()
 	st.CardCounter.DeductCards(st.Hand)
-	if st.IsLandlord {
-		st.CardCounter.DeductCards(st.BottomCards)
+	for _, play := range dto.PublicPlays {
+		st.CardCounter.DeductCards(convert.InfosToCards(play.Cards))
 	}
-	if dto.LastPlayerID != myID {
-		st.CardCounter.DeductCards(st.LastPlayed)
-	}
+	st.Multiplier = max(dto.Multiplier, 1)
 
 	m.Game().SetMustPlay(dto.MustPlay)
 }
