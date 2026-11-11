@@ -1774,6 +1774,13 @@
   box-shadow: 0 0 0 3px rgba(255, 217, 102, .72), 0 14px 24px rgba(0, 0, 0, .28);
 }
 
+.card__suit-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+}
+
 .card__index {
   position: absolute;
   display: grid;
@@ -1799,18 +1806,18 @@
   top: 6px;
 }
 
+/* Keep rank/suit in the top-left lane; the emblem owns the bottom-right. */
 .card__index--bottom {
-  right: 6px;
-  bottom: 6px;
-  transform: rotate(180deg);
+  display: none;
 }
 
 .card__pip {
   position: absolute;
-  left: 50%;
-  top: 53%;
-  transform: translate(-50%, -50%);
-  font-size: 42px;
+  right: 8%;
+  bottom: 6%;
+  width: 1em;
+  height: 1em;
+  font-size: min(var(--pip-size, 42px), calc(var(--w) * .40), calc(var(--h) * .38));
   line-height: 1;
 }
 
@@ -1823,7 +1830,7 @@
 }
 
 .card--played .card__pip {
-  font-size: 31px;
+  --pip-size: 31px;
 }
 
 .card--mini .card__index {
@@ -1839,8 +1846,7 @@
 }
 
 .card--mini .card__pip {
-  top: 72%;
-  font-size: 17px;
+  --pip-size: 17px;
 }
 
 /* Use the actual card dimensions in every context (including end-of-round review).
@@ -1978,7 +1984,7 @@
   .card--hand { --w: 58px; --h: 82px; }
   .card--played { --w: 38px; --h: 54px; }
   .card__index { font-size: 15px; }
-  .card__pip { font-size: 32px; }
+  .card__pip { --pip-size: 32px; }
   .utility-drawer { left: auto; right: max(8px, env(safe-area-inset-right)); bottom: max(8px, env(safe-area-inset-bottom)); width: min(380px, calc(100% - 16px)); max-height: calc(100dvh - 16px); }
 }
 
@@ -2082,7 +2088,7 @@
 }
 
 .card--action .card__pip {
-  font-size: 24px;
+  --pip-size: 24px;
 }
 
 @media (max-width: 880px) {
@@ -2177,7 +2183,7 @@
   .hand__slot.is-selected { transform: translateY(-12px); }
   .hand .card__index { font-size: 12px; }
   .hand .card__index i { font-size: 11px; }
-  .hand .card__pip { font-size: 26px; }
+  .hand .card__pip { --pip-size: 26px; }
   .hand-heading { line-height: 14px; font-size: 10px; }
   .result-screen { padding: 8px; }
   .result-panel { padding: 10px; gap: 8px; }
@@ -2238,7 +2244,7 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
   .felt-table .card--played .card__index { font-size: 9px; }
   .felt-table .card--played .card__index--top { top: 3px; left: 2px; }
   .felt-table .card--played .card__index i { font-size: 8px; }
-  .felt-table .card--played .card__pip { font-size: 17px; }
+  .felt-table .card--played .card__pip { --pip-size: 17px; }
 }
 
 @media (max-width: 360px) and (orientation: portrait) {

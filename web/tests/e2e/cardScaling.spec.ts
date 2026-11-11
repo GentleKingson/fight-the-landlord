@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('card artwork fits every card size and responsive context without joker collisions', async ({ page }, testInfo) => {
+test('card artwork fits every card size and responsive context without artwork collisions', async ({ page }, testInfo) => {
   await page.route('**/api/config', route => route.fulfill({ json: {} }));
   await page.goto('/?demo=table');
   // Mount the production Card with the same ancestor selectors as each consumer.
@@ -21,13 +21,17 @@ test('card artwork fits every card size and responsive context without joker col
       ['hand', 'hand'], ['played', ''], ['mini', ''], ['action', ''],
       ['mini', 'bottom-cards'], ['played', 'felt-table'], ['played', 'end-table__cards'],
     ];
+    const samples = [
+      { rank: 16, suit: 4, color: 0 }, { rank: 17, suit: 4, color: 1 },
+      ...[0, 1, 2, 3].map(suit => ({ rank: 10, suit, color: suit === 1 || suit === 3 ? 1 : 0 })),
+    ];
     createRoot(host).render(h('div', {}, contexts.map(([size, context]) => h('section', {
       key: `${size}-${context}`, className: context,
       style: { display: 'flex', gap: '12px', height: 'auto', padding: '16px', position: 'relative' },
-    }, h('div', { className: context === 'felt-table' ? 'played-cards' : '', style: { display: 'flex', gap: '12px' } }, [16, 17, 10].map(rank => h(Card, { key: rank, size, card: { rank, suit: rank >= 16 ? 4 : 1, color: rank === 16 ? 0 : 1 } })))))));
+    }, h('div', { className: context === 'felt-table' ? 'played-cards' : '', style: { display: 'flex', gap: '12px' } }, samples.map(card => h(Card, { key: `${card.rank}-${card.suit}`, size, card })))))));
   });
   const cards = page.locator('#card-scaling-probe .card');
-  await expect(cards).toHaveCount(21);
+  await expect(cards).toHaveCount(42);
   for (const viewport of [
     { width: 1440, height: 900 }, { width: 880, height: 700 },
     { width: 390, height: 844 }, { width: 320, height: 568 },
@@ -38,11 +42,42 @@ test('card artwork fits every card size and responsive context without joker col
       const box = card.getBoundingClientRect();
       const errors: string[] = [];
       const label = `${card.closest('section')!.className}/${card.className}`;
+      const icons = [...card.querySelectorAll<SVGSVGElement>('.card__suit-icon')];
+      const isJoker = card.classList.contains('is-joker');
+      if (icons.length !== (isJoker ? 0 : 3)) errors.push(`${label}: missing suit SVG`);
+      if (!isJoker && /[♠♥♣♦]/u.test(card.textContent ?? '')) errors.push(`${label}: text suit remains`);
+      for (const icon of icons) {
+        if (!icon.getClientRects().length) continue;
+        const rect = icon.getBoundingClientRect();
+        const style = getComputedStyle(icon);
+        if (!icon.querySelector('path')?.getAttribute('d')) errors.push(`${label}: empty suit path`);
+        if (style.fill !== getComputedStyle(card).color || getComputedStyle(icon.querySelector('path')!).fill !== style.fill) {
+          errors.push(`${label}: suit does not inherit card color`);
+        }
+        if (rect.width <= 0 || Math.abs(rect.width - parseFloat(style.fontSize)) > .1 || Math.abs(rect.width - rect.height) > .1) {
+          errors.push(`${label}: suit size is not 1em square`);
+        }
+        if (rect.left < box.left || rect.right > box.right || rect.top < box.top || rect.bottom > box.bottom) {
+          errors.push(`${label}: suit outside card`);
+        }
+      }
       for (const part of card.children) {
         if (!part.getClientRects().length) continue;
         const rect = part.getBoundingClientRect();
         if (rect.left < box.left || rect.right > box.right || rect.top < box.top || rect.bottom > box.bottom) {
           errors.push(`${label}: ${part.className} outside card`);
+        }
+      }
+      const pip = card.querySelector('.card__pip');
+      if (pip?.getClientRects().length) {
+        const a = pip.getBoundingClientRect();
+        for (const index of card.querySelectorAll('.card__index')) {
+          if (!index.getClientRects().length) continue;
+          const b = index.getBoundingClientRect();
+          // Require breathing room as well as no overlap (CSS pixels).
+          if (a.left < b.right + 2 && a.right > b.left - 2 && a.top < b.bottom + 2 && a.bottom > b.top - 2) {
+            errors.push(`${label}: pip too close to corner index`);
+          }
         }
       }
       if (card.classList.contains('card--mini')) {
