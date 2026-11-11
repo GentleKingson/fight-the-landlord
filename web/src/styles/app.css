@@ -1995,6 +1995,25 @@
 .played-seat--right .played-cards { justify-items: end; }
 .played-seat--me .played-cards { justify-items: center; }
 
+.played-seat--target .played-cards__row {
+  outline: 2px solid #ffe28e;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.played-seat--target .played-cards__meta { flex-wrap: wrap; gap: 4px 6px; }
+.played-cards__target-label {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #ffe28e;
+  color: #123c2d;
+  white-space: nowrap;
+}
+
+/* Keep the current trick visible even where compact layouts hide other subtitles. */
+.turn-banner__copy .turn-banner__play-hint { display: block; }
+
 .played-cards__meta { max-width: 100%; }
 
 .played-cards__meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

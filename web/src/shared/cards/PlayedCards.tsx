@@ -8,9 +8,10 @@ interface PlayedCardsProps {
   handType?: string;
   playerName?: string;
   compact?: boolean;
+  isTarget?: boolean;
 }
 
-export function PlayedCards({ cards, handType, playerName, compact = false }: PlayedCardsProps) {
+export function PlayedCards({ cards, handType, playerName, compact = false, isTarget = false }: PlayedCardsProps) {
   if (!cards.length) {
     return <div className="played-cards played-cards--empty">等待出牌</div>;
   }
@@ -18,6 +19,7 @@ export function PlayedCards({ cards, handType, playerName, compact = false }: Pl
   return (
     <div className={`played-cards ${compact ? 'played-cards--compact' : ''}`}>
       <div className="played-cards__meta">
+        {isTarget ? <b className="played-cards__target-label">待压过</b> : null}
         {playerName ? <span>{playerName}</span> : null}
         {handType ? <strong>{handType}</strong> : null}
       </div>
