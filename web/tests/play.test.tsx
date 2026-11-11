@@ -9,6 +9,41 @@ import type { GameSocket } from '../src/transport/wsClient';
 vi.mock('../src/shared/cards/Hand', () => ({ Hand: () => null }));
 afterEach(cleanup);
 
+it.each([
+  { name: 'empty selection', ranks: [], target: [], mustPlay: true, allowed: false },
+  { name: 'invalid opening hand', ranks: [3, 4], target: [], mustPlay: true, allowed: false },
+  { name: 'invalid reply', ranks: [3, 4], target: [3], mustPlay: false, allowed: false },
+  { name: 'lower reply', ranks: [3], target: [4], mustPlay: false, allowed: false },
+  { name: 'equal reply', ranks: [4], target: [4], mustPlay: false, allowed: false },
+  { name: 'different hand type', ranks: [5, 5], target: [4], mustPlay: false, allowed: false },
+  { name: 'higher reply', ranks: [5], target: [4], mustPlay: false, allowed: true },
+  { name: 'bomb over a pair', ranks: [3, 3, 3, 3], target: [4, 4], mustPlay: false, allowed: true },
+  { name: 'rocket over a bomb', ranks: [16, 17], target: [4, 4, 4, 4], mustPlay: false, allowed: true },
+  { name: 'bomb below a rocket', ranks: [3, 3, 3, 3], target: [16, 17], mustPlay: false, allowed: false },
+  { name: 'opening hand with no previous play', ranks: [3], target: [], mustPlay: true, allowed: true },
+  { name: 'new trick with previous cards retained', ranks: [3], target: [4, 4], mustPlay: true, allowed: true },
+  { name: 'another player turn', ranks: [5], target: [4], mustPlay: false, allowed: false, currentTurn: 'b' }
+])('validates $name before enabling and submitting a play', ({ ranks, target, mustPlay, allowed, currentTurn }) => {
+  const cards = (values: number[]) => values.map((rank, index) => ({ rank, suit: index % 4, color: 0 }));
+  const hand = cards(ranks);
+  useAppStore.setState({ turnToken: 'turn-test', phase: 'playing', playerId: 'a', currentTurn: currentTurn ?? 'a', hand,
+    selectedCards: new Set(hand.map(cardKey)), mustPlay, canBeat: true, players: [],
+    lastPlayed: cards(target), drawer: 'none', tableMessage: '' });
+  const send = vi.fn();
+  render(<GameTable socket={{ send } as unknown as GameSocket} />);
+  const button = screen.getByRole('button', { name: /^出牌$/ }) as HTMLButtonElement;
+  expect(button.disabled).toBe(!allowed);
+  if (ranks.length === 2 && ranks[0] !== ranks[1] && ranks[1] < 16) {
+    expect(screen.getByText('已选 2 张 · 无效牌型')).toBeDefined();
+  }
+  fireEvent.click(button);
+  if (allowed) {
+    expect(send).toHaveBeenCalledWith(MsgType.PlayCards, { cards: hand, turn_token: 'turn-test' });
+  } else {
+    expect(send).not.toHaveBeenCalled();
+  }
+});
+
 it('allows manually selected replies regardless of the advisory can_beat flag', () => {
   const hand = [4, 5, 6, 7, 8].map(rank => ({ rank, suit: 0, color: 0 }));
   useAppStore.setState({ turnToken: 'turn-test', phase: 'playing', playerId: 'a', currentTurn: 'a', hand,
@@ -19,7 +54,7 @@ it('allows manually selected replies regardless of the advisory can_beat flag', 
   fireEvent.click(screen.getByRole('button', { name: /^出牌$/ }));
   expect(send).toHaveBeenCalledWith(MsgType.PlayCards, { cards: hand, turn_token: 'turn-test' });
   fireEvent.click(screen.getByRole('button', { name: /^提示$/ }));
-  expect(useAppStore.getState().tableMessage).toBe('提示：顺子');
+  expect(useAppStore.getState().tableMessage).toBe('提示 1/1：顺子');
 });
 
 it.each([0, 1, 2])('keeps previous player left and next player right with their played cards (self seat %i)', (seat) => {

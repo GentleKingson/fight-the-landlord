@@ -1,157 +1,184 @@
 import { expect, test, type Page } from '@playwright/test';
+import type { BackgroundScene } from '../../src/shared/ui/backgroundScene';
 
-function expectedAsset(page: Page) {
-  const { width, height } = page.viewportSize()!;
-  if (height >= width) return { name: 'portrait-900', dimensions: [900, 1600], budget: 20 * 1024 };
-  if (width > 960) return { name: '1600', dimensions: [1600, 900], budget: 24 * 1024 };
-  return { name: '960', dimensions: [960, 540], budget: 10 * 1024 };
+const FALLBACK_RGB: Record<BackgroundScene, string> = {
+  lobby: 'rgb(22, 41, 33)',
+  table: 'rgb(8, 40, 32)',
+  settlement: 'rgb(23, 38, 31)',
+};
+
+function isSceneBackground(url: string) {
+  return /\/scene-(lobby|table|settlement)-[^/]+\.webp$/.test(new URL(url).pathname);
 }
 
-async function expectPageBackground(page: Page) {
-  const { name } = expectedAsset(page);
+function expectedVariant(page: Page) {
+  const { width, height } = page.viewportSize()!;
+  if (height >= width) return { suffix: 'portrait-900', dimensions: [900, 1600], budget: 60 * 1024 };
+  if (width > 960) return { suffix: '1600', dimensions: [1600, 900], budget: 72 * 1024 };
+  return { suffix: '960', dimensions: [960, 540], budget: 40 * 1024 };
+}
+
+async function expectSceneBackground(page: Page, scene: BackgroundScene) {
+  const { suffix } = expectedVariant(page);
   const shell = page.locator('.app-shell');
-  if (name === 'portrait-900') {
-    await expect(shell).toHaveCSS('background-image', 'none');
-    const frame = await shell.evaluate(element => {
-      const css = getComputedStyle(element, '::before');
-      return { image: css.borderImageSource, slice: css.borderImageSlice,
-        pointerEvents: css.pointerEvents, zIndex: css.zIndex, position: css.position };
-    });
-    expect(frame.image).toContain('emerald-table-portrait-900');
-    expect(frame.slice).toBe('120 fill');
-    expect(frame.pointerEvents).toBe('none');
-    expect(frame.zIndex).toBe('-1');
-    expect(frame.position).toBe('absolute');
-  } else {
-    await expect(shell).toHaveCSS('background-image', new RegExp(`emerald-table-${name}`));
-    expect(await shell.evaluate(element => getComputedStyle(element, '::before').content)).toBe('none');
-  }
-  await expect(page.locator('.app-shell')).toHaveCSS('background-color', 'rgb(0, 59, 41)');
-  await expect(page.locator('.app-shell')).toHaveCSS('background-size', 'cover');
-  await expect(page.locator('.app-shell')).toHaveCSS('background-position', '50% 50%');
+  await expect(shell).toHaveAttribute('data-scene', scene);
+  await expect(shell).toHaveCSS('background-image', new RegExp(`scene-${scene}-${suffix}`));
+  await expect(shell).toHaveCSS('background-color', FALLBACK_RGB[scene]);
+  await expect(shell).toHaveCSS('background-size', 'cover');
+  await expect(shell).toHaveCSS('background-position', '50% 50%');
+
+  const veil = await shell.evaluate((element) => {
+    const css = getComputedStyle(element, '::before');
+    return { pointerEvents: css.pointerEvents, zIndex: css.zIndex, position: css.position };
+  });
+  expect(veil.pointerEvents).toBe('none');
+  expect(veil.zIndex).toBe('-1');
+  expect(veil.position).toBe('absolute');
+
   expect(await page.evaluate(() => ({
     width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
     height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
   }))).toEqual(page.viewportSize());
 }
 
-test('page background loads one appropriately sized WebP and survives navigation and reload', async ({ page }) => {
-  const imageRequests: string[] = [];
-  page.on('request', request => {
-    if (request.url().includes('emerald-table-')) imageRequests.push(request.url());
+test.describe('scene-specific Neo-Chinese page backgrounds', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/config', (route) => route.fulfill({ json: {} }));
   });
-  const responsePromise = page.waitForResponse(response => response.url().includes('emerald-table-'));
-  await page.goto('/?demo=lobby');
-  const response = await responsePromise;
-  const asset = expectedAsset(page);
-  expect(response.ok()).toBe(true);
-  expect(response.url()).toContain(`emerald-table-${asset.name}`);
-  expect(response.headers()['content-type']).toContain('image/webp');
-  expect((await response.body()).byteLength).toBeLessThan(asset.budget);
-  expect(imageRequests).toHaveLength(1);
-  expect(await page.evaluate(async () => {
-    const element = document.querySelector('.app-shell')!;
-    const css = getComputedStyle(element);
-    const source = css.backgroundImage === 'none' ? getComputedStyle(element, '::before').borderImageSource : css.backgroundImage;
-    const image = new Image();
-    image.src = source.slice(5, -2);
-    await image.decode();
-    return [image.naturalWidth, image.naturalHeight];
-  })).toEqual(asset.dimensions);
 
-  await expectPageBackground(page);
-  await page.getByRole('button', { name: '我的战绩', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '我的战绩' })).toBeVisible();
-  await expectPageBackground(page);
-  await page.getByRole('button', { name: '大厅', exact: true }).click();
-  await page.reload();
-  await expect(page.getByRole('button', { name: /快速开局/ })).toBeInViewport({ ratio: 1 });
-  await expectPageBackground(page);
-});
-
-test('the new outer background preserves the original felt and interactive table layers', async ({ page }) => {
-  await page.goto('/?demo=table');
-  await expectPageBackground(page);
-  await expect(page.locator('.table-screen')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  await expect(page.locator('.table-screen')).toHaveCSS('background-image', 'none');
-  expect(await page.locator('.table-screen').evaluate(element => getComputedStyle(element, '::before').content)).toBe('none');
-  const feltBackground = await page.locator('.table-arena').evaluate(element => getComputedStyle(element).backgroundImage);
-  expect(feltBackground).toContain('radial-gradient');
-  expect(feltBackground).not.toContain('emerald-table');
-  const bounds = await page.locator('.table-arena').boundingBox();
-  for (let cycle = 0; cycle < 2; cycle++) {
-    await page.getByRole('button', { name: '聊天', exact: true }).click();
-    await expect(page.locator('.utility-drawer')).toBeVisible();
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
-    await expect(page.locator('.utility-drawer')).toHaveCount(0);
-    expect(await page.locator('.table-arena').boundingBox()).toEqual(bounds);
-  }
-  await expect(page.getByRole('button', { name: '出牌', exact: true })).toBeInViewport({ ratio: 1 });
-  const card = page.getByLabel('手牌').getByRole('button').first();
-  await card.click();
-  await expect(card).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: '重选', exact: true }).click();
-  await expect(card).toHaveAttribute('aria-pressed', 'false');
-});
-
-test('failed background images retain a readable fallback without affecting layout', async ({ page }) => {
-  await page.route('**/emerald-table-*', route => route.abort());
-  for (const mode of ['lobby', 'bidding', 'table', 'result']) {
-    await page.goto(`/?demo=${mode}`);
-    await expectPageBackground(page);
-    if (mode === 'lobby') await expect(page.getByRole('button', { name: /快速开局/ })).toBeInViewport({ ratio: 1 });
-    if (mode === 'bidding') await expect(page.getByRole('button', { name: '叫地主', exact: true })).toBeInViewport({ ratio: 1 });
-    if (mode === 'table') await expect(page.getByRole('button', { name: '出牌', exact: true })).toBeInViewport({ ratio: 1 });
-    if (mode === 'result') await expect(page.getByRole('button', { name: '返回大厅', exact: true })).toBeInViewport({ ratio: 1 });
-  }
-});
-
-test('background selection follows the viewport through portrait and landscape resizing', async ({ page }) => {
-  await page.goto('/?demo=lobby');
-  for (const viewport of [
-    { width: 320, height: 568 },
-    { width: 390, height: 844 },
-    { width: 844, height: 390 },
-    { width: 1440, height: 900 },
-    { width: 900, height: 1200 },
-    { width: 1200, height: 900 },
-    { width: 390, height: 844 },
-  ]) {
-    await page.setViewportSize(viewport);
-    await expectPageBackground(page);
-    await expect(page.getByRole('navigation', { name: '大厅导航' })).toBeInViewport({ ratio: 1 });
-  }
-});
-
-test('portrait decoration paints all four gold corners on tall phones behind the content', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const image = page.waitForResponse(response => response.url().includes('emerald-table-portrait-900'));
-  await page.goto('/?demo=lobby');
-  expect((await image).ok()).toBe(true);
-  await expectPageBackground(page);
-  // Hide only the content for this paint check, retaining the real root and its
-  // pseudo-element. A cover crop or a frame painted behind the root would fail.
-  await page.addStyleTag({ content: '.app-shell > * { visibility: hidden !important; }' });
-  const screenshot = await page.screenshot({ animations: 'disabled', scale: 'css' });
-  const goldCounts = await page.evaluate(async base64 => {
-    const image = new Image();
-    image.src = `data:image/png;base64,${base64}`;
-    await image.decode();
-    const canvas = document.createElement('canvas');
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    const context = canvas.getContext('2d')!;
-    context.drawImage(image, 0, 0);
-    return [[0, 0], [canvas.width - 50, 0], [0, canvas.height - 50], [canvas.width - 50, canvas.height - 50]]
-      .map(([x, y]) => {
-        const pixels = context.getImageData(x, y, 50, 50).data;
-        let gold = 0;
-        for (let i = 0; i < pixels.length; i += 4) {
-          const [red, green, blue] = [pixels[i], pixels[i + 1], pixels[i + 2]];
-          if (red > 110 && green > 65 && blue < 150 && red > green * 1.1 && green > blue * 1.2) gold++;
-        }
-        return gold;
+  for (const { demo, scene } of [
+    { demo: 'lobby', scene: 'lobby' },
+    { demo: 'table', scene: 'table' },
+    { demo: 'result', scene: 'settlement' },
+  ] as const) {
+    test(`${demo} loads only its matching ${scene} WebP variant and decodes cleanly`, async ({ page }) => {
+      const imageRequests: string[] = [];
+      page.on('request', (request) => {
+        if (isSceneBackground(request.url())) imageRequests.push(request.url());
       });
-  }, screenshot.toString('base64'));
-  for (const count of goldCounts) expect(count).toBeGreaterThan(20);
+      const variant = expectedVariant(page);
+      const responsePromise = page.waitForResponse((response) =>
+        isSceneBackground(response.url()) && response.url().includes(`scene-${scene}-`));
+      await page.goto(`/?demo=${demo}`);
+      const response = await responsePromise;
+      expect(response.ok()).toBe(true);
+      expect(response.url()).toContain(`scene-${scene}-${variant.suffix}`);
+      expect(response.headers()['content-type']).toContain('image/webp');
+      expect((await response.body()).byteLength).toBeLessThan(variant.budget);
+      expect(imageRequests).toHaveLength(1);
+
+      expect(await page.evaluate(async () => {
+        const element = document.querySelector('.app-shell')!;
+        const source = getComputedStyle(element).backgroundImage;
+        const urlMatch = /url\("([^"]+)"\)/.exec(source);
+        const image = new Image();
+        image.src = urlMatch ? urlMatch[1] : source.slice(5, -2);
+        await image.decode();
+        return [image.naturalWidth, image.naturalHeight];
+      })).toEqual(variant.dimensions);
+
+      await expectSceneBackground(page, scene);
+    });
+  }
+
+  test('lobby sub-panels and reload retain the tea-house lobby scene without extra fetches', async ({ page }) => {
+    const imageRequests: string[] = [];
+    page.on('request', (request) => {
+      if (isSceneBackground(request.url())) imageRequests.push(request.url());
+    });
+    await page.goto('/?demo=lobby');
+    await expectSceneBackground(page, 'lobby');
+    for (const tab of ['战绩榜', '我的战绩', '聊天', '大厅']) {
+      await page.getByRole('button', { name: tab, exact: true }).click();
+      await expectSceneBackground(page, 'lobby');
+    }
+    expect(imageRequests).toHaveLength(1);
+    await page.reload();
+    await expect(page.getByRole('button', { name: /快速开局/ })).toBeInViewport({ ratio: 1 });
+    await expectSceneBackground(page, 'lobby');
+  });
+
+  test('end-of-round reveal, settlement, review and return-to-lobby transition scenes cleanly', async ({ page }) => {
+    await page.goto('/?demo=reveal');
+    await expectSceneBackground(page, 'settlement');
+    await expect(page.getByRole('region', { name: '终局牌桌' })).toBeVisible();
+
+    await page.goto('/?demo=result');
+    await expectSceneBackground(page, 'settlement');
+    await expect(page.locator('.result-screen')).toHaveAttribute('data-outcome', 'victory');
+    await page.getByRole('button', { name: '查看本局牌面' }).click();
+    await expect(page.getByRole('heading', { name: '本局牌面' })).toBeVisible();
+    await expectSceneBackground(page, 'settlement');
+
+    await page.getByRole('button', { name: '返回结算' }).click();
+    await expectSceneBackground(page, 'settlement');
+    await page.getByRole('button', { name: '返回大厅' }).click();
+    await expect(page.getByRole('button', { name: /快速开局/ })).toBeVisible();
+    await expectSceneBackground(page, 'lobby');
+  });
+
+  test('the bamboo courtyard table scene preserves the green felt and interactive table layers', async ({ page }) => {
+    await page.goto('/?demo=table');
+    await expectSceneBackground(page, 'table');
+    await expect(page.locator('.table-screen')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(page.locator('.table-screen')).toHaveCSS('background-image', 'none');
+    expect(await page.locator('.table-screen').evaluate((element) => getComputedStyle(element, '::before').content)).toBe('none');
+    const feltBackground = await page.locator('.table-arena').evaluate((element) => getComputedStyle(element).backgroundImage);
+    expect(feltBackground).toContain('radial-gradient');
+    expect(feltBackground).not.toContain('scene-');
+    const bounds = await page.locator('.table-arena').boundingBox();
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await page.getByRole('button', { name: '聊天', exact: true }).click();
+      await expect(page.locator('.utility-drawer')).toBeVisible();
+      await page.getByRole('button', { name: '关闭', exact: true }).click();
+      await expect(page.locator('.utility-drawer')).toHaveCount(0);
+      expect(await page.locator('.table-arena').boundingBox()).toEqual(bounds);
+    }
+    await expect(page.getByRole('button', { name: '出牌', exact: true })).toBeInViewport({ ratio: 1 });
+    const card = page.getByLabel('手牌').getByRole('button').first();
+    await card.click();
+    await expect(card).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '重选', exact: true }).click();
+    await expect(card).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('failed background images retain readable scene fallbacks without affecting layout', async ({ page }) => {
+    await page.route((url) => isSceneBackground(url.href), (route) => route.abort());
+    for (const { mode, scene } of [
+      { mode: 'lobby', scene: 'lobby' },
+      { mode: 'bidding', scene: 'table' },
+      { mode: 'table', scene: 'table' },
+      { mode: 'reveal', scene: 'settlement' },
+      { mode: 'result', scene: 'settlement' },
+    ] as const) {
+      await page.goto(`/?demo=${mode}`);
+      await expectSceneBackground(page, scene);
+      if (mode === 'lobby') await expect(page.getByRole('button', { name: /快速开局/ })).toBeInViewport({ ratio: 1 });
+      if (mode === 'bidding') await expect(page.getByRole('button', { name: '叫地主', exact: true })).toBeInViewport({ ratio: 1 });
+      if (mode === 'table') await expect(page.getByRole('button', { name: '出牌', exact: true })).toBeInViewport({ ratio: 1 });
+      if (mode === 'reveal') await expect(page.getByRole('button', { name: '查看结算', exact: true })).toBeInViewport();
+      if (mode === 'result') await expect(page.getByRole('button', { name: '返回大厅', exact: true })).toBeInViewport({ ratio: 1 });
+    }
+  });
+
+  test('background selection follows viewport orientation and width across all scenes', async ({ page }) => {
+    for (const { demo, scene } of [
+      { demo: 'lobby', scene: 'lobby' },
+      { demo: 'table', scene: 'table' },
+      { demo: 'result', scene: 'settlement' },
+    ] as const) {
+      await page.goto(`/?demo=${demo}`);
+      for (const viewport of [
+        { width: 320, height: 568 },
+        { width: 390, height: 844 },
+        { width: 844, height: 390 },
+        { width: 1440, height: 900 },
+        { width: 900, height: 1200 },
+        { width: 1200, height: 900 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await expectSceneBackground(page, scene);
+      }
+    }
+  });
 });

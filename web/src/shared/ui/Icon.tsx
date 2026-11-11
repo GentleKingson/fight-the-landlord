@@ -15,7 +15,7 @@ const icons: Record<IconProps['name'], string> = {
   sound: 'M3 9h4l5-4v14l-5-4H3V9Zm12-2a7 7 0 0 1 0 10v-3a4 4 0 0 0 0-4V7Zm3-3a11 11 0 0 1 0 16v-3a8 8 0 0 0 0-10V4Z',
   muted: 'M3 9h4l5-4v14l-5-4H3V9Zm12-1 3 3 3-3 1 1-3 3 3 3-1 1-3-3-3 3-1-1 3-3-3-3 1-1Z',
   play: 'M8 5v14l11-7-11-7Z',
-  room: 'M4 5h16v14H4V5Zm3 3v8h10V8H7Z',
+  room: 'M12 3 2 11h3v9h5v-6h4v6h5v-9h3L12 3Z',
   bot: 'M7 8h10a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3Zm2-4h6v2H9V4Zm0 8h2v2H9v-2Zm4 0h2v2h-2v-2Z',
   rank: 'M5 20V9h4v11H5Zm5 0V4h4v16h-4Zm5 0v-7h4v7h-4Z',
   stats: 'M5 4h14v4H5V4Zm0 6h9v4H5v-4Zm0 6h12v4H5v-4Z',
