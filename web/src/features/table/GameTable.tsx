@@ -113,10 +113,11 @@ export function GameTable({ socket }: GameTableProps) {
 }
 
 function SeatPlayedCards({ player, action, side }: { player?: PlayerInfo; action?: SeatAction; side: 'left' | 'me' | 'right' }) {
+  const target = useAppStore((state) => state.phase === 'playing' && !state.mustPlay && state.lastPlayedBy === player?.id);
   const cards = action?.type === 'play' ? action.cards : undefined;
   return (
     <section className={`played-seat played-seat--${side}`} aria-label={player && cards?.length ? `${player.name}的出牌` : undefined}>
-      {cards?.length ? <PlayedCards cards={cards} handType={action?.hand_type} playerName={player?.name} /> : null}
+      {cards?.length ? <PlayedCards cards={cards} target={target} handType={action?.hand_type} playerName={player?.name} /> : null}
     </section>
   );
 }
