@@ -64,7 +64,7 @@
 .end-table__cards { display: flex; flex-wrap: wrap; gap: 8px 6px; }
 .end-table__cards .card { --w: 50px; --h: 72px; opacity: 1; cursor: default; }
 .end-table__cards .card__index--bottom { display: none; }
-.end-table__cards .card__pip { top: 65%; font-size: 25px; }
+.end-table__cards .card__pip { --pip-size: 25px; }
 .end-table__winning .end-table__cards,
 .end-table__hand--me .end-table__cards { justify-content: center; }
 .end-table__winning,

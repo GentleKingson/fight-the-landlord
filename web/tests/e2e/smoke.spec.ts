@@ -172,8 +172,8 @@ test('table fits common viewports with collection notice, long plays and an over
       }))).toEqual({ ...viewport, x: 0, y: 0 });
 
       const felt = (await page.locator('.felt-table').boundingBox())!;
-      for (const card of await playedCards.all()) {
-        const box = (await card.boundingBox())!;
+      const boxes = await playedCards.evaluateAll(cards => cards.map(card => card.getBoundingClientRect().toJSON()));
+      for (const box of boxes) {
         expect(box.x).toBeGreaterThanOrEqual(felt.x);
         expect(box.x + box.width).toBeLessThanOrEqual(felt.x + felt.width + 1);
         expect(box.y).toBeGreaterThanOrEqual(felt.y);
