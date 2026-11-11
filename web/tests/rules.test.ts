@@ -46,7 +46,7 @@ describe('shared classic rule contract', () => {
     }
   });
   it('leads with a legal small card even when the previous trick was a rocket', () => {
-    expect(generateSimpleSuggestions(cards([9, 3]), cards([16, 17]), true)).toEqual([cards([3])]);
+    expect(generateSimpleSuggestions(cards([9, 3]), cards([16, 17]), true)).toEqual([cards([3]), cards([9])]);
     expect(generateSimpleSuggestions([], [], true)).toEqual([]);
   });
 });

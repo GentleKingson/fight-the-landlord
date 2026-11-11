@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DealAnimation } from './DealAnimation';
 import { useDealPresentation } from './useDealPresentation';
 import { assignBotAvatars } from './botAvatars';
 import { PlayerAvatar } from './PlayerAvatar';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
-import { useAppStore, useChatStore, type SeatAction, type TableAction } from '../../stores/appStore';
+import { useAppStore, useChatStore, type AppState, type SeatAction, type TableAction } from '../../stores/appStore';
 import { cardKey, generateSimpleSuggestions, summarizeHand } from '../../shared/cards/cardModel';
+import { canBeat, handSignature, parseHand } from '../../shared/cards/rules';
 import { Card } from '../../shared/cards/Card';
 import { Hand } from '../../shared/cards/Hand';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
@@ -16,6 +17,11 @@ import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
 
 interface GameTableProps {
   socket: GameSocket;
+}
+
+function selectTargetPlayerId(state: AppState): string {
+  return state.phase === 'playing' && !state.mustPlay && state.lastPlayed.length > 0
+    ? state.lastPlayedBy : '';
 }
 
 export function GameTable({ socket }: GameTableProps) {
@@ -113,10 +119,12 @@ export function GameTable({ socket }: GameTableProps) {
 }
 
 function SeatPlayedCards({ player, action, side }: { player?: PlayerInfo; action?: SeatAction; side: 'left' | 'me' | 'right' }) {
+  const targetPlayerId = useAppStore(selectTargetPlayerId);
   const cards = action?.type === 'play' ? action.cards : undefined;
+  const isTarget = !!cards?.length && !!targetPlayerId && player?.id === targetPlayerId;
   return (
-    <section className={`played-seat played-seat--${side}`} aria-label={player && cards?.length ? `${player.name}的出牌` : undefined}>
-      {cards?.length ? <PlayedCards cards={cards} handType={action?.hand_type} playerName={player?.name} /> : null}
+    <section className={`played-seat played-seat--${side}${isTarget ? ' played-seat--target' : ''}`} aria-label={player && cards?.length ? `${player.name}的出牌` : undefined}>
+      {cards?.length ? <PlayedCards cards={cards} handType={action?.hand_type} playerName={player?.name} isTarget={isTarget} /> : null}
     </section>
   );
 }
@@ -187,6 +195,9 @@ function TurnBanner() {
   const isGrabTurn = useAppStore((state) => state.isGrabTurn);
   const recentActions = useAppStore((state) => state.recentActions);
   const winnerName = useAppStore((state) => state.winnerName);
+  const targetPlayerId = useAppStore(selectTargetPlayerId);
+  const lastPlayedName = useAppStore((state) => state.lastPlayedName);
+  const mustPlay = useAppStore((state) => state.mustPlay);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -205,14 +216,16 @@ function TurnBanner() {
   const lastBid = [...recentActions].reverse().find((action) => action.type === 'bid');
   const title = isMe ? '轮到你' : `等待 ${actor?.name || '玩家'}`;
   const subtitle = phase === 'bidding'
-    ? (isGrabTurn ? '抢地主阶段' : '叫地主阶段')
+    ? (lastBid?.label ? `${lastBid.player_name || '玩家'}：${lastBid.label}` : isGrabTurn ? '抢地主阶段' : '叫地主阶段')
+    : mustPlay ? '新一轮，请出牌'
+    : targetPlayerId ? `跟牌目标：${players.find(player => player.id === targetPlayerId)?.name || lastPlayedName || '玩家'}`
     : '出牌阶段';
 
   return (
     <div className={`turn-banner ${isMe ? 'is-mine' : ''}`}>
-      <div className="turn-banner__copy">
+      <div className="turn-banner__copy" role="status" aria-atomic="true">
         <strong>{phase === 'dealing' ? '正在发牌' : title}</strong>
-        <span>{phase === 'dealing' ? '发牌结束后开始叫地主' : lastBid?.label ? `${lastBid.player_name || '玩家'}：${lastBid.label}` : subtitle}</span>
+        <span className={phase === 'playing' ? 'turn-banner__play-hint' : undefined}>{phase === 'dealing' ? '发牌结束后开始叫地主' : subtitle}</span>
       </div>
       {phase !== 'dealing' ? <time>{remaining || 0}</time> : null}
     </div>
@@ -220,16 +233,18 @@ function TurnBanner() {
 }
 
 function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boolean; phase: string }) {
+  const hintSession = useRef<{ context: string; suggestions: CardInfo[][] } | null>(null);
   const hand = useAppStore((state) => state.hand);
   const selectedCards = useAppStore((state) => state.selectedCards);
   const lastPlayed = useAppStore((state) => state.lastPlayed);
   const mustPlay = useAppStore((state) => state.mustPlay);
   const isGrabTurn = useAppStore((state) => state.isGrabTurn);
-  const setSelection = useAppStore((state) => state.setSelection);
   const clearSelection = useAppStore((state) => state.clearSelection);
   const selected = hand.filter((card) => selectedCards.has(cardKey(card)));
   const summary = summarizeHand(selected);
-  const canPlay = isMyTurn && phase === 'playing' && selected.length > 0;
+  const parsedHand = parseHand(selected);
+  const canPlay = isMyTurn && phase === 'playing' && parsedHand !== null &&
+    (mustPlay || lastPlayed.length === 0 || canBeat(parsedHand, parseHand(lastPlayed)));
 
   function play() {
     if (!canPlay) {
@@ -249,13 +264,26 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   }
 
   function hint() {
-    const suggestions = generateSimpleSuggestions(hand, lastPlayed, mustPlay);
+    const state = useAppStore.getState();
+    if (state.phase !== 'playing' || state.currentTurn !== state.playerId) return;
+    const context = JSON.stringify([state.roundId, state.playerId, state.currentTurn, state.turnToken,
+      state.hand.map(cardKey).sort(), state.lastPlayedBy, handSignature(state.lastPlayed), state.mustPlay]);
+    const isNewContext = hintSession.current?.context !== context;
+    if (isNewContext) {
+      hintSession.current = { context, suggestions: generateSimpleSuggestions(state.hand, state.lastPlayed, state.mustPlay) };
+    }
+    const suggestions = hintSession.current!.suggestions;
     if (!suggestions.length) {
       useAppStore.setState({ tableMessage: '暂无提示，请手动选牌' });
       return;
     }
-    setSelection(suggestions[0].map(cardKey));
-    useAppStore.setState({ tableMessage: `提示：${summarizeHand(suggestions[0])}` });
+    const selection = handSignature(state.hand.filter(card => state.selectedCards.has(cardKey(card))));
+    const current = isNewContext ? -1 : suggestions.findIndex(cards => handSignature(cards) === selection);
+    const index = (current + 1) % suggestions.length;
+    useAppStore.setState({
+      selectedCards: new Set(suggestions[index].map(cardKey)),
+      tableMessage: `提示 ${index + 1}/${suggestions.length}：${summarizeHand(suggestions[index])}${suggestions.length > 1 ? ' · 再点切换' : ''}`
+    });
   }
 
   if (phase === 'dealing') return <section className="action-bar action-bar--dealing" aria-label="发牌中">等待发牌完成</section>;
