@@ -8,17 +8,17 @@ interface PlayedCardsProps {
   handType?: string;
   playerName?: string;
   compact?: boolean;
-  target?: boolean;
+  isTarget?: boolean;
 }
 
-export function PlayedCards({ cards, handType, playerName, compact = false, target = false }: PlayedCardsProps) {
+export function PlayedCards({ cards, handType, playerName, compact = false, isTarget = false }: PlayedCardsProps) {
   if (!cards.length) {
     return <div className="played-cards played-cards--empty">等待出牌</div>;
   }
 
   return (
-    <div className={`played-cards ${compact ? 'played-cards--compact' : ''} ${target ? 'played-cards--target' : ''}`}>
-      {target ? <span className="played-cards__target-label">待压过</span> : null}
+    <div className={`played-cards ${compact ? 'played-cards--compact' : ''}`}>
+      {isTarget ? <b className="played-cards__target-label">待压过</b> : null}
       <div className="played-cards__meta">
         {playerName ? <span>{playerName}</span> : null}
         {handType ? <strong>{handType}</strong> : null}

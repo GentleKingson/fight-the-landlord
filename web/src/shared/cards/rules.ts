@@ -67,56 +67,103 @@ export function canBeat(hand: ParsedHand | null, target: ParsedHand | null): boo
   return hand.type === target.type && hand.length === target.length && hand.keyRank > target.keyRank;
 }
 
+// Suits do not affect a move. Keep one deterministic set of physical cards per rank multiset.
+export function handSignature(cards: CardInfo[]): string {
+  return cards.map(card => card.rank).sort((a, b) => a - b).join(',');
+}
+
+const suggestionTypes: HandType[] = ['单张', '对子', '三张', '三带一', '三带二', '顺子',
+  '连对', '飞机', '飞机带单', '飞机带对', '四带二', '四带两对', '炸弹', '王炸'];
+
 export function suggestPlays(hand: CardInfo[], lastPlayed: CardInfo[], mustPlay: boolean): CardInfo[][] {
   const groups = groupCards(hand);
-  if (mustPlay || lastPlayed.length === 0) {
-    const first = groups.values().next().value;
-    return first ? [[first[0]]] : [];
-  }
-  const target = parseHand(lastPlayed);
-  if (!target || target.type === '王炸') return [];
-  const suggestions: CardInfo[][] = [];
+  const freeLead = mustPlay || lastPlayed.length === 0;
+  const target = freeLead ? null : parseHand(lastPlayed);
+  if (!freeLead && (!target || target.type === '王炸')) return [];
+  const suggestions = new Map<string, { cards: CardInfo[]; parsed: ParsedHand; splitCost: number }>();
+  const wanted = (type: HandType) => freeLead || type === target?.type || type === '炸弹' || type === '王炸';
   const add = (cards: CardInfo[]) => {
-    if (canBeat(parseHand(cards), target)) suggestions.push(cards);
-  };
-  // Construct the same type first, with the smallest body rank first.
-  let repeat = 1, length = target.length || 1, wings = 0, wingSize = 1;
-  switch (target.type) {
-    case '对子': case '连对': repeat = 2; break;
-    case '三张': case '飞机': repeat = 3; break;
-    case '三带一': repeat = 3; wings = 1; break;
-    case '三带二': repeat = 3; wings = 1; wingSize = 2; break;
-    case '飞机带单': repeat = 3; wings = length; break;
-    case '飞机带对': repeat = 3; wings = length; wingSize = 2; break;
-    case '炸弹': repeat = 4; break;
-    case '四带二': repeat = 4; wings = 2; break;
-    case '四带两对': repeat = 4; wings = 2; wingSize = 2; break;
-  }
-  for (const start of groups.keys()) {
-    if (start <= target.keyRank || (length > 1 && start + length - 1 >= 15)) continue;
-    const body: CardInfo[] = [];
-    for (let rank = start; rank < start + length; rank++) {
-      const group = groups.get(rank) ?? [];
-      if (group.length < repeat) break;
-      body.push(...group.slice(0, repeat));
+    const parsed = parseHand(cards);
+    if (!parsed || (!freeLead && !canBeat(parsed, target))) return;
+    const counts = groupCards(cards);
+    let splitCost = 0;
+    for (const [rank, used] of counts) {
+      const total = groups.get(rank)!.length;
+      if (used.length < total) splitCost += total === 4 ? 100 : total === 3 ? 10 : 1;
     }
-    if (body.length !== length * repeat) continue;
-    let remaining = wings;
-    for (const [rank, group] of groups) {
-      if (!remaining || (rank >= start && rank < start + length)) continue;
-      if (wingSize === 2) {
-        if (group.length >= 2) { body.push(...group.slice(0, 2)); remaining--; }
-      } else {
-        const count = Math.min(group.length, 2, remaining);
-        body.push(...group.slice(0, count));
-        remaining -= count;
+    // Preserve the rocket when suggesting ordinary single cards or attachments.
+    if (groups.has(16) && groups.has(17) && counts.has(16) !== counts.has(17)) splitCost += 50;
+    suggestions.set(handSignature(cards), { cards: [...cards].sort((a, b) => a.rank - b.rank || a.suit - b.suit), parsed, splitCost });
+  };
+
+  // Choose wings by rank counts, not physical-card subsets. Single wings may include pairs,
+  // but never three/four cards of one rank under this project's parseHand contract.
+  const withWings = (body: CardInfo[], count: number, size: 1 | 2) => {
+    if (body.length + count * size > hand.length) return;
+    const bodyRanks = new Set(body.map(card => card.rank));
+    const available = [...groups].filter(([rank, cards]) => !bodyRanks.has(rank) && cards.length >= size);
+    const capacity = available.map(([, cards]) => size === 2 ? 1 : Math.min(cards.length, 2));
+    const suffix = new Array<number>(capacity.length + 1).fill(0);
+    for (let i = capacity.length - 1; i >= 0; i--) suffix[i] = suffix[i + 1] + capacity[i];
+    const wings: CardInfo[] = [];
+    const choose = (index: number, remaining: number) => {
+      if (!remaining) { add([...body, ...wings]); return; }
+      if (remaining > suffix[index]) return;
+      const cards = available[index][1];
+      for (let take = 0; take <= Math.min(capacity[index], remaining); take++) {
+        wings.push(...cards.slice(0, take * size));
+        choose(index + 1, remaining - take);
+        wings.length -= take * size;
+      }
+    };
+    choose(0, count);
+  };
+
+  for (const cards of groups.values()) {
+    if (wanted('单张')) add(cards.slice(0, 1));
+    if (cards.length >= 2 && wanted('对子')) add(cards.slice(0, 2));
+    if (cards.length >= 3) {
+      const trio = cards.slice(0, 3);
+      if (wanted('三张')) add(trio);
+      if (wanted('三带一')) withWings(trio, 1, 1);
+      if (wanted('三带二')) withWings(trio, 1, 2);
+    }
+    if (cards.length === 4) {
+      add(cards);
+      if (wanted('四带二')) withWings(cards, 2, 1);
+      if (wanted('四带两对')) withWings(cards, 2, 2);
+    }
+  }
+  // Enumerate each contiguous body and permitted length; a reply only needs the target length.
+  for (const repeat of [1, 2, 3]) {
+    const type: HandType = repeat === 1 ? '顺子' : repeat === 2 ? '连对' : '飞机';
+    if (!wanted(type) && !(repeat === 3 && (wanted('飞机带单') || wanted('飞机带对')))) continue;
+    const minLength = repeat === 1 ? 5 : repeat === 2 ? 3 : 2;
+    for (const start of groups.keys()) {
+      const body: CardInfo[] = [];
+      for (let rank = start; rank < 15; rank++) {
+        const cards = groups.get(rank);
+        if (!cards || cards.length < repeat) break;
+        body.push(...cards.slice(0, repeat));
+        const length = rank - start + 1;
+        if (!freeLead && length > target!.length) break;
+        if (length < minLength || (!freeLead && length !== target!.length)) continue;
+        if (wanted(type)) add(body);
+        if (repeat === 3) {
+          if (wanted('飞机带单')) withWings(body, length, 1);
+          if (wanted('飞机带对')) withWings(body, length, 2);
+        }
       }
     }
-    if (!remaining) add(body);
-  }
-  if (target.type !== '炸弹') {
-    for (const group of groups.values()) if (group.length === 4) add(group);
   }
   if (groups.has(16) && groups.has(17)) add([groups.get(16)![0], groups.get(17)![0]]);
-  return suggestions;
+  return [...suggestions.values()].sort((a, b) => {
+    const order = suggestionTypes.indexOf(a.parsed.type) - suggestionTypes.indexOf(b.parsed.type) ||
+      a.splitCost - b.splitCost || a.parsed.keyRank - b.parsed.keyRank || a.parsed.length - b.parsed.length;
+    if (order) return order;
+    for (let i = 0; i < Math.min(a.cards.length, b.cards.length); i++) {
+      if (a.cards[i].rank !== b.cards[i].rank) return a.cards[i].rank - b.cards[i].rank;
+    }
+    return a.cards.length - b.cards.length;
+  }).map(suggestion => suggestion.cards);
 }

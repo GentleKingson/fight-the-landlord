@@ -5,38 +5,67 @@
   display: flex;
   flex-direction: column;
   color: var(--text);
-  /* Decorative only: keep a dark, readable fallback while the image loads. */
-  background-color: #003b29;
-  background-image: url('../assets/emerald-table-960.webp');
+  /* Decorative only: keep a dark, scene-matched fallback while the image loads. */
+  background-color: #162921;
+  background-image: url('../assets/scene-lobby-960.webp');
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
 }
 
+.app-shell[data-scene="table"] {
+  background-color: #082820;
+  background-image: url('../assets/scene-table-960.webp');
+}
+
+.app-shell[data-scene="settlement"] {
+  background-color: #17261f;
+  background-image: url('../assets/scene-settlement-960.webp');
+}
+
 @media (min-width: 961px) {
   .app-shell {
-    background-image: url('../assets/emerald-table-1600.webp');
+    background-image: url('../assets/scene-lobby-1600.webp');
+  }
+
+  .app-shell[data-scene="table"] {
+    background-image: url('../assets/scene-table-1600.webp');
+  }
+
+  .app-shell[data-scene="settlement"] {
+    background-image: url('../assets/scene-settlement-1600.webp');
   }
 }
 
 @media (orientation: portrait) {
-  .app-shell { background-image: none; }
-
-  .app-shell::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    border: 1px solid transparent;
-    /* Nine-slice the decoration: keep all four corners on tall phones without
-       cropping them with cover or stretching their square motifs. Only the
-       quiet felt center and edge strips stretch to the viewport. */
-    border-image-source: url('../assets/emerald-table-portrait-900.webp');
-    border-image-slice: 120 fill;
-    border-image-width: clamp(40px, 12vw, 100px);
-    border-image-repeat: stretch;
+  .app-shell {
+    background-image: url('../assets/scene-lobby-portrait-900.webp');
   }
+
+  .app-shell[data-scene="table"] {
+    background-image: url('../assets/scene-table-portrait-900.webp');
+  }
+
+  .app-shell[data-scene="settlement"] {
+    background-image: url('../assets/scene-settlement-portrait-900.webp');
+  }
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(6, 17, 13, .36) 0%, transparent 16%, transparent 86%, rgba(6, 17, 13, .32) 100%),
+    radial-gradient(ellipse at 50% 50%, rgba(8, 24, 19, .08) 0%, rgba(5, 16, 12, .28) 100%);
+}
+
+.app-shell[data-scene="settlement"]::before {
+  background:
+    linear-gradient(180deg, rgba(10, 18, 14, .32) 0%, transparent 18%, transparent 84%, rgba(10, 18, 14, .32) 100%),
+    radial-gradient(ellipse at 50% 42%, rgba(255, 206, 98, .07) 0%, rgba(6, 18, 14, .26) 78%);
 }
 
 .maintenance-banner,
@@ -189,12 +218,14 @@
 .brand-lockup h1 {
   font-size: 24px;
   line-height: 1;
+  text-shadow: 0 2px 10px rgba(7, 17, 13, .65);
 }
 
 .brand-lockup p {
   margin-top: 4px;
-  color: rgba(255, 249, 233, .76);
+  color: rgba(255, 249, 233, .84);
   font-size: 13px;
+  text-shadow: 0 1px 6px rgba(7, 17, 13, .6);
 }
 
 .lobby-status {
@@ -203,7 +234,9 @@
   gap: 8px;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(16, 36, 31, .52);
+  background: rgba(14, 32, 26, .74);
+  box-shadow: inset 0 0 0 1px rgba(255, 224, 138, .24), 0 6px 16px rgba(0, 0, 0, .2);
+  backdrop-filter: blur(6px);
   color: var(--text-light);
   font-weight: 700;
   font-size: 13px;
@@ -225,10 +258,11 @@
   width: min(100%, 940px);
   margin: auto;
   border-radius: var(--radius-lg);
-  background: var(--panel-dark);
+  background: linear-gradient(180deg, rgba(21, 43, 35, .82), rgba(11, 25, 20, .88));
+  backdrop-filter: blur(8px);
   color: var(--text-light);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  border: 1px solid rgba(255, 224, 138, .24);
+  box-shadow: inset 0 1px 0 rgba(255, 241, 198, .1), var(--shadow);
 }
 
 .lobby-home {
@@ -256,8 +290,9 @@
   padding: 18px;
   border-radius: var(--radius-md);
   background:
-    radial-gradient(ellipse at 78% 22%, rgba(248,206,85,.14), transparent 55%),
-    linear-gradient(145deg, #2e7952, #123d2d);
+    radial-gradient(ellipse at 78% 22%, rgba(255, 214, 102, .22), transparent 55%),
+    linear-gradient(145deg, rgba(43, 114, 78, .92), rgba(15, 52, 38, .96));
+  box-shadow: inset 0 0 0 1px rgba(255, 224, 138, .22);
   overflow: hidden;
   position: relative;
 }
@@ -331,8 +366,8 @@
   padding: 16px;
   border-radius: var(--radius-md);
   color: var(--text);
-  background: var(--panel);
-  box-shadow: var(--shadow-soft);
+  background: linear-gradient(180deg, rgba(255, 252, 244, .95), rgba(245, 238, 223, .92));
+  box-shadow: inset 0 0 0 1px rgba(185, 142, 68, .22), var(--shadow-soft);
 }
 
 .entry-tile strong {
@@ -601,20 +636,22 @@
   margin: 0 auto;
   padding: 6px;
   border-radius: 12px;
-  background: rgba(15, 35, 29, .76);
-  border: 1px solid var(--line);
+  background: rgba(14, 31, 25, .82);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 224, 138, .22);
   box-shadow: var(--shadow-soft);
 }
 
 .bottom-nav button {
   min-height: 42px;
   background: transparent;
-  color: rgba(255,255,255,.72);
+  color: rgba(255, 249, 233, .76);
 }
 
 .bottom-nav button.is-active {
-  color: var(--text-light);
-  background: rgba(255,255,255,.14);
+  color: #ffe9b0;
+  background: rgba(255, 218, 128, .16);
+  box-shadow: inset 0 0 0 1px rgba(255, 224, 138, .22);
 }
 
 .table-screen {
@@ -1072,6 +1109,22 @@
   gap: 14px;
   padding: 18px;
   text-align: center;
+  border-color: rgba(255, 224, 138, .34);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 214, 102, .12), transparent 58%),
+    linear-gradient(180deg, rgba(22, 44, 35, .84), rgba(10, 24, 19, .9));
+}
+
+.result-screen[data-outcome="victory"] .result-panel {
+  border-color: rgba(255, 224, 138, .48);
+  box-shadow: inset 0 1px 0 rgba(255, 241, 198, .22), 0 20px 48px rgba(7, 18, 14, .38);
+}
+
+.result-screen[data-outcome="defeat"] .result-panel {
+  border-color: rgba(182, 219, 204, .28);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(164, 214, 198, .09), transparent 58%),
+    linear-gradient(180deg, rgba(18, 38, 32, .86), rgba(9, 22, 18, .92));
 }
 
 .result-heading { display: grid; gap: 6px; }
@@ -1087,7 +1140,8 @@
   margin: auto;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(248, 206, 85, .16);
+  background: rgba(248, 206, 85, .18);
+  box-shadow: inset 0 0 0 1px rgba(255, 224, 138, .28);
   color: #ffe092;
   font-weight: 900;
 }
@@ -1958,6 +2012,25 @@
 .played-seat--right .played-cards { justify-items: end; }
 .played-seat--me .played-cards { justify-items: center; }
 
+.played-seat--target .played-cards__row {
+  outline: 2px solid #ffe28e;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.played-seat--target .played-cards__meta { flex-wrap: wrap; gap: 4px 6px; }
+.played-cards__target-label {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #ffe28e;
+  color: #123c2d;
+  white-space: nowrap;
+}
+
+/* Keep the current trick visible even where compact layouts hide other subtitles. */
+.turn-banner__copy .turn-banner__play-hint { display: block; }
+
 .played-cards__meta { max-width: 100%; }
 
 .played-cards__meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2265,6 +2338,10 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
 @media (orientation: landscape) and (max-height: 520px) {
   .table-arena { padding: 3px 8px; gap: 4px; }
   .turn-banner { width: min(260px, 54%); }
+  /* Keep the visible play hint within the timer's height budget on short screens. */
+  .turn-banner__copy { display: flex; align-items: center; gap: 8px; }
+  .turn-banner__copy strong { flex-shrink: 0; max-width: 50%; }
+  .turn-banner__copy span { min-width: 0; margin-top: 0; }
   .felt-table .played-cards { --played-card-w: 22px; --played-card-h: 24px; --played-step: 16px; gap: 2px; }
   .felt-table .played-cards__meta { min-height: 14px; font-size: 10px; line-height: 1.2; }
   .felt-table .card--played .card__index { font-size: 8px; }
@@ -2297,11 +2374,6 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
 
 /* Keep labels in flow and the target ring on the exact visible card bounds. */
 .felt-table .played-cards { padding: 5px; gap: 7px; }
-.played-cards--target .played-cards__row {
-  outline: 2px solid #ffe08a;
-  outline-offset: 3px;
-  border-radius: 7px;
-}
 .played-cards__target-label {
   padding: 3px 8px;
   border-radius: 7px;

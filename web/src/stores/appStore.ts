@@ -175,7 +175,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     else selectedCards.add(key);
     set({ selectedCards, tableMessage: '' });
   },
-  setSelection: (keys) => set({ selectedCards: new Set(keys) }),
+  setSelection: (keys) => set({ selectedCards: new Set(keys), tableMessage: '' }),
   clearSelection: () => set({ selectedCards: new Set(), tableMessage: '' }),
   leaveLocalRoom: () => set({ roomCode: '', players: [], phase: 'lobby', ...initialTable, selectedCards: new Set() }),
   showSettlement: () => {
