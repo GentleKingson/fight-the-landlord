@@ -92,7 +92,7 @@ test.describe('scene-specific Neo-Chinese page backgrounds', () => {
       await page.getByRole('button', { name: tab, exact: true }).click();
       await expectSceneBackground(page, 'lobby');
     }
-    expect(new Set(imageRequests).size).toBe(1);
+    expect(imageRequests).toHaveLength(1);
     await page.reload();
     await expect(page.getByRole('button', { name: /快速开局/ })).toBeInViewport({ ratio: 1 });
     await expectSceneBackground(page, 'lobby');
