@@ -6,6 +6,7 @@ import './styles/reset.css';
 import './styles/tokens.css';
 import './styles/app.css';
 import './styles/endGame.css';
+import './styles/theme.css';
 
 // Seed before the first render so demo pages request only their active scene.
 const demo = new URLSearchParams(window.location.search).get('demo');

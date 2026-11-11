@@ -27,16 +27,18 @@ export function GameResult({ socket }: { socket: GameSocket }) {
         </header>
         <div className="score-list">
           {scores.map((score) => (
-            <div className="score-row" key={score.player_id}>
-              <span>{score.player_name}</span>
+            <div className={`score-row${score.player_id === playerId ? ' is-me' : ''}`} key={score.player_id}>
+              <span>{score.player_name}{score.player_id === playerId ? '（我）' : ''}</span>
               <strong className={score.score >= 0 ? 'is-positive' : 'is-negative'}>{score.score >= 0 ? '+' : ''}{score.score}</strong>
             </div>
           ))}
         </div>
-        {snapshot ? <button className="secondary-action" onClick={reviewEndTable}>查看本局牌面</button> : null}
-        <div className="room-actions">
+        <div className="result-actions">
           <button className="primary-action" onClick={() => { const mode = useAppStore.getState().matchMode; useAppStore.getState().leaveLocalRoom(); useAppStore.setState({ phase: 'matching' }); socket.send(mode === 'practice' ? MsgType.PracticeMatch : MsgType.QuickMatch); }}>再来一局</button>
-          <button className="secondary-action" onClick={() => { useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>
+          <div className="room-actions">
+            {snapshot ? <button className="secondary-action" onClick={reviewEndTable}>查看本局牌面</button> : null}
+            <button className="secondary-action" onClick={() => { useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>
+          </div>
         </div>
       </section>
     </main>
