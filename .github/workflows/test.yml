@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -27,7 +27,18 @@ jobs:
         working-directory: web
       - run: npm test && npm run build
         working-directory: web
-      - run: npx playwright install --with-deps chromium && npm run test:e2e
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-ubuntu24-${{ runner.arch }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Use healthy Ubuntu mirrors
+        # The Azure mirror repeatedly stalls DNS; keep the official archive/security fallbacks.
+        run: sudo sed -i '/azure.archive.ubuntu.com/d' /etc/apt/apt-mirrors.txt
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps --only-shell chromium
+        working-directory: web
+      - run: npm run test:e2e
         working-directory: web
       - name: Keep browser test evidence
         if: ${{ always() }}
@@ -83,30 +94,36 @@ jobs:
         run: make lint
 
   go-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
       - name: Set up Go
+        id: go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false
 
       - name: Restore Go cache
+        id: go-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
+          # Refresh compiled packages after source changes, including repeated PR pushes.
+          key: go-test-ubuntu24-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-test-ubuntu24-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-
+            go-test-ubuntu24-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
 
       - name: Install Redis for crash and backup recovery tests
         run: |
           if ! command -v redis-server >/dev/null || ! command -v redis-cli >/dev/null; then
+            sudo sed -i '/azure.archive.ubuntu.com/d' /etc/apt/apt-mirrors.txt
             sudo apt-get update
             sudo apt-get install -y redis-server
           fi
@@ -119,12 +136,12 @@ jobs:
 
       - name: Save Go cache
         uses: actions/cache/save@v6
-        if: github.ref == 'refs/heads/main'
+        if: steps.go-cache.outputs.cache-hit != 'true'
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
