@@ -12,42 +12,31 @@ magick web/src/assets/landlord-logo.png -filter Lanczos -resize 176x176 -strip -
 
 The runtime asset is 26,300 bytes versus 1,073,837 bytes for the source (97.6% smaller). The browser regression test enforces a 32 KiB payload budget and checks its decoded dimensions and responsive layout.
 
-## Emerald page background
+## Neo-Chinese scene backgrounds
 
-The selected emerald-and-gold design is used only on the outer `.app-shell`.
-The original green felt, cards and opaque panels are unchanged. The table screen
-is transparent so its former gradients and decorative wood layer cannot hide the image.
+The outer `.app-shell` switches `data-scene` automatically across all web screens so every stage of a match has a dedicated Neo-Chinese atmosphere while preserving the opaque playing cards, clean green `.table-arena` felt, and zero-scroll responsive layouts:
 
-- `emerald-table-960.webp`: 960 × 540, 7,992 bytes, for landscape viewports up to 960 CSS pixels wide.
-- `emerald-table-1600.webp`: 1600 × 900, 22,764 bytes, for wider landscape viewports.
-- `emerald-table-portrait-900.webp`: 900 × 1600, 17,254 bytes, for portrait viewports.
-  Its separate 941 × 1672 source PNG was 1,828,494 bytes (99.1% smaller at runtime).
-- The 1672 × 941 source PNG was 2,033,166 bytes. Runtime files are 98.9–99.6% smaller;
-  the full-size source is not shipped or imported by the app.
-- Landscape uses centered `cover`. Portrait uses a decorative pseudo-element with
-  nine-slice `border-image`: all four square gold corners remain uncropped and
-  unstretched, even on tall 19.5:9 phones. Only the quiet felt center and edge strips
-  stretch. The 120px source corners render at 40–100 CSS pixels to match the viewport.
-  An isolated stacking context keeps the decoration behind content, with no pointer
-  events or layout footprint. Returning to landscape removes the portrait layer.
-- A solid `#003b29` background remains readable during loading or if the image fails.
-  The background is CSS-only, adds no layout box, and does not intercept input.
-- Vite emits hashed `/assets/` URLs supported by the existing Go static server.
-  Each viewport initially requests just its matching orientation/size; no preload
-  fetches the other variants. Rotation updates the asset without reloading the page.
+- **`lobby` (`scene-lobby-*`) — 暖灯茶馆大厅**: carved rosewood lattice screens, warm silk palace lanterns with crimson tassels, and misty bamboo beyond the windows. Used across lobby home, leaderboard, personal stats, lobby chat, rules, matchmaking, and room waiting (`connecting | lobby | matching | waiting`), with fallback `#162921`.
+- **`table` (`scene-table-*`) — 竹庭夜景牌桌**: moonlit emerald bamboo stalks, carved ebony pavilion eaves with antique gold fretwork, and soft warm lantern bokeh framing the card table during dealing, bidding, and active play (`dealing | bidding | playing`), with fallback `#082820`.
+- **`settlement` (`scene-settlement-*`) — 祥云金辉结算**: sculpted golden ruyi clouds, crimson-and-gold festival palace lanterns, and imperial emerald brocade used for end-of-round hand reveal, unlimited board review, and victory/defeat score settlement (`game_over`), with fallback `#17261f`.
 
-To regenerate from the selected original PNG, with ImageMagick:
+Each scene provides three metadata-free lossy VP8 WebP runtime variants:
+
+- `scene-*-960.webp`: 960 × 540 (~29–37 KiB, 40 KiB budget), for landscape viewports up to 960 CSS pixels wide.
+- `scene-*-1600.webp`: 1600 × 900 (~55–68 KiB, 72 KiB budget), for wider desktop/landscape viewports.
+- `scene-*-portrait-900.webp`: 900 × 1600 (~39–56 KiB, 60 KiB budget), for portrait viewports (`orientation: portrait`).
+
+`.app-shell::before` adds an isolated, non-interactive (`pointer-events: none; z-index: -1`) edge-contrast veil behind content so headers, navigation bars, and panels remain legible across aspect ratios without layout boxes or input interception. Each viewport requests only the single variant matching the active scene and orientation; Vite emits hashed `/assets/` URLs compatible with the Go static server.
+
+To regenerate any scene's runtime variants from its landscape and portrait masters with ImageMagick:
 
 ```sh
-magick "$SOURCE_PNG" -filter Lanczos -resize 960x -strip -quality 82 -define webp:method=6 web/src/assets/emerald-table-960.webp
-magick "$SOURCE_PNG" -filter Lanczos -resize 1600x -strip -quality 82 -define webp:method=6 web/src/assets/emerald-table-1600.webp
-magick "$PORTRAIT_SOURCE_PNG" -filter Lanczos -resize x1600 -strip -quality 82 -define webp:method=6 web/src/assets/emerald-table-portrait-900.webp
+convert "$LANDSCAPE_SRC" -filter Lanczos -resize 960x540^ -gravity center -extent 960x540 -strip -quality 80 -define webp:method=6 web/src/assets/scene-NAME-960.webp
+convert "$LANDSCAPE_SRC" -filter Lanczos -resize 1600x900^ -gravity center -extent 1600x900 -strip -quality 80 -define webp:method=6 web/src/assets/scene-NAME-1600.webp
+convert "$PORTRAIT_SRC" -filter Lanczos -resize 900x1600^ -gravity center -extent 900x1600 -strip -quality 80 -define webp:method=6 web/src/assets/scene-NAME-portrait-900.webp
 ```
 
-`tests/e2e/background.spec.ts` checks payload budgets (10 / 24 / 20 KiB), decoded
-sizes, portrait-frame layering, live rotation/viewport changes, navigation/reload,
-image-failure fallback, intact felt and repeated drawer/card interactions on
-desktop and mobile viewports.
+`tests/backgroundAssets.test.ts` and `tests/e2e/background.spec.ts` check VP8 headers, decoded dimensions, payload budgets, single-variant network loading, scene transitions, viewport rotation, image-failure fallbacks, intact felt, and interactive drawers/cards on desktop and mobile viewports.
 
 ## Bot portraits
 

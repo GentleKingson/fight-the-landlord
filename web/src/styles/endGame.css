@@ -10,9 +10,10 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 18px;
-  border: 1px solid rgba(255, 224, 138, .25);
+  border: 1px solid rgba(255, 224, 138, .28);
   border-radius: 12px;
-  background: rgba(12, 29, 24, .95);
+  background: rgba(13, 30, 24, .88);
+  backdrop-filter: blur(8px);
 }
 
 .end-table__heading h1 { margin: 4px 0 0; font-size: 24px; }

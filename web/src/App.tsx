@@ -7,10 +7,16 @@ import { createGameSocket, type GameSocket } from './transport/wsClient';
 import { useAppStore } from './stores/appStore';
 import { seedDemoState } from './stores/demoState';
 import { connectGameAudio } from './audio/connectGameAudio';
+import { resolveBackgroundScene } from './shared/ui/backgroundScene';
 
 const ERROR_TOAST_DURATION_MS = 5000;
 
 export function App() {
+  const [demo] = useState(() => {
+    const value = new URLSearchParams(window.location.search).get('demo');
+    if (value) seedDemoState(value);
+    return value;
+  });
   const [collecting, setCollecting] = useState(false);
   useEffect(() => {
     fetch('/api/config').then(r => r.ok ? r.json() : null).then(c => setCollecting(c?.collect_training_data === true)).catch(() => {});
@@ -21,6 +27,7 @@ export function App() {
   const connected = useAppStore((state) => state.connected);
   const error = useAppStore((state) => state.error);
   const maintenance = useAppStore((state) => state.maintenance);
+  const scene = resolveBackgroundScene(phase);
 
   useEffect(() => connectGameAudio(socket), [socket]);
 
@@ -35,20 +42,16 @@ export function App() {
   }, [connected, error]);
 
   useEffect(() => {
-    const demo = new URLSearchParams(window.location.search).get('demo');
-    if (demo) {
-      seedDemoState(demo);
-      return;
-    }
+    if (demo) return;
     socket.connect();
     return () => socket.close();
-  }, [socket]);
+  }, [demo, socket]);
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-scene={scene}>
       {collecting ? <div className="collection-notice" role="status">本服务已启用训练数据采集：记录匿名牌局、操作及胜负；不记录昵称、聊天或重连令牌。</div> : null}
       {maintenance ? <div className="maintenance-banner">服务器维护中，暂时无法开始新对局</div> : null}
-      {!connected && !new URLSearchParams(window.location.search).get('demo') ? (
+      {!connected && !demo ? (
         <ConnectionState error={error} />
       ) : null}
       {connected && error ? <div className="connection-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError('')}>关闭</button></div> : null}

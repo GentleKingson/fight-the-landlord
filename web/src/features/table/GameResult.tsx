@@ -2,19 +2,23 @@ import { useEffect, useRef } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore } from '../../stores/appStore';
+import { resolveSettlementOutcome } from '../../shared/ui/backgroundScene';
 
 export function GameResult({ socket }: { socket: GameSocket }) {
+  const playerId = useAppStore((state) => state.playerId);
+  const winnerId = useAppStore((state) => state.winnerId);
   const winnerName = useAppStore((state) => state.winnerName);
   const winnerIsLandlord = useAppStore((state) => state.winnerIsLandlord);
   const finalMultiplier = useAppStore((state) => state.finalMultiplier);
   const scores = useAppStore((state) => state.scores);
   const snapshot = useAppStore((state) => state.endSnapshot);
   const reviewEndTable = useAppStore((state) => state.reviewEndTable);
+  const outcome = resolveSettlementOutcome(playerId, winnerId, winnerIsLandlord, scores);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus(); }, []);
 
   return (
-    <main className="result-screen">
+    <main className="result-screen" data-outcome={outcome}>
       <section className="result-panel">
         <header className="result-heading">
           <span className="result-badge">{winnerIsLandlord ? '地主获胜' : '农民获胜'}</span>
