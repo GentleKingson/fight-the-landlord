@@ -160,6 +160,10 @@ test('table fits common viewports with collection notice, long plays and an over
       for (const side of ['left', 'me', 'right']) {
         await expect(page.locator(`.played-seat--${side} .card--played`)).toHaveCount(18);
       }
+      // Compact layouts must retain the new status text without stealing the card rows' space.
+      await expect(page.locator('.turn-banner__play-hint')).toHaveText('跟牌目标：松风');
+      await expect(page.locator('.turn-banner__play-hint')).toBeVisible();
+      await expect(page.getByText('待压过', { exact: true })).toBeVisible();
       expect(await page.evaluate(() => ({
         width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
         height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
