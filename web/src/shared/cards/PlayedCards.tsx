@@ -18,8 +18,8 @@ export function PlayedCards({ cards, handType, playerName, compact = false, isTa
 
   return (
     <div className={`played-cards ${compact ? 'played-cards--compact' : ''}`}>
-      {isTarget ? <b className="played-cards__target-label">待压过</b> : null}
       <div className="played-cards__meta">
+        {isTarget ? <b className="played-cards__target-label">待压过</b> : null}
         {playerName ? <span>{playerName}</span> : null}
         {handType ? <strong>{handType}</strong> : null}
       </div>
