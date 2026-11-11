@@ -7,6 +7,10 @@ const FALLBACK_RGB: Record<BackgroundScene, string> = {
   settlement: 'rgb(23, 38, 31)',
 };
 
+function isSceneBackground(url: string) {
+  return /\/scene-(lobby|table|settlement)-[^/]+\.webp$/.test(new URL(url).pathname);
+}
+
 function expectedVariant(page: Page) {
   const { width, height } = page.viewportSize()!;
   if (height >= width) return { suffix: 'portrait-900', dimensions: [900, 1600], budget: 60 * 1024 };
@@ -50,10 +54,11 @@ test.describe('scene-specific Neo-Chinese page backgrounds', () => {
     test(`${demo} loads only its matching ${scene} WebP variant and decodes cleanly`, async ({ page }) => {
       const imageRequests: string[] = [];
       page.on('request', (request) => {
-        if (request.url().includes('scene-')) imageRequests.push(request.url());
+        if (isSceneBackground(request.url())) imageRequests.push(request.url());
       });
       const variant = expectedVariant(page);
-      const responsePromise = page.waitForResponse((response) => response.url().includes(`scene-${scene}-`));
+      const responsePromise = page.waitForResponse((response) =>
+        isSceneBackground(response.url()) && response.url().includes(`scene-${scene}-`));
       await page.goto(`/?demo=${demo}`);
       const response = await responsePromise;
       expect(response.ok()).toBe(true);
@@ -79,7 +84,7 @@ test.describe('scene-specific Neo-Chinese page backgrounds', () => {
   test('lobby sub-panels and reload retain the tea-house lobby scene without extra fetches', async ({ page }) => {
     const imageRequests: string[] = [];
     page.on('request', (request) => {
-      if (request.url().includes('scene-')) imageRequests.push(request.url());
+      if (isSceneBackground(request.url())) imageRequests.push(request.url());
     });
     await page.goto('/?demo=lobby');
     await expectSceneBackground(page, 'lobby');
@@ -138,7 +143,7 @@ test.describe('scene-specific Neo-Chinese page backgrounds', () => {
   });
 
   test('failed background images retain readable scene fallbacks without affecting layout', async ({ page }) => {
-    await page.route('**/scene-*-*', (route) => route.abort());
+    await page.route((url) => isSceneBackground(url.href), (route) => route.abort());
     for (const { mode, scene } of [
       { mode: 'lobby', scene: 'lobby' },
       { mode: 'bidding', scene: 'table' },

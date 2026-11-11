@@ -5,18 +5,12 @@ import { GameResult } from './features/table/GameResult';
 import { GameEnd } from './features/table/GameEnd';
 import { createGameSocket, type GameSocket } from './transport/wsClient';
 import { useAppStore } from './stores/appStore';
-import { seedDemoState } from './stores/demoState';
 import { connectGameAudio } from './audio/connectGameAudio';
 import { resolveBackgroundScene } from './shared/ui/backgroundScene';
 
 const ERROR_TOAST_DURATION_MS = 5000;
 
-export function App() {
-  const [demo] = useState(() => {
-    const value = new URLSearchParams(window.location.search).get('demo');
-    if (value) seedDemoState(value);
-    return value;
-  });
+export function App({ demo = null }: { demo?: string | null }) {
   const [collecting, setCollecting] = useState(false);
   useEffect(() => {
     fetch('/api/config').then(r => r.ok ? r.json() : null).then(c => setCollecting(c?.collect_training_data === true)).catch(() => {});
