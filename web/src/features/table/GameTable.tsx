@@ -165,7 +165,7 @@ function SeatPanel({ player, avatarSrc, side, active, action }: { player?: Playe
 function PlayerBadge({ player, avatarSrc, active, action }: { player: PlayerInfo; avatarSrc?: string; active: boolean; action?: SeatAction }) {
   const actionLabel = action?.type === 'bid' ? action.label : action?.type === 'pass' ? '不出' : '';
   return (
-    <div className={`player-badge ${active ? 'is-active' : ''}`}>
+    <div className={`player-badge ${active ? 'is-active' : ''} ${player.is_landlord ? 'is-landlord' : ''}`}>
       <PlayerAvatar name={player.name} src={avatarSrc} />
       <div>
         <strong title={player.name}>{player.name}</strong>
