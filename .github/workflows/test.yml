@@ -125,8 +125,8 @@ jobs:
           fi
 
       - name: Run tests
-        # Use ci tag to skip sound tests/deps
-        run: go test -tags=ci -race -p 4 -coverprofile=coverage.out -covermode=atomic ./...
+        # Keep compiled packages cached, but actually exercise Redis crash/recovery every run.
+        run: go test -tags=ci -race -count=1 -p 4 -coverprofile=coverage.out -covermode=atomic ./...
         env:
           DDZ_REDIS_INTEGRATION: "1"
 

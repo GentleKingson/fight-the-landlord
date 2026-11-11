@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('card artwork fits every card size and responsive context without artwork collisions', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'mobile-landscape', 'The sweep already covers both orientations on desktop and mobile');
   await page.route('**/api/config', route => route.fulfill({ json: {} }));
   await page.goto('/?demo=table');
   // Mount the production Card with the same ancestor selectors as each consumer.

@@ -49,12 +49,14 @@ for (const winner of ['p1', 'p2', 'p3']) {
       if (await cards.count()) {
         await cards.last().scrollIntoViewIfNeeded();
         await expect(cards.last()).toBeInViewport();
-        const bounds = await section.boundingBox();
-        for (const card of await cards.all()) {
-          const box = (await card.boundingBox())!;
+        const { bounds, boxes } = await section.evaluate(element => ({
+          bounds: element.getBoundingClientRect().toJSON(),
+          boxes: [...element.querySelectorAll('.card')].map(card => card.getBoundingClientRect().toJSON()),
+        }));
+        for (const box of boxes) {
           expect(box.width).toBeGreaterThanOrEqual(44);
-          expect(box.x).toBeGreaterThanOrEqual(bounds!.x);
-          expect(box.x + box.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1);
+          expect(box.x).toBeGreaterThanOrEqual(bounds.x);
+          expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
         }
       }
       await expect(settle).toBeInViewport();

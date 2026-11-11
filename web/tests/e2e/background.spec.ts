@@ -161,7 +161,8 @@ test.describe('scene-specific Neo-Chinese page backgrounds', () => {
     }
   });
 
-  test('background selection follows viewport orientation and width across all scenes', async ({ page }) => {
+  test('background selection follows viewport orientation and width across all scenes', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile-landscape', 'The sweep already covers both orientations on desktop and mobile');
     for (const { demo, scene } of [
       { demo: 'lobby', scene: 'lobby' },
       { demo: 'table', scene: 'table' },
