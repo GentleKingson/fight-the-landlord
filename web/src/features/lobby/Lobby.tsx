@@ -1,6 +1,7 @@
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore } from '../../stores/appStore';
+import { Card } from '../../shared/cards/Card';
 import { Icon } from '../../shared/ui/Icon';
 import landlordLogo from '../../assets/landlord-logo-176.webp';
 
@@ -82,6 +83,11 @@ function LobbyHome({ socket }: LobbyProps) {
   return (
     <section className="lobby-home">
       <div className="quick-card">
+        <div className="quick-card__art" aria-hidden="true">
+          <span className="quick-card__back" />
+          <Card card={{ rank: 13, suit: 1, color: 1 }} size="played" disabled />
+          <Card card={{ rank: 14, suit: 0, color: 0 }} size="played" disabled />
+        </div>
         <div className="quick-card__copy">
           <h2>快速开局</h2>
           <p>匹配在线玩家，进入标准三人牌桌。</p>

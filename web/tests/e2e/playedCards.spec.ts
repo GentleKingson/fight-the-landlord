@@ -68,3 +68,36 @@ test('target label and long hands fit the table and clear for a new trick', asyn
   await expect(page.locator('.played-seat--target')).toHaveCount(0);
   await expect(page.getByText('新一轮，请出牌')).toBeVisible();
 });
+
+test('target ring follows visible cards for short and long plays', async ({ page }, testInfo) => {
+  await page.route('**/api/config', route => route.fulfill({ json: {} }));
+  await page.goto('/?demo=table');
+  for (const count of [1, 2, 4, 5, 12, 20]) {
+    await page.evaluate(async (count) => {
+      const modulePath = '/src/stores/appStore.ts';
+      const { useAppStore } = await import(/* @vite-ignore */ modulePath);
+      const state = useAppStore.getState();
+      const actions = Object.fromEntries(state.players.map((player: { id: string }) => [player.id, {
+        type: 'play', player_id: player.id, hand_type: '出牌',
+        cards: Array.from({ length: count }, (_, i) => ({ rank: 3 + i % 13, suit: i % 4, color: i % 2 }))
+      }]));
+      useAppStore.setState({ mustPlay: false, lastPlayedBy: state.players[0].id, seatActions: actions });
+    }, count);
+    await expect(page.locator('.played-seat--target')).toHaveCount(1);
+    for (const side of ['left', 'me', 'right']) {
+      const row = page.locator(`.played-seat--${side} .played-cards__row`);
+      await expect(row.locator('.card')).toHaveCount(count);
+      const geometry = await row.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const cards = [...element.children].map(card => card.getBoundingClientRect());
+        return { left: rect.left, right: rect.right, first: cards[0].left, last: cards.at(-1)!.right };
+      });
+      expect(Math.abs(geometry.left - geometry.first)).toBeLessThan(1);
+      expect(Math.abs(geometry.right - geometry.last)).toBeLessThan(1);
+    }
+    if (count === 4) await page.screenshot({ path: `/tmp/ddz-layout-${testInfo.project.name}.png` });
+  }
+  await page.goto('/?demo=lobby');
+  await expect(page.locator('.quick-card__art .card')).toHaveCount(2);
+  await page.screenshot({ path: `/tmp/ddz-lobby-${testInfo.project.name}.png` });
+});
