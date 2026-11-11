@@ -2416,6 +2416,8 @@ button:focus-visible, summary:focus-visible { outline: 2px solid #ffe08a; outlin
 
 @media (max-width: 600px) and (max-height: 600px) and (orientation: portrait) {
   .felt-table .played-cards { --played-card-h: 32px; gap: 5px; padding-block: 0; }
+  /* At 32px high, reserve the face for the complete rank/suit corner. */
+  .felt-table .card--played .card__pip { display: none; }
   .felt-table .played-cards__meta { min-height: 18px; padding-block: 1px; }
   .played-cards__target-label { padding-block: 1px; }
   .turn-banner { padding-block: 4px; }

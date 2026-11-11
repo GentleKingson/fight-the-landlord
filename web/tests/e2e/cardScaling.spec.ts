@@ -76,7 +76,7 @@ test('card artwork fits every card size and responsive context without artwork c
           const b = index.getBoundingClientRect();
           // Require breathing room as well as no overlap (CSS pixels).
           if (a.left < b.right + 2 && a.right > b.left - 2 && a.top < b.bottom + 2 && a.bottom > b.top - 2) {
-            errors.push(`${label}: pip too close to corner index`);
+            errors.push(`${label}: pip too close to corner index (horizontal gap=${Math.max(a.left - b.right, b.left - a.right).toFixed(2)}px, vertical gap=${Math.max(a.top - b.bottom, b.top - a.bottom).toFixed(2)}px)`);
           }
         }
       }
