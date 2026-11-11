@@ -91,6 +91,8 @@ test('auto settlement and keyboard review work without restarting the timer', as
   const review = page.getByRole('button', { name: '查看本局牌面' });
   await expect(review).toBeVisible();
   await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: '再来一局' })).toBeFocused();
+  await page.keyboard.press('Tab');
   await expect(review).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: '本局牌面' })).toBeFocused();
