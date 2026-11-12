@@ -110,6 +110,12 @@ test('all dense portrait hand cards remain visible and selectable at 320px', asy
       else await page.mouse.click(box.x + 5, box.y + 30);
       await expect(card).toHaveAttribute('aria-selected', 'true');
     }
+    expect(await cards.evaluateAll(elements => elements.every(card => {
+      const rank = card.querySelector('.card__index--top b');
+      if (!rank) return true;
+      const box = rank.getBoundingClientRect();
+      return document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('.card') === card;
+    }))).toBe(true);
   }
 });
 
@@ -156,7 +162,6 @@ test('table fits common viewports with collection notice, long plays and an over
           } });
         }
       })`);
-      const playedCards = page.locator('.felt-table .card--played');
       for (const side of ['left', 'me', 'right']) {
         await expect(page.locator(`.played-seat--${side} .card--played`)).toHaveCount(18);
       }
@@ -172,7 +177,7 @@ test('table fits common viewports with collection notice, long plays and an over
       }))).toEqual({ ...viewport, x: 0, y: 0 });
 
       const felt = (await page.locator('.felt-table').boundingBox())!;
-      const boxes = await playedCards.evaluateAll(cards => cards.map(card => card.getBoundingClientRect().toJSON()));
+      const boxes = await page.locator('.felt-table .played-cards__row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().toJSON()));
       for (const box of boxes) {
         expect(box.x).toBeGreaterThanOrEqual(felt.x);
         expect(box.x + box.width).toBeLessThanOrEqual(felt.x + felt.width + 1);

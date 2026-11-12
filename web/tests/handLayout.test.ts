@@ -44,3 +44,15 @@ it('fits all 20 cards and 15 rank groups within a narrow single-row hand', () =>
     expect(new Set(coordinates).size).toBe(20);
   }
 });
+
+
+it('limits row imbalance without losing rank grouping across a split', () => {
+  const layout = buildHandLayout(Array.from({ length: 20 }, (_, i) => c(i % 4, 14 - Math.floor(i / 4))), 280);
+  expect(layout.filter(item => item.row === 0)).toHaveLength(10);
+  expect(layout.filter(item => item.row === 1)).toHaveLength(10);
+  expect(layout[9].groupIndex).toBe(layout[10].groupIndex);
+  for (const row of [0, 1]) {
+    const positions = layout.filter(item => item.row === row).map(item => item.rowX);
+    expect(Math.min(...positions.slice(1).map((x, i) => x - positions[i]))).toBeGreaterThanOrEqual(23);
+  }
+});

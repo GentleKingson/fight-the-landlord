@@ -5,6 +5,7 @@ export default defineConfig({
   server: { fs: { allow: [process.cwd(), resolve(process.cwd(), '../internal/protocol/proto'), resolve(process.cwd(), '../internal/sound/gaming')] } },
   test: {
     environment: 'jsdom',
+    setupFiles: ['./tests/browserMocks.ts'],
     include: ['tests/**/*.test.{ts,tsx}'],
     exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**']
   }

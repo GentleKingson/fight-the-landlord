@@ -90,10 +90,25 @@ test('target ring follows visible cards for short and long plays', async ({ page
       const geometry = await row.evaluate(element => {
         const rect = element.getBoundingClientRect();
         const cards = [...element.children].map(card => card.getBoundingClientRect());
-        return { left: rect.left, right: rect.right, first: cards[0].left, last: cards.at(-1)!.right };
+        return { left: rect.left, right: rect.right, first: cards[0].left, last: Math.min(rect.right, cards.at(-1)!.right) };
       });
       expect(Math.abs(geometry.left - geometry.first)).toBeLessThan(1);
       expect(Math.abs(geometry.right - geometry.last)).toBeLessThan(1);
+    }
+    for (const row of await page.locator('.felt-table .played-cards__row').all()) {
+      const readable = await row.evaluate(element => {
+        const cards = [...element.children];
+        return cards.every((card, index) => {
+          const rank = card.querySelector('.card__index--top b')!;
+          const next = cards[index + 1];
+          return parseFloat(getComputedStyle(rank).fontSize) >= 14 && (!next || rank.getBoundingClientRect().right <= next.getBoundingClientRect().left);
+        });
+      });
+      expect(readable).toBe(true);
+      await row.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+      const last = await row.locator('.card').last().boundingBox();
+      const bounds = (await row.boundingBox())!;
+      expect(last!.x + last!.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
     }
     if (count === 4) await page.screenshot({ path: `/tmp/ddz-layout-${testInfo.project.name}.png` });
   }
