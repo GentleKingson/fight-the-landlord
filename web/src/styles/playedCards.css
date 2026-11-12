@@ -1,0 +1,184 @@
+.played-cards {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-width: 170px;
+  color: var(--text-light);
+}
+
+.played-cards--empty {
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .18);
+  color: rgba(255, 255, 255, .68);
+  font-weight: 800;
+}
+
+.played-cards--compact {
+  justify-items: start;
+}
+
+.played-cards__meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(2, 49, 34, .58);
+  color: #ffe28e;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.played-cards__meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.played-cards__meta strong {
+  flex: none;
+}
+
+.played-cards__row {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: min(520px, 58vw);
+}
+
+/* Keep labels in flow and the target ring on the exact visible card bounds. */
+.played-cards__target-label {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: #ffe08a;
+  color: #173b2d;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+/* ---------- Felt Table Played Seats ---------- */
+.felt-table--seats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 10px;
+}
+
+.felt-table > .played-cards {
+  display: grid;
+}
+
+.played-seat {
+  width: 100%;
+  min-width: 0;
+}
+
+.played-seat--left .played-cards {
+  justify-items: start;
+}
+
+.played-seat--right .played-cards {
+  justify-items: end;
+}
+
+.played-seat--me .played-cards {
+  justify-items: center;
+}
+
+.played-seat--target .played-cards__row {
+  outline: 2px solid #ffe28e;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.played-seat--target .played-cards__meta {
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.felt-table .played-cards {
+  --played-card-w: 58px;
+  --played-card-h: 82px;
+  --played-step: 32px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px;
+  gap: 7px;
+}
+
+.felt-table .played-cards__meta {
+  padding: 3px 8px;
+  line-height: 1.35;
+  gap: 6px;
+}
+
+.felt-table .played-cards__row {
+  display: grid;
+  grid-template-columns: repeat(calc(var(--played-count) - 1), minmax(0, 1fr)) var(--played-card-w);
+  gap: 0;
+  max-width: 100%;
+  width: min(100%, calc((var(--played-count) - 1) * var(--played-step) + var(--played-card-w)));
+  padding-right: 0;
+}
+
+.felt-table .played-cards__row:has(> .card:only-child) {
+  grid-template-columns: var(--played-card-w);
+  width: var(--played-card-w);
+  padding-right: 0;
+}
+
+.felt-table .card--played {
+  --w: var(--played-card-w);
+  --h: var(--played-card-h);
+}
+
+/* ---------- Responsive Played Cards ---------- */
+@media (max-width: 880px) {
+  .felt-table .played-cards { --played-card-w: 38px; --played-card-h: 54px; --played-step: 22px; }
+  .felt-table .played-cards__meta { min-height: 18px; font-size: 11px; }
+  .felt-table .played-cards__meta span { max-width: 150px; }
+  .felt-table .card__index--bottom { display: none; }
+}
+
+@media (max-width: 600px) and (orientation: portrait) {
+  .felt-table--seats { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) auto; gap: 4px; }
+  .played-seat--left { grid-column: 1; grid-row: 1; }
+  .played-seat--right { grid-column: 2; grid-row: 1; }
+  .played-seat--me { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* Short screens must keep target, name and hand type on one metadata row. */
+@media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
+  .felt-table .played-cards { --played-card-w: 28px; --played-card-h: 40px; --played-step: 18px; padding-block: 3px; gap: 5px; }
+  .felt-table .played-cards__meta { flex-wrap: nowrap; padding: 2px 6px; gap: 4px; }
+  .played-cards__target-label { padding: 2px 4px; font-size: 10px; }
+  .felt-table .card--played .card__index { font-size: 9px; }
+  .felt-table .card--played .card__index--top { top: 3px; left: 2px; }
+  .felt-table .card--played .card__index i { font-size: 8px; }
+  .felt-table .card--played .card__pip { --pip-size: 17px; }
+}
+
+@media (max-width: 600px) and (max-height: 600px) and (orientation: portrait) {
+  .felt-table .played-cards { --played-card-h: 32px; padding-block: 0; gap: 5px; }
+  /* At 32px high, reserve the face for the complete rank/suit corner. */
+  .felt-table .card--played .card__pip { display: none; }
+  .felt-table .played-cards__meta { min-height: 18px; padding-block: 1px; }
+  .played-cards__target-label { padding-block: 1px; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .felt-table .played-cards { --played-card-w: 22px; --played-card-h: 20px; --played-step: 16px; padding-block: 0; gap: 3px; }
+  .felt-table .played-cards__meta { flex-wrap: nowrap; min-height: 16px; padding: 1px 6px; gap: 4px; font-size: 10px; }
+  .played-cards__target-label { padding: 0 4px; font-size: 10px; }
+  .felt-table .card--played .card__index { font-size: 8px; }
+  .felt-table .card--played .card__index--top { top: 3px; left: 2px; }
+  .felt-table .card--played .card__index i { font-size: 7px; }
+  .felt-table .card--played .card__pip { display: none; }
+}
