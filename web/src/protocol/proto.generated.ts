@@ -78,7 +78,7 @@ export const MessageType = {
   MSG_ERROR: 200,
   MSG_PRACTICE_MATCH: 201,
   MSG_CANCEL_MATCH: 18,
-  MSG_MATCH_CANCELLED: 127,
+  MSG_MATCH_CANCELED: 127,
 } as const;
 
 export function encodeMessage(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {

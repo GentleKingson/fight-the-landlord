@@ -94,7 +94,7 @@ func TestCancelMatchAcknowledgesOnlyQueueRemoval(t *testing.T) {
 	h.Handle(client, codec.MustNewMessage(protocol.MsgCancelMatch, nil))
 	require.Zero(t, matcher.GetQueueLength())
 	messages := client.SentMessages()
-	require.Equal(t, protocol.MsgMatchCancelled, messages[len(messages)-1].Type)
+	require.Equal(t, protocol.MsgMatchCanceled, messages[len(messages)-1].Type)
 	// Once dequeued/reserved, cancellation must not falsely confirm success.
 	h.Handle(client, codec.MustNewMessage(protocol.MsgCancelMatch, nil))
 	messages = client.SentMessages()

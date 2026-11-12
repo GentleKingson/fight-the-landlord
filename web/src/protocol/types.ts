@@ -6,7 +6,7 @@ export const MsgType = {
   LeaveRoom: 'leave_room',
   QuickMatch: 'quick_match',
   CancelMatch: 'cancel_match',
-  MatchCancelled: 'match_cancelled',
+  MatchCanceled: 'match_canceled',
   PracticeMatch: 'practice_match',
   Ready: 'ready',
   CancelReady: 'cancel_ready',

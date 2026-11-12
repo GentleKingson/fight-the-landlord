@@ -680,3 +680,9 @@
   .table-screen, .table-arena { gap: 2px; }
   .action-bar small { height: 14px; min-height: 14px; line-height: 14px; }
 }
+@media (max-width: 360px) and (orientation: portrait) {
+  /* Keep five 44px tool targets without widening the hand's grid track. */
+  .table-score-strip { padding-inline: 4px; gap: 0; }
+  .table-score-strip span { display: none; }
+  .table-score-strip strong { font-size: 10px; }
+}

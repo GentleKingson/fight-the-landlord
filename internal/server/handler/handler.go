@@ -120,7 +120,7 @@ func (h *Handler) initHandlers() {
 		protocol.MsgLeaveRoom:  func(c types.ClientInterface, _ *protocol.Message) { h.handleLeaveRoom(c) },
 		protocol.MsgCancelMatch: func(c types.ClientInterface, _ *protocol.Message) {
 			if h.matcher.RemoveFromQueue(c) {
-				c.SendMessage(codec.MustNewMessage(protocol.MsgMatchCancelled, nil))
+				c.SendMessage(codec.MustNewMessage(protocol.MsgMatchCanceled, nil))
 			} else {
 				c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeGameStarted, "匹配已进入组桌阶段，无法取消，请等待进入牌局"))
 			}

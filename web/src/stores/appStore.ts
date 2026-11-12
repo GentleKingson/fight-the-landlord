@@ -272,7 +272,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
         break;
       }
-      case MsgType.MatchCancelled:
+      case MsgType.MatchCanceled:
         if (state.phase === 'matching') set({ phase: 'lobby', cancellingMatch: false });
         break;
       case MsgType.MatchFound:

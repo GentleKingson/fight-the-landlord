@@ -74,7 +74,7 @@ const (
 	MessageType_MSG_ERROR              MessageType = 200
 	MessageType_MSG_PRACTICE_MATCH     MessageType = 201
 	MessageType_MSG_CANCEL_MATCH       MessageType = 18
-	MessageType_MSG_MATCH_CANCELLED    MessageType = 127
+	MessageType_MSG_MATCH_CANCELED     MessageType = 127
 )
 
 // Enum value maps for MessageType.
@@ -128,7 +128,7 @@ var (
 		200: "MSG_ERROR",
 		201: "MSG_PRACTICE_MATCH",
 		18:  "MSG_CANCEL_MATCH",
-		127: "MSG_MATCH_CANCELLED",
+		127: "MSG_MATCH_CANCELED",
 	}
 	MessageType_value = map[string]int32{
 		"MSG_UNKNOWN":                0,
@@ -179,7 +179,7 @@ var (
 		"MSG_ERROR":                  200,
 		"MSG_PRACTICE_MATCH":         201,
 		"MSG_CANCEL_MATCH":           18,
-		"MSG_MATCH_CANCELLED":        127,
+		"MSG_MATCH_CANCELED":         127,
 	}
 )
 
@@ -270,7 +270,7 @@ const file_internal_protocol_proto_message_proto_rawDesc = "" +
 	"%internal/protocol/proto/message.proto\x12\bprotocol\"N\n" +
 	"\aMessage\x12)\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x15.protocol.MessageTypeR\x04type\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\fR\apayload*\x87\b\n" +
+	"\apayload\x18\x02 \x01(\fR\apayload*\x86\b\n" +
 	"\vMessageType\x12\x0f\n" +
 	"\vMSG_UNKNOWN\x10\x00\x12\x11\n" +
 	"\rMSG_RECONNECT\x10\x01\x12\f\n" +
@@ -320,8 +320,8 @@ const file_internal_protocol_proto_message_proto_rawDesc = "" +
 	"\x0fMSG_MAINTENANCE\x10~\x12\x0e\n" +
 	"\tMSG_ERROR\x10\xc8\x01\x12\x17\n" +
 	"\x12MSG_PRACTICE_MATCH\x10\xc9\x01\x12\x14\n" +
-	"\x10MSG_CANCEL_MATCH\x10\x12\x12\x17\n" +
-	"\x13MSG_MATCH_CANCELLED\x10\x7fB=Z;github.com/palemoky/fight-the-landlord/internal/protocol/pbb\x06proto3"
+	"\x10MSG_CANCEL_MATCH\x10\x12\x12\x16\n" +
+	"\x12MSG_MATCH_CANCELED\x10\x7fB=Z;github.com/palemoky/fight-the-landlord/internal/protocol/pbb\x06proto3"
 
 var (
 	file_internal_protocol_proto_message_proto_rawDescOnce sync.Once

@@ -36,7 +36,7 @@ it('keeps matching until the server confirms cancellation and keeps a reserved m
   receive({ type: MsgType.Error, payload: { code: 1, message: '正在组桌' } });
   expect(useAppStore.getState().phase).toBe('matching');
   fireEvent.click(screen.getByRole('button', { name: '取消匹配' }));
-  receive({ type: MsgType.MatchCancelled, payload: {} });
+  receive({ type: MsgType.MatchCanceled, payload: {} });
   expect(useAppStore.getState().phase).toBe('lobby');
 });
 
