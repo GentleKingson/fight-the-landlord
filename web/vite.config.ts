@@ -91,7 +91,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), lobbyPreloadDemoFilter(), precompressAssets()],
     server: {
-      fs: { allow: [process.cwd(), resolve(process.cwd(), '../internal/protocol/proto'), resolve(process.cwd(), '../internal/sound/gaming')] },
+      fs: { allow: [process.cwd(), resolve(process.cwd(), '../internal/protocol/proto'), resolve(process.cwd(), '../internal/sound')] },
       host: '0.0.0.0',
       port: 5174,
       proxy: {

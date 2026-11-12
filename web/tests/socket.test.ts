@@ -429,6 +429,7 @@ test.each([500, 1000, 2000])('RTT %d: one submission, matching acknowledgement, 
   vi.advanceTimersByTime(rtt);
   transport.receive('bid_result', { player_id: 'me', action_token: 'bid-1', bid: true });
   expect(useAppStore.getState().submission).toBe('confirmed');
+  expect(useAppStore.getState().submissionMessage).toBe('');
   expect(sentTypes(transport).filter(t => t === 'bid')).toHaveLength(1);
   socket.close();
 });
@@ -558,6 +559,7 @@ test.each(['quota', 'read-denied', 'storage-disabled'])('reconnect keeps memory 
       turn_deadline: Date.now() + 30000, server_time: Date.now(),
     } });
     expect(useAppStore.getState().submission).toBe('confirmed');
+    expect(useAppStore.getState().submissionMessage).toBe('');
     expect(sentTypes(transport)).not.toContain('play_cards');
     // The recovered page can submit a new turn instead of remaining locked.
     expect(socket.send('pass', { turn_token: 'play-2' })).toBe(true);

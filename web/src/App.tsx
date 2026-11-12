@@ -5,6 +5,7 @@ import { GameResult } from './features/table/GameResult';
 import { GameEnd } from './features/table/GameEnd';
 import { createGameSocket, type GameSocket } from './transport/wsClient';
 import { useAppStore } from './stores/appStore';
+import { connectBackgroundMusic } from './audio/backgroundMusic';
 import { connectGameAudio } from './audio/connectGameAudio';
 import { resolveBackgroundScene } from './shared/ui/backgroundScene';
 
@@ -26,6 +27,7 @@ export function App({ demo = null }: { demo?: string | null }) {
   const scene = resolveBackgroundScene(phase);
 
   useEffect(() => connectGameAudio(socket), [socket]);
+  useEffect(() => connectBackgroundMusic(), []);
 
   // Mobile keyboards can resize only the visual viewport, leaving fixed drawers behind.
   useEffect(() => {
@@ -75,7 +77,7 @@ export function App({ demo = null }: { demo?: string | null }) {
   return (
     <div className="app-shell" data-scene={scene}>
       {collecting ? <div className="collection-notice" role="status">本服务已启用训练数据采集：记录匿名牌局、操作及胜负；不记录昵称、聊天或重连令牌。</div> : null}
-      {submissionMessage && !['bidding', 'playing'].includes(phase) ? (
+      {connected && !error && submissionMessage && !['bidding', 'playing'].includes(phase) ? (
         <div className="submission-notice connection-toast" data-state={submission} role={submission === 'rejected' ? 'alert' : 'status'}>
           <span>{submissionMessage}</span>
           {submission !== 'pending' && submission !== 'unknown' ? (

@@ -566,6 +566,9 @@
 }
 
 @media (max-width: 600px) and (orientation: portrait) {
+  .table-topbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px; }
+  .table-brand__logo { font-size: 16px; }
+  .table-score-strip { justify-self: center; gap: 4px; padding-inline: 4px; }
   .table-tools .tool-button { min-width: 30px; width: 30px; padding: 4px; }
   .tool-button span { display: none; }
   .table-score-strip span, .table-score-strip strong { font-size: 11px; }

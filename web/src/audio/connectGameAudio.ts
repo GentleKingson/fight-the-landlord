@@ -116,8 +116,10 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
         !['dealing', 'bidding', 'playing', 'game_over'].includes(state.phase)) stop();
   });
   const unsubscribeAudio = audio.subscribe(() => { if (!audio.getEnabled()) endTurn(); });
-  const onVisibility = () => { if (document.hidden) stop(); };
+  const onVisibility = () => { if (document.hidden) stop(); else audio.unlock(); };
   document.addEventListener('pointerup', audio.unlock);
+  document.addEventListener('touchend', audio.unlock);
+  window.addEventListener('pageshow', audio.unlock);
   document.addEventListener('keydown', audio.unlock);
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('pagehide', stop);
@@ -126,6 +128,8 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
     unsubscribeStore();
     unsubscribeAudio();
     document.removeEventListener('pointerup', audio.unlock);
+    document.removeEventListener('touchend', audio.unlock);
+    window.removeEventListener('pageshow', audio.unlock);
     document.removeEventListener('keydown', audio.unlock);
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('pagehide', stop);

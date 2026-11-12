@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  server: { fs: { allow: [process.cwd(), resolve(process.cwd(), '../internal/protocol/proto'), resolve(process.cwd(), '../internal/sound/gaming')] } },
+  server: { fs: { allow: [process.cwd(), resolve(process.cwd(), '../internal/protocol/proto'), resolve(process.cwd(), '../internal/sound')] } },
   test: {
     environment: 'jsdom',
     setupFiles: ['./tests/browserMocks.ts'],

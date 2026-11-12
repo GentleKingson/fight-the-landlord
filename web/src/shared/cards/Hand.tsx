@@ -197,7 +197,7 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
   return (
     <div
       ref={rootRef}
-      className={`hand ${disabled ? 'is-disabled' : ''} ${dragStart !== null ? 'is-dragging' : ''}`}
+      className={`hand ${cards.length <= 6 ? 'hand--short' : ''} ${disabled ? 'is-disabled' : ''} ${dragStart !== null ? 'is-dragging' : ''}`}
       style={{ '--hand-count': cards.length } as CSSProperties}
       role={exposedCount > 0 ? 'listbox' : 'group'}
       aria-label="手牌"
