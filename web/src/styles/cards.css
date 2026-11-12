@@ -1,0 +1,242 @@
+.card {
+  --w: 72px;
+  --h: 104px;
+  --card-w: var(--w);
+  position: relative;
+  display: block;
+  width: var(--w);
+  height: var(--h);
+  flex: 0 0 auto;
+  border-radius: 10px;
+  border: 1px solid rgba(20, 26, 30, .2);
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, .98), rgba(244, 241, 233, .96)),
+    #fff;
+  color: var(--black-card);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 7px 15px rgba(0, 0, 0, .22);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 900;
+  user-select: none;
+}
+
+.card--red {
+  color: var(--red-card);
+}
+
+.card--played {
+  --w: 58px;
+  --h: 82px;
+  border-radius: 9px;
+}
+
+.card--mini {
+  --w: 34px;
+  --h: 48px;
+  border-radius: 6px;
+}
+
+.card--action {
+  --w: 46px;
+  --h: 64px;
+  border-radius: 8px;
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, .99), rgba(247, 244, 237, .98)),
+    #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 5px 12px rgba(0, 0, 0, .28);
+}
+
+.card.is-selected {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .92), 0 16px 24px rgba(0, 0, 0, .3);
+  filter: brightness(1.08) saturate(1.04);
+}
+
+.card.is-joker {
+  background:
+    linear-gradient(155deg, #fff, #f2eee4 64%, #e9dfcf),
+    #fff;
+}
+
+.card__suit-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+}
+
+.card__index {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 0;
+  line-height: .9;
+  font-size: 17px;
+}
+
+.card__index b {
+  display: block;
+  font-style: normal;
+}
+
+.card__index i {
+  display: block;
+  margin-top: 1px;
+  font-style: normal;
+  font-size: 15px;
+}
+
+.card__index--top {
+  left: 6px;
+  top: 6px;
+}
+
+/* Keep rank/suit in the top-left lane; the emblem owns the bottom-right. */
+.card__index--bottom {
+  display: none;
+}
+
+.card__pip {
+  position: absolute;
+  right: 8%;
+  bottom: 6%;
+  width: 1em;
+  height: 1em;
+  font-size: min(var(--pip-size, 42px), calc(var(--w) * .40), calc(var(--h) * .38));
+  line-height: 1;
+}
+
+.card--played .card__index {
+  font-size: 13px;
+}
+
+.card--played .card__index i {
+  font-size: 12px;
+}
+
+.card--played .card__pip {
+  --pip-size: 31px;
+}
+
+.card--mini .card__index {
+  font-size: 9px;
+}
+
+.card--mini .card__index i {
+  font-size: 8px;
+}
+
+.card--mini .card__index--bottom {
+  display: none;
+}
+
+.card--mini .card__pip {
+  --pip-size: 17px;
+}
+
+.card--action .card__index {
+  font-size: 11px;
+}
+
+.card--action .card__index i {
+  font-size: 10px;
+}
+
+.card--action .card__pip {
+  --pip-size: 24px;
+}
+
+/* Use the actual card dimensions in every context (including end-of-round review).
+   Keep the word and emblem in separate horizontal lanes as the card shrinks. */
+.card__joker-word {
+  position: absolute;
+  left: 10%;
+  bottom: 10%;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: .04em;
+  font-size: min(calc(var(--w) * .21), calc(var(--h) * .17));
+  line-height: 1;
+}
+
+.card__joker-star {
+  position: absolute;
+  right: 8%;
+  bottom: 10%;
+  font-size: min(calc(var(--w) * .40), calc(var(--h) * .40));
+  line-height: 1;
+}
+
+/* ---------- Card Back & Placeholders ---------- */
+.card-back-stack {
+  position: relative;
+  display: block;
+  width: 112px;
+  height: 84px;
+  max-width: 120px;
+}
+
+.card-back-stack strong {
+  position: absolute;
+  right: -8px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(180deg, #4d89dc, #1e5db7);
+  border: 2px solid rgba(255, 255, 255, .72);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
+  text-align: center;
+  font-weight: 950;
+}
+
+.card-back {
+  position: absolute;
+  left: calc(var(--i, 0) * 4px);
+  top: calc(var(--i, 0) * .6px);
+  width: 42px;
+  height: 60px;
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, .18) 0 2px, transparent 3px),
+    repeating-linear-gradient(45deg, #2e5fac, #2e5fac 5px, #477fd2 5px, #477fd2 10px);
+  border: 2px solid rgba(239, 247, 255, .82);
+  box-shadow: 0 5px 10px rgba(0, 0, 0, .22);
+}
+
+.card-back:nth-child(1) { --i: 0; }
+.card-back:nth-child(2) { --i: 1; }
+.card-back:nth-child(3) { --i: 2; }
+.card-back:nth-child(4) { --i: 3; }
+.card-back:nth-child(5) { --i: 4; }
+.card-back:nth-child(6) { --i: 5; }
+.card-back:nth-child(7) { --i: 6; }
+.card-back:nth-child(8) { --i: 7; }
+.card-back:nth-child(9) { --i: 8; }
+.card-back:nth-child(10) { --i: 9; }
+.card-back:nth-child(11) { --i: 10; }
+.card-back:nth-child(12) { --i: 11; }
+.card-back:nth-child(13) { --i: 12; }
+.card-back:nth-child(14) { --i: 13; }
+.card-back:nth-child(15) { --i: 14; }
+.card-back:nth-child(16) { --i: 15; }
+.card-back:nth-child(17) { --i: 16; }
+
+.mini-card-placeholder {
+  width: 30px;
+  height: 42px;
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .14), transparent 38%),
+    repeating-linear-gradient(45deg, #315eab, #315eab 4px, #4d82d1 4px, #4d82d1 8px);
+  border: 1px solid rgba(255, 255, 255, .5);
+  box-shadow: 0 4px 9px rgba(0, 0, 0, .24);
+}
+
+@media (max-width: 880px) {
+  .card--hand { --w: 58px; --h: 82px; }
+  .card--played { --w: 38px; --h: 54px; }
+  .card__index { font-size: 15px; }
+  .card__pip { --pip-size: 32px; }
+}
