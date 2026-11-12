@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore } from '../../stores/appStore';
+import { SoundToggle } from '../../audio/SoundToggle';
 import { Card } from '../../shared/cards/Card';
 import { Icon } from '../../shared/ui/Icon';
 import { useImeSafeEnter } from '../../shared/ui/imeSafeSubmit';
@@ -32,9 +33,12 @@ export function Lobby({ socket }: LobbyProps) {
             <p>{playerName ? `${playerName}，准备开局` : '轻量牌桌，快速开局'}</p>
           </div>
         </div>
-        <div className="lobby-status">
-          <span className="status-dot" />
-          在线 {onlineCount || 0}
+        <div className="lobby-header-tools">
+          <SoundToggle />
+          <div className="lobby-status">
+            <span className="status-dot" />
+            在线 {onlineCount || 0}
+          </div>
         </div>
       </header>
 

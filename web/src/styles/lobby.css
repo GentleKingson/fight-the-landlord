@@ -511,6 +511,11 @@
   margin: 0 0 14px;
 }
 
+.sub-panel.rules-panel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .ranking-list {
   display: grid;
   gap: 8px;
@@ -658,3 +663,7 @@
   .sub-panel { padding: 10px; }
   .sub-panel h2 { margin-bottom: 8px; font-size: 18px; }
 }
+
+.lobby-header-tools { display: flex; align-items: center; gap: 8px; flex: none; }
+.lobby-header-tools .tool-button { min-width: 36px; min-height: 36px; padding: 6px; }
+.lobby-header-tools .tool-button span { display: none; }

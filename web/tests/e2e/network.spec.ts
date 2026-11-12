@@ -33,19 +33,22 @@ for (const { rtt, storageFailure } of scenarios) test(`submission recovery with 
     window.transport.receive('connected', { player_id: 'me' });
     window.transport.receive('reconnected', { player_id: 'me' });
     if (${storageFailure}) Storage.prototype.setItem = () => { throw new DOMException('full', 'QuotaExceededError'); };
-    useAppStore.setState({ currentTurn: 'me', bidToken: 'token', timeout: 15, timerStart: Date.now() });
+    // A handshake without a game snapshot returns to the lobby; start a bid turn explicitly.
+    useAppStore.setState({ phase: 'bidding', currentTurn: 'me', bidToken: 'token', timeout: 15, timerStart: Date.now() });
     window.networkSocket.send('bid', { bid: true, bid_token: 'token' });
     window.networkSocket.send('bid', { bid: true, bid_token: 'token' });
   })()`);
   await expect(page.getByText('操作已提交，等待服务器确认…', { exact: true })).toBeVisible();
   expect(await page.evaluate('window.submissions')).toBe(1);
   await page.evaluate('window.transport.onclose({ code: 1006 })');
-  await expect(page.locator('.submission-notice')).toContainText('操作结果待核对');
+  await expect(page.locator('#play-action-summary')).toContainText('操作结果待核对');
+  expect(await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => useAppStore.getState().submission)`)).toBe('unknown');
   await page.waitForTimeout(2600);
   await page.evaluate(`window.transport.onopen(); window.transport.receive('connected', { player_id: 'me' });`);
   await expect(page.getByText('正在核对上次操作，请勿重复提交', { exact: true })).toBeVisible();
   await page.evaluate(`window.transport.receive('reconnected', { player_id: 'me', game_state: { phase: 'playing', last_action_token: 'token', hand: [{ rank: 3 }], players: [] } });`);
-  await expect(page.getByText('服务器已确认操作成功', { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => ({ submission: useAppStore.getState().submission, message: useAppStore.getState().submissionMessage }))`)).toEqual({ submission: 'confirmed', message: '' });
+  await expect(page.getByText('服务器已确认操作成功', { exact: true })).toHaveCount(0);
   expect(await page.evaluate('window.submissions')).toBe(1);
   await page.evaluate('window.networkSocket.close()');
 });

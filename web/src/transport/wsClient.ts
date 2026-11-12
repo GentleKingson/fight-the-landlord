@@ -159,7 +159,7 @@ export class GameSocket {
       useAppStore.setState({ submission: 'idle', submissionMessage: '对局已不可恢复，无法核对上次操作结果；不会自动重发' });
       return;
     }
-    useAppStore.setState({ submission: accepted ? 'confirmed' : 'rejected', submissionMessage: accepted ? '服务器已确认操作成功' : '服务器未接受上次操作，请按恢复后的回合状态操作' });
+    useAppStore.setState({ submission: accepted ? 'confirmed' : 'rejected', submissionMessage: accepted ? '' : '服务器未接受上次操作，请按恢复后的回合状态操作' });
   }
 
   private markUnknown(): void {

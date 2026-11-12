@@ -85,7 +85,9 @@
 @media (max-width: 700px) and (orientation: portrait) {
   .hand { height: 178px; }
   .hand .card { --h: 78px; }
-  .hand .card__index--top { left: 3px; }
+  /* Leave the complete rank/suit corner visible in dense overlapping hands. */
+  .hand .card__index--top { left: 3px; font-size: 13px; }
+  .hand .card__index i { font-size: 12px; }
   .hand__slot { left: calc(50% + var(--row-x, 0px) - 29px); }
   .hand__slot[data-row="0"] { bottom: 86px; }
   .hand__slot[data-row="1"] { bottom: 6px; }
@@ -110,4 +112,13 @@
   .hand .card__index { font-size: 12px; }
   .hand .card__index i { font-size: 11px; }
   .hand .card__pip { --pip-size: 26px; }
+}
+
+/* A small hand fits on one row; retain the same rank order as larger hands. */
+@media (max-width: 700px) and (orientation: portrait) {
+  .hand--short { height: 112px; }
+  .hand--short .hand__slot {
+    left: calc(50% + var(--compact-x, 0px) - 29px);
+    bottom: 8px;
+  }
 }
