@@ -70,12 +70,26 @@ function precompressAssets(): Plugin {
   };
 }
 
+function lobbyPreloadDemoFilter(): Plugin {
+  return {
+    name: 'lobby-preload-demo-filter',
+    apply: 'serve',
+    transformIndexHtml(html, ctx) {
+      if (!ctx?.originalUrl) return html;
+      const url = new URL(ctx.originalUrl, 'http://localhost');
+      const demo = url.searchParams.get('demo');
+      if (!demo || demo === 'lobby') return html;
+      return html.replace(/\s*<link\b[^>]*rel="preload"[^>]*scene-lobby-[^>]*>/g, '');
+    }
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const wsTarget = env.VITE_WS_TARGET || 'ws://localhost:1780';
 
   return {
-    plugins: [react(), precompressAssets()],
+    plugins: [react(), lobbyPreloadDemoFilter(), precompressAssets()],
     server: {
       fs: { allow: [process.cwd(), resolve(process.cwd(), '../internal/protocol/proto'), resolve(process.cwd(), '../internal/sound/gaming')] },
       host: '0.0.0.0',

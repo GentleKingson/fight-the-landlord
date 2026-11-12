@@ -54,6 +54,26 @@ func TestWebRoutesAndPrivateDataIsolation(t *testing.T) {
 		s.routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, http.NoBody))
 		require.Equal(t, cache, response.Header().Get("Cache-Control"), path)
 	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.webmanifest"), []byte(`{"name":"斗地主"}`), 0o600))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "icons"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "icons", "icon-192.png"), []byte("\x89PNG\r\n\x1a\n"), 0o600))
+	for path, tc := range map[string]struct {
+		status      int
+		contentType string
+	}{
+		"/manifest.webmanifest":    {status: http.StatusOK, contentType: "application/manifest+json; charset=utf-8"},
+		"/manifest.webmanifest.br": {status: http.StatusNotFound},
+		"/icons/icon-192.png":      {status: http.StatusOK, contentType: "image/png"},
+		"/icons/":                  {status: http.StatusNotFound},
+	} {
+		rec := httptest.NewRecorder()
+		s.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, http.NoBody))
+		require.Equal(t, tc.status, rec.Code, path)
+		if tc.contentType != "" {
+			require.Equal(t, tc.contentType, rec.Header().Get("Content-Type"), path)
+			require.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"), path)
+		}
+	}
 	cfg.Server.WebDir = filepath.Join(dir, "missing")
 	require.Error(t, validateWebConfig(cfg))
 }

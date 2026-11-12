@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore } from '../../stores/appStore';
@@ -160,15 +161,152 @@ function MatchingPanel() {
   );
 }
 
+function legacyCopyText(text: string): boolean {
+  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') {
+    return false;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
+}
+
+async function writeTextToClipboard(text: string): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  if (!legacyCopyText(text)) {
+    throw new Error('Clipboard API unavailable');
+  }
+}
+
 function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: string; players: ReturnType<typeof useAppStore.getState>['players'] }) {
   const playerId = useAppStore((state) => state.playerId);
   const me = players.find((player) => player.id === playerId);
+  const codeRef = useRef<HTMLElement | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+
+  const supportsInvokerCommands = typeof window !== 'undefined' && 'CommandEvent' in window;
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
+  const announce = useCallback((nextState: 'copied' | 'failed', message: string) => {
+    if (resetTimerRef.current !== null) {
+      clearTimeout(resetTimerRef.current);
+    }
+    setCopyState(nextState);
+    setStatusMessage((prev) => (prev === message ? `${message}\u00A0` : message));
+    resetTimerRef.current = setTimeout(() => {
+      setCopyState('idle');
+      setStatusMessage('');
+      resetTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyRoomCode = useCallback(async () => {
+    if (!roomCode) return;
+    try {
+      await writeTextToClipboard(roomCode);
+      announce('copied', `已复制房间号 ${roomCode}`);
+    } catch {
+      announce('failed', '复制失败，请手动复制房间号');
+    }
+  }, [announce, roomCode]);
+
+  const handleShareRoomCode = useCallback(async () => {
+    if (!roomCode || typeof navigator === 'undefined' || typeof navigator.share !== 'function') return;
+    const shareData: ShareData = {
+      title: '斗地主房间邀请',
+      text: `快来加入我的斗地主房间，房间号：${roomCode}`
+    };
+    try {
+      if (typeof navigator.canShare === 'function' && !navigator.canShare(shareData)) {
+        await handleCopyRoomCode();
+        return;
+      }
+      await navigator.share(shareData);
+      announce('copied', `已分享房间号 ${roomCode}`);
+    } catch (error) {
+      if ((error as { name?: string } | null)?.name === 'AbortError') {
+        return;
+      }
+      announce('failed', '分享失败，请复制房间号');
+    }
+  }, [announce, handleCopyRoomCode, roomCode]);
+
+  useEffect(() => {
+    const codeElement = codeRef.current;
+    if (!supportsInvokerCommands || !codeElement) return;
+    const onCommand = (event: Event) => {
+      if ((event as Event & { command?: string }).command === '--copy') {
+        void handleCopyRoomCode();
+      }
+    };
+    codeElement.addEventListener('command', onCommand);
+    return () => {
+      codeElement.removeEventListener('command', onCommand);
+    };
+  }, [handleCopyRoomCode, supportsInvokerCommands]);
 
   return (
     <section className="room-waiting">
       <div className="room-code-panel">
         <span>房间号</span>
-        <strong>{roomCode || '...'}</strong>
+        <strong id="waiting-room-code" ref={codeRef}>{roomCode || '...'}</strong>
+        <div className="room-code-tools">
+          <button
+            type="button"
+            className="room-copy-button"
+            command="--copy"
+            commandfor="waiting-room-code"
+            disabled={!roomCode}
+            data-copied={copyState === 'copied' ? '' : undefined}
+            data-failed={copyState === 'failed' ? '' : undefined}
+            onClick={supportsInvokerCommands ? undefined : () => void handleCopyRoomCode()}
+          >
+            <Icon name={copyState === 'copied' ? 'check' : 'copy'} />
+            <span>{copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制房间号'}</span>
+          </button>
+          {canShare ? (
+            <button
+              type="button"
+              className="room-share-button"
+              disabled={!roomCode}
+              onClick={() => void handleShareRoomCode()}
+            >
+              <Icon name="share" />
+              <span>分享房间号</span>
+            </button>
+          ) : null}
+        </div>
+        <div
+          className={`room-copy-status ${copyState !== 'idle' ? 'is-visible' : ''} ${copyState === 'failed' ? 'is-error' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
+          {statusMessage}
+        </div>
         <p>{players.length}/3 人已入座</p>
       </div>
       <div className="seat-list">

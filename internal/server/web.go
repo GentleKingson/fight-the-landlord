@@ -313,8 +313,12 @@ func webMimeType(relPath string) string {
 }
 
 func isWebAsset(path string) bool {
-	// Vite produces hashed files directly under /assets; never expose sidecar archives directly.
-	if filepath.Dir(path) != "/assets" {
+	if path == "/manifest.webmanifest" {
+		return true
+	}
+	// Vite produces hashed files under /assets and PWA icons under /icons; never expose sidecar archives directly.
+	dir := filepath.Dir(path)
+	if dir != "/assets" && dir != "/icons" {
 		return false
 	}
 	ext := strings.ToLower(filepath.Ext(path))

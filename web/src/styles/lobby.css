@@ -354,13 +354,13 @@
 .room-code-panel {
   display: grid;
   justify-items: center;
-  gap: 4px;
+  gap: 6px;
   padding: 18px;
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, .1);
 }
 
-.room-code-panel span,
+.room-code-panel > span,
 .room-code-panel p {
   color: rgba(255, 255, 255, .7);
   margin: 0;
@@ -370,6 +370,79 @@
   font-size: 40px;
   color: #ffe092;
   letter-spacing: .14em;
+}
+
+.room-code-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.room-copy-button,
+.room-share-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 224, 146, .4);
+  background: rgba(255, 224, 146, .14);
+  color: #fff6da;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease;
+}
+
+.room-copy-button:hover:not(:disabled),
+.room-share-button:hover:not(:disabled) {
+  background: rgba(255, 224, 146, .24);
+  border-color: rgba(255, 224, 146, .68);
+}
+
+.room-copy-button:active:not(:disabled),
+.room-share-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.room-copy-button[data-copied] {
+  background: rgba(88, 196, 134, .28);
+  border-color: rgba(135, 232, 174, .75);
+  color: #e9fff1;
+}
+
+.room-copy-button[data-failed] {
+  background: rgba(214, 92, 82, .3);
+  border-color: rgba(255, 160, 152, .75);
+  color: #ffecea;
+}
+
+.room-copy-button:disabled,
+.room-share-button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.room-copy-status {
+  min-height: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #b7f5cf;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  pointer-events: none;
+}
+
+.room-copy-status.is-visible {
+  opacity: 1;
+}
+
+.room-copy-status.is-error {
+  color: #ffb8b2;
 }
 
 .seat-list {
