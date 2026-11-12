@@ -73,6 +73,15 @@ function LobbyHome({ socket }: LobbyProps) {
     socket.send(MsgType.JoinRoom, { room_code: roomCode });
   }
 
+  function startMatch(mode: 'online' | 'practice') {
+    if (useAppStore.getState().phase === 'matching') return;
+    if (socket.send(mode === 'online' ? MsgType.QuickMatch : MsgType.PracticeMatch)) {
+      useAppStore.setState({ phase: 'matching', matchMode: mode, error: '' });
+    } else {
+      setError('匹配请求发送失败，请等待连接恢复后重试');
+    }
+  }
+
   function refreshRooms() {
     socket.send(MsgType.GetRoomList);
   }
@@ -95,7 +104,7 @@ function LobbyHome({ socket }: LobbyProps) {
           <h2>快速开局</h2>
           <p>匹配在线玩家，进入标准三人牌桌。</p>
         </div>
-        <button className="primary-action" onClick={() => { useAppStore.setState({ phase: 'matching', matchMode: 'online' }); socket.send(MsgType.QuickMatch); }}>
+        <button className="primary-action" onClick={() => startMatch('online')}>
           <Icon name="play" /> 快速开局
         </button>
       </div>
@@ -106,7 +115,7 @@ function LobbyHome({ socket }: LobbyProps) {
           <strong>创建房间</strong>
           <span>好友同玩</span>
         </button>
-        <button className="entry-tile" onClick={() => { if (useAppStore.getState().phase === 'matching') return; useAppStore.setState({ phase: 'matching', matchMode: 'practice' }); socket.send(MsgType.PracticeMatch); }}>
+        <button className="entry-tile" onClick={() => startMatch('practice')}>
           <Icon name="bot" />
           <strong>人机练习</strong>
           <span>随时练手</span>
@@ -386,8 +395,8 @@ function LobbyChat({ socket }: LobbyProps) {
   function send() {
     const content = chatInput.trim();
     if (!content) return;
-    socket.send(MsgType.Chat, { content, scope: 'lobby' });
-    setChatInput('');
+    if (socket.send(MsgType.Chat, { content, scope: 'lobby' })) setChatInput('');
+    else useAppStore.getState().setError('聊天发送失败，草稿已保留，请等待连接恢复后重试');
   }
 
   return (

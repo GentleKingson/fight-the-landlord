@@ -267,3 +267,27 @@ summary:focus-visible {
 .rules-panel p {
   line-height: 1.7;
 }
+
+.submission-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #263b4a;
+  color: #fff;
+  font-size: 14px;
+}
+.submission-notice[data-state="rejected"],
+.submission-notice[data-state="unknown"] { background: #65451f; }
+.submission-notice[data-state="confirmed"] { background: #28533c; }
+.submission-notice button { color: inherit; text-decoration: underline; flex-shrink: 0; }
+
+/* Keep connection recovery and action feedback readable together. */
+.submission-notice ~ .connection-toast {
+  position: static;
+  transform: none;
+  align-self: center;
+  flex: none;
+}

@@ -7,7 +7,7 @@ import { END_REVEAL_DURATION_MS } from '../src/stores/endGame';
 import { RESULT_ACTION_GUARD_MS } from '../src/shared/resultPresentation';
 import { MsgType, type IncomingPayloadMap, type PlayerInfo } from '../src/protocol/types';
 
-const { send } = vi.hoisted(() => ({ send: vi.fn() }));
+const { send } = vi.hoisted(() => ({ send: vi.fn().mockReturnValue(true) }));
 vi.mock('../src/transport/wsClient', () => ({ createGameSocket: () => ({ connect() {}, close() {}, send, subscribe: () => () => {} }) }));
 vi.mock('../src/audio/connectGameAudio', () => ({ connectGameAudio: () => () => {} }));
 

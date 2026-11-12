@@ -24,7 +24,7 @@ it.each(['lobby', 'matching', 'waiting'] as const)('shows the brand image beside
 
 it('enters matching immediately and sends only one practice request on repeated clicks', () => {
   useAppStore.setState({ phase: 'lobby', lobbyPanel: 'home', matchMode: 'online' });
-  const send = vi.fn();
+  const send = vi.fn().mockReturnValue(true);
   render(<Lobby socket={{ send } as unknown as GameSocket} />);
   const button = screen.getByRole('button', { name: /人机练习/ });
   fireEvent.click(button);
@@ -44,4 +44,18 @@ it('shows a vacant middle seat without duplicating the third player', () => {
   render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
   expect(screen.getAllByText('C')).toHaveLength(1);
   expect(screen.getAllByText('等待加入')).toHaveLength(1);
+});
+
+it.each([/快速开局/, /人机练习/])('keeps the lobby when %s cannot be sent', (name) => {
+  useAppStore.setState({ phase: 'lobby', lobbyPanel: 'home', error: '' });
+  render(<Lobby socket={{ send: vi.fn().mockReturnValue(false) } as unknown as GameSocket} />);
+  fireEvent.click(screen.getByRole('button', { name }));
+  expect(useAppStore.getState().phase).toBe('lobby');
+  expect(useAppStore.getState().error).toContain('匹配请求发送失败');
+});
+
+it('leaves matching when the connection drops', () => {
+  useAppStore.setState({ phase: 'matching', connected: true });
+  useAppStore.getState().setConnected(false);
+  expect(useAppStore.getState().phase).toBe('lobby');
 });

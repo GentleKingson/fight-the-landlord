@@ -21,7 +21,7 @@ afterEach(() => {
 
 describe('IME-safe chat and room-code forms', () => {
   it('suppresses Enter submission during IME composition and Safari 229 fallback in lobby chat, then submits once confirmed', () => {
-    const send = vi.fn();
+    const send = vi.fn().mockReturnValue(true);
     useAppStore.setState({ phase: 'lobby', lobbyPanel: 'chat', chatInput: 'nihao' });
     render(<Lobby socket={{ send } as unknown as GameSocket} />);
 
@@ -50,7 +50,7 @@ describe('IME-safe chat and room-code forms', () => {
   });
 
   it('suppresses Enter submission during IME composition in room table chat and supports form submit button', () => {
-    const send = vi.fn();
+    const send = vi.fn().mockReturnValue(true);
     useAppStore.setState({
       phase: 'playing',
       connected: true,
@@ -81,7 +81,7 @@ describe('IME-safe chat and room-code forms', () => {
   });
 
   it('submits room code via form with enterKeyHint="go" and autoComplete="off"', () => {
-    const send = vi.fn();
+    const send = vi.fn().mockReturnValue(true);
     useAppStore.setState({ phase: 'lobby', lobbyPanel: 'home', roomCodeInput: '654321', error: '' });
     render(<Lobby socket={{ send } as unknown as GameSocket} />);
 
@@ -99,4 +99,14 @@ describe('IME-safe chat and room-code forms', () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(MsgType.JoinRoom, { room_code: '654321' });
   });
+});
+
+it.each(['lobby', 'room'])('retains the %s chat draft when sending fails', (scope) => {
+  useAppStore.setState({ phase: scope === 'room' ? 'playing' : 'lobby', lobbyPanel: 'chat',
+    drawer: 'chat', hand: [], players: [], chatInput: ' 保留草稿 ', error: '' });
+  const socket = { send: vi.fn().mockReturnValue(false) } as unknown as GameSocket;
+  render(scope === 'room' ? <GameTable socket={socket} /> : <Lobby socket={socket} />);
+  fireEvent.click(screen.getByRole('button', { name: '发送' }));
+  expect(useAppStore.getState().chatInput).toBe(' 保留草稿 ');
+  expect(useAppStore.getState().error).toContain('草稿已保留');
 });
