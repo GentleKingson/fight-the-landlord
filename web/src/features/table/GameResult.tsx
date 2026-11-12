@@ -5,6 +5,7 @@ import { useAppStore } from '../../stores/appStore';
 import { resolveSettlementOutcome } from '../../shared/ui/backgroundScene';
 
 export function GameResult({ socket }: { socket: GameSocket }) {
+  const matchMode = useAppStore(state => state.matchMode);
   const playerId = useAppStore((state) => state.playerId);
   const winnerId = useAppStore((state) => state.winnerId);
   const winnerName = useAppStore((state) => state.winnerName);
@@ -33,11 +34,12 @@ export function GameResult({ socket }: { socket: GameSocket }) {
       <section className="result-panel">
         <header className="result-heading">
           <span className="result-badge">{winnerIsLandlord ? '地主获胜' : '农民获胜'}</span>
-          <h1 ref={heading} tabIndex={-1}>{winnerName || '本局'} 获胜</h1>
+          <h1 ref={heading} tabIndex={-1}>{outcome === 'victory' ? '你赢了' : outcome === 'defeat' ? '你输了' : '本局结束'}</h1>
+          <p>{winnerName || '获胜玩家'} · {winnerIsLandlord ? '地主' : '农民'}获胜</p>
           <p>最终倍数 x{finalMultiplier || 1}</p>
         </header>
         <div className="score-list">
-          {scores.map((score) => (
+          {[...scores].sort((a, b) => Number(b.player_id === playerId) - Number(a.player_id === playerId)).map((score) => (
             <div className={`score-row${score.player_id === playerId ? ' is-me' : ''}`} key={score.player_id}>
               <span>{score.player_name}{score.player_id === playerId ? '（我）' : ''}</span>
               <strong className={score.score >= 0 ? 'is-positive' : 'is-negative'}>{score.score >= 0 ? '+' : ''}{score.score}</strong>
@@ -45,7 +47,7 @@ export function GameResult({ socket }: { socket: GameSocket }) {
           ))}
         </div>
         <div className="result-actions">
-          <button className="primary-action" onClick={playAgain}>再来一局</button>
+          <button className="primary-action" onClick={playAgain}>{matchMode === 'practice' ? '再练一局' : '重新匹配'}</button>
           <div className="room-actions">
             {snapshot ? <button className="secondary-action" onClick={reviewEndTable}>查看本局牌面</button> : null}
             <button className="secondary-action" onClick={() => { useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>

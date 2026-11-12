@@ -83,8 +83,8 @@ it.each([0, 1, 2])('keeps previous player left and next player right with their 
   const right = screen.getByRole('region', { name: '山月的出牌' });
   expect(left.classList.contains('played-seat--left')).toBe(true);
   expect(right.classList.contains('played-seat--right')).toBe(true);
-  expect(within(left).getByRole('button', { name: '10♠' })).toBeDefined();
-  expect(within(right).getByRole('button', { name: '9♥' })).toBeDefined();
+  expect(within(left).getByRole('img', { name: '10♠' })).toBeDefined();
+  expect(within(right).getByRole('img', { name: '9♥' })).toBeDefined();
 });
 
 it('retains preselection and revalidates against another player’s new play', () => {

@@ -41,7 +41,7 @@ test('human practice survives reload and finishes a recorded game', async ({ pag
   await expect(page.getByRole('button', { name: '返回大厅' })).toBeVisible();
   expect(plays).toBeGreaterThan(0);
   expect(await page.evaluate(() => sessionStorage.getItem('ddz_match_mode'))).toBe('practice');
-  await page.getByRole('button', { name: '再来一局' }).click();
+  await page.getByRole('button', { name: '再练一局' }).click();
   await expect(page.getByLabel('斗地主牌桌')).toBeVisible();
   await expect(page.getByLabel('斗地主牌桌')).toContainText('🤖');
 });

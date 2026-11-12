@@ -5,6 +5,8 @@ export const MsgType = {
   JoinRoom: 'join_room',
   LeaveRoom: 'leave_room',
   QuickMatch: 'quick_match',
+  CancelMatch: 'cancel_match',
+  MatchCanceled: 'match_canceled',
   PracticeMatch: 'practice_match',
   Ready: 'ready',
   CancelReady: 'cancel_ready',

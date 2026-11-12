@@ -90,7 +90,7 @@ func (m *Matcher) AddToQueue(client types.ClientInterface) {
 }
 
 // RemoveFromQueue 从匹配队列移除
-func (m *Matcher) RemoveFromQueue(client types.ClientInterface) {
+func (m *Matcher) RemoveFromQueue(client types.ClientInterface) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -101,9 +101,10 @@ func (m *Matcher) RemoveFromQueue(client types.ClientInterface) {
 			if len(m.queue) == 0 {
 				m.cancelBotFillTimer()
 			}
-			return
+			return true
 		}
 	}
+	return false
 }
 
 func (m *Matcher) startBotFillTimer() {

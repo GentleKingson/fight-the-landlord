@@ -18,9 +18,11 @@ const (
 	MsgPing      MessageType = "ping"      // 心跳 ping
 
 	// 房间操作
-	MsgCreateRoom    MessageType = "create_room"    // 创建房间
-	MsgJoinRoom      MessageType = "join_room"      // 加入房间
-	MsgLeaveRoom     MessageType = "leave_room"     // 离开房间
+	MsgCreateRoom    MessageType = "create_room" // 创建房间
+	MsgJoinRoom      MessageType = "join_room"   // 加入房间
+	MsgLeaveRoom     MessageType = "leave_room"  // 离开房间
+	MsgCancelMatch   MessageType = "cancel_match"
+	MsgMatchCanceled MessageType = "match_canceled"
 	MsgQuickMatch    MessageType = "quick_match"    // 快速匹配
 	MsgPracticeMatch MessageType = "practice_match" // 人机练习
 	MsgReady         MessageType = "ready"          // 准备就绪

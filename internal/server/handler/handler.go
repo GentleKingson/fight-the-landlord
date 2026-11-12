@@ -115,9 +115,16 @@ func (h *Handler) initHandlers() {
 		protocol.MsgReconnect: h.handleReconnect,
 
 		// 房间操作
-		protocol.MsgCreateRoom:    func(c types.ClientInterface, _ *protocol.Message) { h.handleCreateRoom(c) },
-		protocol.MsgJoinRoom:      h.handleJoinRoom,
-		protocol.MsgLeaveRoom:     func(c types.ClientInterface, _ *protocol.Message) { h.handleLeaveRoom(c) },
+		protocol.MsgCreateRoom: func(c types.ClientInterface, _ *protocol.Message) { h.handleCreateRoom(c) },
+		protocol.MsgJoinRoom:   h.handleJoinRoom,
+		protocol.MsgLeaveRoom:  func(c types.ClientInterface, _ *protocol.Message) { h.handleLeaveRoom(c) },
+		protocol.MsgCancelMatch: func(c types.ClientInterface, _ *protocol.Message) {
+			if h.matcher.RemoveFromQueue(c) {
+				c.SendMessage(codec.MustNewMessage(protocol.MsgMatchCanceled, nil))
+			} else {
+				c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeGameStarted, "匹配已进入组桌阶段，无法取消，请等待进入牌局"))
+			}
+		},
 		protocol.MsgQuickMatch:    func(c types.ClientInterface, _ *protocol.Message) { h.handleQuickMatch(c) },
 		protocol.MsgPracticeMatch: func(c types.ClientInterface, _ *protocol.Message) { h.handlePracticeMatch(c) },
 		protocol.MsgReady:         func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, true) },

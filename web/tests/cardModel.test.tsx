@@ -38,7 +38,7 @@ describe('card face model', () => {
 
   it('renders jokers without B/R corner markers', () => {
     render(<Card card={{ suit: 4, rank: 17, color: 1 }} />);
-    const joker = screen.getByRole('button', { name: '大王' });
+    const joker = screen.getByRole('img', { name: '大王' });
     expect(joker).toHaveTextContent('JOKER');
     expect(joker.querySelector('.card__joker-index')).toBeNull();
   });

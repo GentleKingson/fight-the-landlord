@@ -75,8 +75,8 @@ export function App({ demo = null }: { demo?: string | null }) {
   return (
     <div className="app-shell" data-scene={scene}>
       {collecting ? <div className="collection-notice" role="status">本服务已启用训练数据采集：记录匿名牌局、操作及胜负；不记录昵称、聊天或重连令牌。</div> : null}
-      {submissionMessage ? (
-        <div className="submission-notice" data-state={submission} role={submission === 'rejected' ? 'alert' : 'status'}>
+      {submissionMessage && !['bidding', 'playing'].includes(phase) ? (
+        <div className="submission-notice connection-toast" data-state={submission} role={submission === 'rejected' ? 'alert' : 'status'}>
           <span>{submissionMessage}</span>
           {submission !== 'pending' && submission !== 'unknown' ? (
             <button onClick={() => useAppStore.setState({ submission: 'idle', submissionMessage: '' })}>关闭提示</button>

@@ -28,11 +28,11 @@ func TestMatcher_QueueOps(t *testing.T) {
 	assert.Equal(t, 2, matcher.GetQueueLength())
 
 	// Remove c1
-	matcher.RemoveFromQueue(c1)
+	assert.True(t, matcher.RemoveFromQueue(c1))
 	assert.Equal(t, 1, matcher.GetQueueLength())
 
 	// Remove c1 again (should be no-op)
-	matcher.RemoveFromQueue(c1)
+	assert.False(t, matcher.RemoveFromQueue(c1))
 	assert.Equal(t, 1, matcher.GetQueueLength())
 
 	// Remove c2

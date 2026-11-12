@@ -34,7 +34,7 @@ it('moves the unique target after a reply, retains it after a pass and clears it
   act(() => { pass('p3'); turn('p1', true); });
   expect(target()).toBeNull();
   expect(ownCards.classList.contains('played-seat--target')).toBe(false);
-  expect(within(ownCards).getAllByRole('button')).toHaveLength(2);
+  expect(within(ownCards).getAllByRole('img')).toHaveLength(2);
   expect(screen.getByText('新一轮，请出牌')).toBeTruthy();
 });
 

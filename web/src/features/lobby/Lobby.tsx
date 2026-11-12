@@ -5,6 +5,8 @@ import { useAppStore, useChatStore } from '../../stores/appStore';
 import { Card } from '../../shared/cards/Card';
 import { Icon } from '../../shared/ui/Icon';
 import { useImeSafeEnter } from '../../shared/ui/imeSafeSubmit';
+import { RulesPanel } from '../../shared/ui/RulesPanel';
+import { useLobbyRequest } from './useLobbyRequest';
 import landlordLogo from '../../assets/landlord-logo-176.webp';
 
 interface LobbyProps {
@@ -36,27 +38,29 @@ export function Lobby({ socket }: LobbyProps) {
         </div>
       </header>
 
-      {phase === 'matching' ? <MatchingPanel /> : null}
+      {phase === 'matching' ? <MatchingPanel socket={socket} /> : null}
       {phase === 'waiting' ? <RoomWaiting socket={socket} roomCode={roomCode} players={players} /> : null}
       {phase !== 'matching' && phase !== 'waiting' ? (
         panel === 'home' ? <LobbyHome socket={socket} /> : <LobbySubPanel socket={socket} panel={panel} />
       ) : null}
 
       <nav className="bottom-nav" aria-label="大厅导航">
-        <button className={panel === 'home' ? 'is-active' : ''} onClick={() => setLobbyPanel('home')}>大厅</button>
-        <button className={panel === 'leaderboard' ? 'is-active' : ''} onClick={() => { setLobbyPanel('leaderboard'); socket.send(MsgType.GetLeaderboard, { type: 'total', offset: 0, limit: 30 }); }}>
+        <button aria-current={panel === 'home' ? 'page' : undefined} className={panel === 'home' ? 'is-active' : ''} onClick={() => setLobbyPanel('home')}>大厅</button>
+        <button aria-current={panel === 'leaderboard' ? 'page' : undefined} className={panel === 'leaderboard' ? 'is-active' : ''} onClick={() => { setLobbyPanel('leaderboard'); }}>
           战绩榜
         </button>
-        <button className={panel === 'stats' ? 'is-active' : ''} onClick={() => { setLobbyPanel('stats'); socket.send(MsgType.GetStats); }}>
+        <button aria-current={panel === 'stats' ? 'page' : undefined} className={panel === 'stats' ? 'is-active' : ''} onClick={() => { setLobbyPanel('stats'); }}>
           我的战绩
         </button>
-        <button className={panel === 'chat' ? 'is-active' : ''} onClick={() => setLobbyPanel('chat')}>聊天</button>
+        <button aria-current={panel === 'chat' ? 'page' : undefined} className={panel === 'chat' ? 'is-active' : ''} onClick={() => setLobbyPanel('chat')}>聊天</button>
+      <button aria-current={panel === 'rules' ? 'page' : undefined} className={panel === 'rules' ? 'is-active' : ''} onClick={() => setLobbyPanel('rules')}>规则</button>
       </nav>
     </main>
   );
 }
 
 function LobbyHome({ socket }: LobbyProps) {
+  const { status, retry, requested } = useLobbyRequest(socket, MsgType.GetRoomList, MsgType.RoomListResult, false);
   const roomCodeInput = useAppStore((state) => state.roomCodeInput);
   const roomList = useAppStore((state) => state.roomList);
   const setRoomCodeInput = useAppStore((state) => state.setRoomCodeInput);
@@ -83,7 +87,7 @@ function LobbyHome({ socket }: LobbyProps) {
   }
 
   function refreshRooms() {
-    socket.send(MsgType.GetRoomList);
+    retry();
   }
 
   function joinListedRoom(roomCode: string) {
@@ -148,26 +152,38 @@ function LobbyHome({ socket }: LobbyProps) {
           <button className="secondary-action" onClick={refreshRooms}>刷新</button>
         </div>
         <div className="room-browser__list">
-          {roomList.length ? roomList.map((room) => (
+          {status ? <p role="status">{status}</p> : roomList.length ? roomList.map((room) => (
             <button className="room-browser__row" key={room.room_code} onClick={() => joinListedRoom(room.room_code)}>
               <span>{room.room_code}</span>
               <em>{room.player_count}/{room.max_players || 3}</em>
             </button>
-          )) : <p className="empty-text">暂无可加入房间，点击刷新查看。</p>}
+          )) : <p className="empty-text">{requested ? '当前没有可加入的房间，可创建房间邀请好友或刷新重试。' : '点击刷新查看可加入房间，也可创建房间邀请好友。'}</p>}
         </div>
       </section>
     </section>
   );
 }
 
-function MatchingPanel() {
-  return (
-    <section className="state-panel">
-      <span className="spinner spinner--large" />
-      <h2>正在寻找牌友</h2>
-      <p>系统正在为你安排一张三人牌桌。</p>
-    </section>
-  );
+function MatchingPanel({ socket }: LobbyProps) {
+  const mode = useAppStore(state => state.matchMode);
+  const cancelling = useAppStore(state => state.cancellingMatch);
+  const connected = useAppStore(state => state.connected);
+  const [started] = useState(Date.now);
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [started]);
+  return <section className="state-panel">
+    <span className="spinner spinner--large" aria-hidden="true" />
+    <h2>{mode === 'practice' ? '正在准备人机对局' : '正在匹配在线玩家'}</h2>
+    <p>已等待 {elapsed} 秒</p>
+    <p role="status">{cancelling ? '正在确认取消，请稍候…' : elapsed >= 30 ? mode === 'online' ? '等待时间较长，可取消匹配后重试或选择人机练习。' : '准备时间较长，请刷新页面恢复服务器状态。' : mode === 'practice' ? '正在安排两位电脑牌友。' : '正在寻找牌友，请稍候。'}</p>
+    {mode === 'online' ? <button className="secondary-action" disabled={!connected || cancelling} onClick={() => {
+      if (socket.send(MsgType.CancelMatch)) useAppStore.setState({ cancellingMatch: true });
+      else useAppStore.getState().setError('取消请求未发送，请连接恢复后重试');
+    }}>取消匹配</button> : elapsed >= 30 ? <p>若始终未进入牌桌，请刷新页面恢复服务器状态。</p> : null}
+  </section>;
 }
 
 function legacyCopyText(text: string): boolean {
@@ -316,7 +332,7 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
         >
           {statusMessage}
         </div>
-        <p>{players.length}/3 人已入座</p>
+        <p>{players.length}/3 人已入座 · {players.length < 3 ? `还缺 ${3 - players.length} 人` : '等待所有玩家准备'}</p>
       </div>
       <div className="seat-list">
         {Array.from({ length: 3 }, (_, index) => {
@@ -325,7 +341,7 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
             <div className={`seat-row ${player?.id === playerId ? 'is-me' : ''}`} key={index}>
               <span>{index + 1}</span>
               <strong>{player?.name || '等待加入'}</strong>
-              {player ? <em>{player.ready ? '已准备' : '等待中'}</em> : null}
+              {player ? <em>{!player.online ? '离线' : player.ready ? '已准备' : '未准备'}</em> : null}
             </div>
           );
         })}
@@ -343,36 +359,38 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
 }
 
 function LobbySubPanel({ socket, panel }: LobbyProps & { panel: string }) {
-  if (panel === 'leaderboard') return <LeaderboardPanel />;
-  if (panel === 'stats') return <StatsPanel />;
+  if (panel === 'leaderboard') return <LeaderboardPanel socket={socket} />;
+  if (panel === 'stats') return <StatsPanel socket={socket} />;
   if (panel === 'chat') return <LobbyChat socket={socket} />;
-  return <RulesPanel />;
+  return <section className="sub-panel"><h2>玩法说明</h2><RulesPanel /></section>;
 }
 
-function LeaderboardPanel() {
+function LeaderboardPanel({ socket }: LobbyProps) {
+  const { status, retry } = useLobbyRequest(socket, MsgType.GetLeaderboard, MsgType.LeaderboardResult);
   const entries = useAppStore((state) => state.leaderboard);
   return (
     <section className="sub-panel">
-      <h2>战绩榜</h2>
+      <h2>战绩榜</h2><button className="secondary-action" onClick={retry}>重新加载</button>
       <div className="ranking-list">
-        {entries.length ? entries.map((entry, index) => (
+        {status ? <p role="status">{status}</p> : entries.length ? entries.map((entry, index) => (
           <div className="ranking-row" key={`${entry.player_id}_${index}`}>
             <span>#{entry.rank || index + 1}</span>
             <strong>{entry.player_name}</strong>
             <em>{entry.score} 分</em>
           </div>
-        )) : <p className="empty-text">暂无排行榜数据</p>}
+        )) : <p className="empty-text">尚无玩家积分记录，完成对局后再来查看</p>}
       </div>
     </section>
   );
 }
 
-function StatsPanel() {
+function StatsPanel({ socket }: LobbyProps) {
+  const { status, retry } = useLobbyRequest(socket, MsgType.GetStats, MsgType.StatsResult);
   const stats = useAppStore((state) => state.stats);
   return (
     <section className="sub-panel">
-      <h2>我的战绩</h2>
-      {stats ? (
+      <h2>我的战绩</h2><button className="secondary-action" onClick={retry}>重新加载</button>
+      {status ? <p role="status">{status}</p> : stats ? (
         <div className="stats-grid">
           <Stat label="总局数" value={stats.total_games} />
           <Stat label="胜局" value={stats.wins} />
@@ -381,7 +399,7 @@ function StatsPanel() {
           <Stat label="排名" value={`#${stats.rank || '-'}`} />
           <Stat label="最高连胜" value={stats.max_win_streak} />
         </div>
-      ) : <p className="empty-text">点击底部“我的战绩”获取数据</p>}
+      ) : <p className="empty-text">你还没有对局记录，完成一局后再来查看</p>}
     </section>
   );
 }
@@ -420,16 +438,6 @@ function LobbyChat({ socket }: LobbyProps) {
         />
         <button type="submit">发送</button>
       </form>
-    </section>
-  );
-}
-
-function RulesPanel() {
-  return (
-    <section className="sub-panel rules-panel">
-      <h2>玩法说明</h2>
-      <p>地主独自对抗两名农民，任意一方率先出完手牌即可获胜。</p>
-      <p>常见牌型包括单张、对子、三张、顺子、连对、飞机、炸弹和王炸。</p>
     </section>
   );
 }

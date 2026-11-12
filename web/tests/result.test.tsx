@@ -63,7 +63,7 @@ describe('terminal table snapshot', () => {
     receive(MsgType.GameOver, result('p3'));
     render(<App />);
     const labels = () => within(screen.getByRole('region', { name: '获胜最后一手' }))
-      .getAllByRole('button').map(card => card.getAttribute('aria-label'));
+      .getAllByRole('img').map(card => card.getAttribute('aria-label'));
     expect(labels()).toEqual(['3♠', '3♥', '3♣', 'A♠', 'A♥']);
     act(() => useAppStore.getState().showSettlement());
     act(() => useAppStore.getState().reviewEndTable());
@@ -77,7 +77,7 @@ describe('terminal table snapshot', () => {
     expect(screen.queryByRole('region', { name: '终局牌桌' })).not.toBeInTheDocument();
     act(() => finish(winner));
     for (const label of ['我', '上家', '下家']) expect(screen.getByRole('region', { name: `${label}剩余手牌` })).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: '获胜最后一手' })).getByRole('button', { name: 'A♠' })).toBeDisabled();
+    expect(within(screen.getByRole('region', { name: '获胜最后一手' })).getByRole('img', { name: 'A♠' })).not.toHaveAttribute('tabindex');
     expect(screen.getByText('已出完')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '出牌' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option')).not.toBeInTheDocument();
@@ -153,8 +153,8 @@ describe('end-screen navigation', () => {
     render(<App />);
     act(() => vi.advanceTimersByTime(RESULT_ACTION_GUARD_MS));
     fireEvent.click(screen.getByRole('button', { name: '查看结算' }));
-    useAppStore.setState({ matchMode: 'practice' });
-    fireEvent.click(screen.getByRole('button', { name: '再来一局' }));
+    act(() => useAppStore.setState({ matchMode: 'practice' }));
+    fireEvent.click(screen.getByRole('button', { name: '再练一局' }));
     expect(send).toHaveBeenCalledExactlyOnceWith(MsgType.PracticeMatch);
     expect(useAppStore.getState().endSnapshot).toBeNull();
     act(() => { receive(MsgType.GameStart, { players }); vi.advanceTimersByTime(20_000); });

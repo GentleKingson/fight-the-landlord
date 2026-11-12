@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
@@ -83,4 +84,19 @@ func TestDelayedCleanupCannotRemoveReusedRoomCode(t *testing.T) {
 	require.Same(t, newGame, h.GetGameSession(newRoom.Code))
 	h.SetGameSession(oldRoom.Code, oldGame)
 	require.Same(t, newGame, h.GetGameSession(newRoom.Code))
+}
+
+func TestCancelMatchAcknowledgesOnlyQueueRemoval(t *testing.T) {
+	matcher := match.NewMatcher(match.MatcherDeps{})
+	client := testutil.NewSimpleClient("queued", "Queued")
+	h := NewHandler(HandlerDeps{Matcher: matcher})
+	matcher.AddToQueue(client)
+	h.Handle(client, codec.MustNewMessage(protocol.MsgCancelMatch, nil))
+	require.Zero(t, matcher.GetQueueLength())
+	messages := client.SentMessages()
+	require.Equal(t, protocol.MsgMatchCanceled, messages[len(messages)-1].Type)
+	// Once dequeued/reserved, cancellation must not falsely confirm success.
+	h.Handle(client, codec.MustNewMessage(protocol.MsgCancelMatch, nil))
+	messages = client.SentMessages()
+	require.Equal(t, protocol.MsgError, messages[len(messages)-1].Type)
 }

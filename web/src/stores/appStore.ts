@@ -17,6 +17,7 @@ interface ConnectionSlice {
 }
 
 interface LobbySlice {
+  cancellingMatch: boolean;
   matchMode: 'practice' | 'online';
   phase: Phase;
   roomCode: string;
@@ -154,6 +155,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   maintenance: false,
   phase: 'connecting',
   matchMode: loadMatchMode(),
+  cancellingMatch: false,
   roomCode: '',
   players: [],
   onlineCount: 0,
@@ -169,7 +171,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatInput: '',
   tableMessage: '',
 
-  setConnected: (connected) => set({ connected, ...(!connected && get().phase === 'matching' ? { phase: 'lobby' as const } : {}) }),
+  setConnected: (connected) => set({ connected, ...(!connected ? { latency: 0, cancellingMatch: false } : {}), ...(!connected && get().phase === 'matching' ? { phase: 'lobby' as const } : {}) }),
   setError: (error) => set({ error }),
   setLobbyPanel: (lobbyPanel) => set({ lobbyPanel }),
   setRoomCodeInput: (roomCodeInput) => set({ roomCodeInput }),
@@ -200,6 +202,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...(!keepResult ? { ...initialTable, players: [], roomCode: '', selectedCards: new Set<string>() } : {}),
           connected: true,
           ...(!['pending', 'unknown'].includes(state.submission) ? { submission: 'idle', submissionMessage: '' } as const : {}),
+          cancellingMatch: false,
           error: '',
           phase: keepResult ? 'game_over' : 'lobby',
           playerId: payload.player_id,
@@ -236,7 +239,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.Error: {
         const payload = message.payload as { message?: string };
-        set({ error: payload.message || '未知错误', phase: state.phase === 'matching' ? 'lobby' : state.phase });
+        set({ error: payload.message || '未知错误', cancellingMatch: false, phase: state.phase === 'matching' && !state.cancellingMatch ? 'lobby' : state.phase });
         break;
       }
       case MsgType.OnlineCount:
@@ -269,8 +272,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
         break;
       }
+      case MsgType.MatchCanceled:
+        if (state.phase === 'matching') set({ phase: 'lobby', cancellingMatch: false });
+        break;
       case MsgType.MatchFound:
-        set({ phase: 'waiting' });
+        set({ phase: 'waiting', cancellingMatch: false });
         break;
       case MsgType.GameStart: {
         const payload = message.payload as { players: PlayerInfo[] };
@@ -380,11 +386,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.StatsResult:
-        set({ stats: message.payload as StatsResultPayload, lobbyPanel: 'stats' });
+        set({ stats: message.payload as StatsResultPayload });
         break;
       case MsgType.LeaderboardResult: {
         const payload = message.payload as { type: string; entries: LeaderboardEntry[] };
-        set({ leaderboardType: payload.type, leaderboard: payload.entries ?? [], lobbyPanel: 'leaderboard' });
+        set({ leaderboardType: payload.type, leaderboard: payload.entries ?? [] });
         break;
       }
       case MsgType.RoomListResult:
