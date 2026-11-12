@@ -85,20 +85,21 @@
 @media (max-width: 700px) and (orientation: portrait) {
   .hand { height: 178px; }
   .hand .card { --h: 78px; }
+  .hand .card__index--top { left: 3px; }
   .hand__slot { left: calc(50% + var(--row-x, 0px) - 29px); }
   .hand__slot[data-row="0"] { bottom: 86px; }
   .hand__slot[data-row="1"] { bottom: 6px; }
-  .hand__slot.is-selected { transform: translateY(-14px); }
+  .hand__slot.is-selected { transform: translateY(-2px); }
 }
 
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
-  .hand { height: 138px; }
-  .hand .card { --h: 58px; }
-  .hand__slot[data-row="0"] { bottom: 66px; }
+  .hand { height: 128px; }
+  .hand .card { --h: 54px; }
+  .hand__slot[data-row="0"] { bottom: 62px; }
 }
 
 @media (orientation: landscape) and (max-height: 520px) {
-  .hand-heading { font-size: 10px; }
+  .hand-heading { display: none; }
   .hand { height: 78px; }
   .hand .card { --w: 58px; --h: 60px; border-radius: 7px; }
   .hand__slot { left: calc(50% + var(--compact-x, 0px) - 29px); bottom: 4px; }

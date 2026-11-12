@@ -67,8 +67,8 @@
 .utility-drawer header button {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-sm);
   color: #fff;
   background: rgba(255, 255, 255, .1);
@@ -139,3 +139,6 @@
     max-height: calc(100dvh - 16px);
   }
 }
+
+.utility-drawer .chat-input-row input { font-size: 16px; }
+.utility-drawer { bottom: calc(var(--keyboard-inset, 0px) + max(8px, env(safe-area-inset-bottom))); max-height: min(620px, calc(var(--visible-height, 100dvh) - 16px)); }

@@ -121,7 +121,7 @@
 
 .felt-table .played-cards__row {
   display: grid;
-  grid-template-columns: repeat(calc(var(--played-count) - 1), minmax(0, 1fr)) var(--played-card-w);
+  grid-template-columns: repeat(calc(var(--played-count) - 1), minmax(24px, 1fr)) var(--played-card-w);
   gap: 0;
   max-width: 100%;
   width: min(100%, calc((var(--played-count) - 1) * var(--played-step) + var(--played-card-w)));
@@ -181,4 +181,22 @@
   .felt-table .card--played .card__index--top { top: 3px; left: 2px; }
   .felt-table .card--played .card__index i { font-size: 7px; }
   .felt-table .card--played .card__pip { display: none; }
+}
+
+/* Keep rank lanes readable; long plays scroll within the target ring. */
+.felt-table .played-cards__row { justify-content: start; overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; }
+.played-cards__scroll-hint { flex: none; white-space: nowrap; color: #ffe08a; }
+.felt-table .card--played .card__index { font-size: 14px; }
+.felt-table .card--played .card__index--top { left: 3px; top: 3px; }
+.felt-table .card--played .card__index i { font-size: 11px; }
+.felt-table .card--played .card__pip { display: none; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .felt-table .played-cards { --played-card-w: 38px; --played-card-h: 24px; }
+  .felt-table .card--played .card__index--top { display: flex; align-items: center; gap: 2px; }
+  .felt-table .played-cards__row { grid-template-columns: repeat(calc(var(--played-count) - 1), minmax(36px, 1fr)) var(--played-card-w); }
+}
+/* On very short portrait displays, reserve the center for the current target. */
+@media (orientation: portrait) and (max-height: 540px) {
+  .felt-table:has(.played-seat--target) .played-seat:not(.played-seat--target) { display: none; }
+  .felt-table .played-seat--target { grid-column: 1 / -1; grid-row: 1; }
 }

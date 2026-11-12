@@ -55,6 +55,8 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastPointerDownIndex = useRef<number | null>(null);
   const sameCardPointerDown = useRef(false);
+  const selectionAtStart = useRef<Set<string>>(new Set());
+  const dragRects = useRef<{ index: number; rect: DOMRect }[]>([]);
   const lastHitIndexRef = useRef<number | null>(null);
   const [dragStart, setDragStart] = useState<number | null>(null);
   const [dragMoved, setDragMoved] = useState(false);
@@ -92,6 +94,9 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
   }
 
   function indexFromPoint(clientX: number, clientY: number): number {
+    if (dragStart !== null) {
+      return dragRects.current.find(({ rect }) => clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom)?.index ?? -1;
+    }
     const target = document.elementFromPoint(clientX, clientY);
     return indexFromTarget(target);
   }
@@ -111,7 +116,7 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
     const max = Math.max(dragStart, endIndex);
     const rangedKeys = keys.slice(min, max + 1);
     setDragKeys(new Set(rangedKeys));
-    onRangeSelect(Array.from(new Set([...selected, ...rangedKeys])));
+    onRangeSelect(Array.from(new Set([...selectionAtStart.current, ...rangedKeys])));
   }
 
   function selectGroup(groupIndex: number) {
@@ -200,12 +205,14 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
       aria-disabled={disabled || undefined}
       onKeyDown={handleSpatialKeyDown}
       onPointerDown={(event) => {
-        if (disabled) return;
+        if (disabled || !event.isPrimary || event.button !== 0) return;
         const index = indexFromTarget(event.target);
         if (index >= 0 && index < exposedCount) {
           setRovingFocus(index);
           sameCardPointerDown.current = lastPointerDownIndex.current === index;
           lastPointerDownIndex.current = index;
+          selectionAtStart.current = new Set(selected);
+          dragRects.current = Array.from(rootRef.current!.querySelectorAll<HTMLElement>('[data-card-index]')).map(slot => ({ index: Number(slot.dataset.cardIndex), rect: slot.getBoundingClientRect() })).reverse();
           setDragStart(index);
           setDragMoved(false);
           lastHitIndexRef.current = index;
@@ -214,13 +221,13 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
         }
       }}
       onPointerMove={(event) => {
-        if (disabled || dragStart === null) return;
+        if (disabled || !event.isPrimary || dragStart === null) return;
         event.preventDefault();
         const index = indexFromPoint(event.clientX, event.clientY);
         applyRange(index);
       }}
       onPointerUp={(event) => {
-        if (disabled) return;
+        if (disabled || !event.isPrimary) return;
         const index = indexFromPoint(event.clientX, event.clientY);
         const hitIndex = index >= 0 ? index : lastHitIndexRef.current;
         if (dragStart !== null && !dragMoved && hitIndex === dragStart) onToggle(keys[dragStart]);
@@ -234,7 +241,9 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
           // Pointer capture may already be released by the browser.
         }
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(event) => {
+        if (!event.isPrimary) return;
+        if (dragStart !== null) onRangeSelect([...selectionAtStart.current]);
         setDragStart(null);
         setDragMoved(false);
         lastHitIndexRef.current = null;
@@ -425,7 +434,9 @@ export function buildHandLayout(cards: CardInfo[], width = 280): HandCardLayout[
     const difference = Math.abs(cards.length - 2 * count);
     if (difference < best) { best = difference; splitAt = index + 1; }
   });
-  const rowGroups = [groups.slice(0, splitAt), groups.slice(splitAt)];
+  // Preserve rank groups unless that leaves a row more than two cards denser.
+  const splitIndex = best <= 2 ? groups.slice(0, splitAt).reduce((sum, group) => sum + group.cards.length, 0) : Math.ceil(cards.length / 2);
+  const rowGroups = [buildGroups(cards.slice(0, splitIndex)), buildGroups(cards.slice(splitIndex)).map(group => ({ ...group, startIndex: group.startIndex + splitIndex }))];
   const singlePositions = buildFittedPositions(groups, width, 72, 32, 8);
   const compactPositions = buildFittedPositions(groups, width, 58, 25, 5);
   const rowPositions = new Map<number, number>();
@@ -440,7 +451,7 @@ export function buildHandLayout(cards: CardInfo[], width = 280): HandCardLayout[
     const rowCards = row.flatMap((group) => group.cards);
     let cursor = 0;
     row.forEach((group, groupPosition) => {
-      const groupIndex = rowIndex === 0 ? groupPosition : splitAt + groupPosition;
+      const groupIndex = groups.findIndex(original => group.startIndex >= original.startIndex && group.startIndex < original.startIndex + original.cards.length);
       group.cards.forEach((card, groupOffset) => {
         const index = group.startIndex + groupOffset;
         items.push({
@@ -480,7 +491,7 @@ function buildGroups(cards: CardInfo[]): HandGroup[] {
 function buildFittedPositions(groups: HandGroup[], width: number, cardWidth: number, maxStep: number, groupGap: number): Map<number, number> {
   const count = groups.reduce((sum, group) => sum + group.cards.length, 0);
   const available = Math.max(0, width - cardWidth - 8);
-  const gap = Math.min(groupGap, available / Math.max(1, count * 2));
+  const gap = Math.min(groupGap, Math.max(0, available - (count - 1) * 24) / Math.max(1, groups.length - 1));
   const step = Math.min(maxStep, Math.max(0, (available - Math.max(0, groups.length - 1) * gap) / Math.max(1, count - 1)));
   return buildCenteredPositions(groups, step, gap);
 }

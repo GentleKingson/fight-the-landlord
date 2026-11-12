@@ -7,7 +7,7 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 8px;
-  padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom));
+  padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   color: var(--text-light);
   /* Let the shared page background show through; keep the felt table opaque. */
   background: transparent;
@@ -629,4 +629,18 @@
   .action-bar { width: min(100%, 620px); padding: 4px 6px; gap: 2px 6px; }
   .action-bar .primary-action, .action-bar .secondary-action { min-height: 36px; font-size: 16px; }
   .action-bar small { min-height: 14px; font-size: 10px; }
+}
+
+@media (max-width: 880px), (pointer: coarse) {
+  .table-tools .tool-button { min-width: 44px; width: 44px; min-height: 44px; padding: 4px; }
+  .table-tools .tool-button span { display: none; }
+  .action-bar .primary-action, .action-bar .secondary-action { min-height: 44px; }
+}
+@media (max-width: 360px) and (orientation: portrait) {
+  .table-brand { display: none; }
+  .table-topbar { grid-template-columns: auto auto; justify-content: space-between; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .action-bar small { display: none; }
+  .table-topbar { padding-block: 0; }
 }
