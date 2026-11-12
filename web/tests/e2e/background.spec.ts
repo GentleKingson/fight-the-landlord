@@ -135,11 +135,11 @@ test.describe('scene-specific Neo-Chinese page backgrounds', () => {
       expect(await page.locator('.table-arena').boundingBox()).toEqual(bounds);
     }
     await expect(page.getByRole('button', { name: '出牌', exact: true })).toBeInViewport({ ratio: 1 });
-    const card = page.getByLabel('手牌').getByRole('button').first();
+    const card = page.getByLabel('手牌').getByRole('option').first();
     await card.click();
-    await expect(card).toHaveAttribute('aria-pressed', 'true');
+    await expect(card).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('button', { name: '重选', exact: true }).click();
-    await expect(card).toHaveAttribute('aria-pressed', 'false');
+    await expect(card).toHaveAttribute('aria-selected', 'false');
   });
 
   test('failed background images retain readable scene fallbacks without affecting layout', async ({ page }) => {

@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEventHandler } from 'react';
+import type { CSSProperties, FocusEventHandler, KeyboardEventHandler, MouseEventHandler } from 'react';
 import type { CardInfo } from '../../protocol/types';
 import { normalizeCard, type CardSuit } from './cardModel';
 
@@ -21,51 +21,96 @@ function SuitIcon({ suit }: { suit: CardSuit }) {
 
 interface CardProps {
   card: CardInfo;
+  as?: 'button' | 'option';
   selected?: boolean;
   disabled?: boolean;
+  tabIndex?: number;
   size?: 'hand' | 'played' | 'mini' | 'action';
   style?: CSSProperties;
-  onClick?: MouseEventHandler<HTMLButtonElement>;
+  onClick?: MouseEventHandler<HTMLElement>;
+  onFocus?: FocusEventHandler<HTMLElement>;
+  onKeyDown?: KeyboardEventHandler<HTMLElement>;
+  onKeyUp?: KeyboardEventHandler<HTMLElement>;
 }
 
-export function Card({ card, selected = false, disabled = false, size = 'hand', style, onClick }: CardProps) {
+export function Card({
+  card,
+  as = 'button',
+  selected = false,
+  disabled = false,
+  tabIndex,
+  size = 'hand',
+  style,
+  onClick,
+  onFocus,
+  onKeyDown,
+  onKeyUp
+}: CardProps) {
   const face = normalizeCard(card);
+  const className = [
+    'card',
+    `card--${size}`,
+    `card--${face.color}`,
+    `card--${face.suit}`,
+    selected ? 'is-selected' : '',
+    disabled ? 'is-disabled' : '',
+    face.isJoker ? 'is-joker' : ''
+  ].filter(Boolean).join(' ');
+
+  const content = face.isJoker ? (
+    <>
+      <span className="card__joker-word" aria-hidden="true">JOKER</span>
+      <span className="card__joker-star" aria-hidden="true">{face.suitSymbol}</span>
+    </>
+  ) : (
+    <>
+      <span className="card__index card__index--top" aria-hidden="true">
+        <b>{face.rankLabel}</b>
+        <i><SuitIcon suit={face.suit} /></i>
+      </span>
+      <span className="card__pip" aria-hidden="true"><SuitIcon suit={face.suit} /></span>
+      <span className="card__index card__index--bottom" aria-hidden="true">
+        <b>{face.rankLabel}</b>
+        <i><SuitIcon suit={face.suit} /></i>
+      </span>
+    </>
+  );
+
+  if (as === 'option') {
+    return (
+      <div
+        role="option"
+        className={className}
+        style={style}
+        tabIndex={tabIndex}
+        aria-selected={selected}
+        aria-disabled={disabled || undefined}
+        aria-label={face.label}
+        onClick={onClick as MouseEventHandler<HTMLDivElement> | undefined}
+        onFocus={onFocus as FocusEventHandler<HTMLDivElement> | undefined}
+        onKeyDown={onKeyDown as KeyboardEventHandler<HTMLDivElement> | undefined}
+        onKeyUp={onKeyUp as KeyboardEventHandler<HTMLDivElement> | undefined}
+      >
+        {content}
+      </div>
+    );
+  }
 
   return (
     <button
-      className={[
-        'card',
-        `card--${size}`,
-        `card--${face.color}`,
-        `card--${face.suit}`,
-        selected ? 'is-selected' : '',
-        face.isJoker ? 'is-joker' : ''
-      ].filter(Boolean).join(' ')}
+      className={className}
       type="button"
       disabled={disabled}
+      tabIndex={tabIndex}
       style={style}
-      onClick={onClick}
+      onClick={onClick as MouseEventHandler<HTMLButtonElement> | undefined}
+      onFocus={onFocus as FocusEventHandler<HTMLButtonElement> | undefined}
+      onKeyDown={onKeyDown as KeyboardEventHandler<HTMLButtonElement> | undefined}
+      onKeyUp={onKeyUp as KeyboardEventHandler<HTMLButtonElement> | undefined}
       aria-pressed={selected}
       aria-label={face.label}
     >
-      {face.isJoker ? (
-        <>
-          <span className="card__joker-word">JOKER</span>
-          <span className="card__joker-star">{face.suitSymbol}</span>
-        </>
-      ) : (
-        <>
-          <span className="card__index card__index--top">
-            <b>{face.rankLabel}</b>
-            <i><SuitIcon suit={face.suit} /></i>
-          </span>
-          <span className="card__pip" aria-hidden="true"><SuitIcon suit={face.suit} /></span>
-          <span className="card__index card__index--bottom" aria-hidden="true">
-            <b>{face.rankLabel}</b>
-            <i><SuitIcon suit={face.suit} /></i>
-          </span>
-        </>
-      )}
+      {content}
     </button>
   );
 }

@@ -1,30 +1,25 @@
-import protobuf from 'protobufjs';
-import messageProto from '../../../internal/protocol/proto/message.proto?raw';
-import commonProto from '../../../internal/protocol/proto/common.proto?raw';
-import clientProto from '../../../internal/protocol/proto/client.proto?raw';
-import serverProto from '../../../internal/protocol/proto/server.proto?raw';
-import gameProto from '../../../internal/protocol/proto/game.proto?raw';
+import {
+  MessageType as ProtoMessageType,
+  decodeMessage as decodeProtoEnvelope,
+  encodeMessage as encodeProtoEnvelope,
+  staticMessageCodecs,
+  type StaticPayloadCodec
+} from './proto.generated';
 import type { IncomingMessage, MessageType, OutgoingPayload } from './types';
-
-const schemaSource = buildSchema([messageProto, commonProto, clientProto, serverProto, gameProto]);
-const parseRoot = new protobuf.Root();
-const root = protobuf.parse(schemaSource, parseRoot, { keepCase: true }).root;
-const Message = root.lookupType('protocol.Message');
-const MessageTypeEnum = root.lookupEnum('protocol.MessageType');
 
 const enumToType = new Map<number, string>();
 const typeToEnum = new Map<string, number>();
 
-for (const [name, value] of Object.entries(MessageTypeEnum.values)) {
+for (const [name, value] of Object.entries(ProtoMessageType)) {
   const wireName = name.replace(/^MSG_/, '').toLowerCase();
   enumToType.set(value, wireName);
   typeToEnum.set(wireName, value);
 }
 
-typeToEnum.set('maintenance_pull', MessageTypeEnum.values.MSG_MAINTENANCE_STATUS);
-typeToEnum.set('maintenance_push', MessageTypeEnum.values.MSG_MAINTENANCE);
-enumToType.set(MessageTypeEnum.values.MSG_MAINTENANCE_STATUS, 'maintenance_pull');
-enumToType.set(MessageTypeEnum.values.MSG_MAINTENANCE, 'maintenance_push');
+typeToEnum.set('maintenance_pull', ProtoMessageType.MSG_MAINTENANCE_STATUS);
+typeToEnum.set('maintenance_push', ProtoMessageType.MSG_MAINTENANCE);
+enumToType.set(ProtoMessageType.MSG_MAINTENANCE_STATUS, 'maintenance_pull');
+enumToType.set(ProtoMessageType.MSG_MAINTENANCE, 'maintenance_push');
 
 const payloadNames: Record<string, string> = {
   reconnect: 'ReconnectPayload',
@@ -64,80 +59,64 @@ const payloadNames: Record<string, string> = {
   error: 'ErrorPayload'
 };
 
-const payloadTypes = new Map<string, protobuf.Type>();
+const payloadTypes = new Map<string, StaticPayloadCodec>();
 for (const [type, name] of Object.entries(payloadNames)) {
-  payloadTypes.set(type, root.lookupType(`protocol.${name}`));
+  const codec = staticMessageCodecs[name];
+  if (codec) {
+    payloadTypes.set(type, codec);
+  }
 }
 
 const jsonPayloadTypes = new Set(['chat']);
 
 export function encodeMessage(type: MessageType | string, payload?: OutgoingPayload): Uint8Array<ArrayBufferLike> {
-  const enumValue = typeToEnum.get(type) ?? MessageTypeEnum.values.MSG_UNKNOWN;
-  const PayloadType = payloadTypes.get(type);
+  const enumValue = typeToEnum.get(type) ?? ProtoMessageType.MSG_UNKNOWN;
+  const payloadCodec = payloadTypes.get(type);
   let payloadBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
 
-  if (payload && PayloadType && !jsonPayloadTypes.has(type)) {
-    payloadBytes = PayloadType.encode(PayloadType.fromObject(payload)).finish();
+  if (payload && payloadCodec && !jsonPayloadTypes.has(type)) {
+    payloadBytes = payloadCodec.encode(payload as Record<string, unknown>);
   } else if (payload) {
     payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
   }
 
-  return Message.encode(Message.fromObject({ type: enumValue, payload: payloadBytes })).finish();
+  return encodeProtoEnvelope({ type: enumValue, payload: payloadBytes }).finish();
 }
 
 export function decodeMessage(data: ArrayBuffer | Uint8Array): IncomingMessage {
-  const buffer = data instanceof Uint8Array ? data : new Uint8Array(data);
-  const decoded = Message.decode(buffer) as unknown as { type: number; payload?: Uint8Array };
+  const buffer = ArrayBuffer.isView(data)
+    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    : new Uint8Array(data);
+  const decoded = decodeProtoEnvelope(buffer) as { type: number; payload?: Uint8Array };
   const type = enumToType.get(decoded.type) ?? 'unknown';
   const payload = decodePayload(type, decoded.payload);
   return { type, payload } as IncomingMessage;
 }
 
 function decodePayload(type: string, bytes?: Uint8Array): unknown {
-  if (!bytes || bytes.length === 0) return {};
+  const raw = bytes ?? new Uint8Array(0);
+  if (!jsonPayloadTypes.has(type)) {
+    const payloadCodec = payloadTypes.get(type);
+    if (payloadCodec) {
+      return payloadCodec.decode(raw);
+    }
+  }
+  if (raw.length === 0) return {};
   if (jsonPayloadTypes.has(type)) {
     try {
-      return JSON.parse(new TextDecoder().decode(bytes));
+      return JSON.parse(new TextDecoder().decode(raw));
     } catch {
-      const PayloadType = payloadTypes.get(type);
-      if (PayloadType) {
-        const message = PayloadType.decode(bytes);
-        return PayloadType.toObject(message, {
-          longs: Number,
-          enums: Number,
-          defaults: true,
-          arrays: true,
-          objects: true
-        });
+      const payloadCodec = payloadTypes.get(type);
+      if (payloadCodec) {
+        return payloadCodec.decode(raw);
       }
     }
   }
-  const PayloadType = payloadTypes.get(type);
-  if (PayloadType) {
-    const message = PayloadType.decode(bytes);
-    return PayloadType.toObject(message, {
-      longs: Number,
-      enums: Number,
-      defaults: true,
-      arrays: true,
-      objects: true
-    });
-  }
 
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(new TextDecoder().decode(raw));
   } catch {
-    return { _raw: Array.from(bytes) };
+    return { _raw: Array.from(raw) };
   }
 }
 
-function buildSchema(parts: string[]): string {
-  return parts
-    .join('\n')
-    .replace(/^syntax\s*=.*?;\s*$/gm, '')
-    .replace(/^package\s+protocol;\s*$/gm, '')
-    .replace(/^option\s+.*?;\s*$/gm, '')
-    .replace(/^import\s+.*?;\s*$/gm, '')
-    .replace(/^\s*$/gm, '')
-    .replace(/^/, 'syntax = "proto3";\npackage protocol;\n');
-}

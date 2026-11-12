@@ -115,7 +115,7 @@ for (const muted of [false, true]) {
       const modulePath = '/src/audio/gameAudio.ts';
       (await import(/* @vite-ignore */ modulePath)).gameAudio.setEnabled(!muted);
     }, muted);
-    await page.getByLabel('手牌', { exact: true }).getByRole('button').first().click();
+    await page.getByLabel('手牌', { exact: true }).getByRole('option').first().click();
     const play = (await page.getByRole('button', { name: '出牌', exact: true }).boundingBox())!;
     await page.mouse.move(play.x + play.width / 2, play.y + play.height / 2);
     await page.mouse.down();

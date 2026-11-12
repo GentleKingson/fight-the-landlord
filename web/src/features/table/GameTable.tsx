@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DealAnimation } from './DealAnimation';
 import { useDealPresentation } from './useDealPresentation';
 import { assignBotAvatars } from './botAvatars';
@@ -12,6 +12,7 @@ import { Card } from '../../shared/cards/Card';
 import { Hand } from '../../shared/cards/Hand';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
 import { Icon } from '../../shared/ui/Icon';
+import { useImeSafeEnter } from '../../shared/ui/imeSafeSubmit';
 import { SoundToggle } from '../../audio/SoundToggle';
 import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
 
@@ -152,7 +153,16 @@ function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: str
   const setDrawer = useAppStore((state) => state.setDrawer);
   const open = useAppStore((state) => state.drawer === drawer);
   return (
-    <button className="tool-button" onClick={() => setDrawer(open ? 'none' : drawer)} title={label} aria-label={label} aria-expanded={open}>
+    <button
+      type="button"
+      className="tool-button"
+      data-drawer={drawer}
+      onClick={() => setDrawer(open ? 'none' : drawer)}
+      title={label}
+      aria-label={label}
+      aria-expanded={open}
+      aria-controls={open ? 'table-utility-drawer' : undefined}
+    >
       <Icon name={icon} />
       <span>{label}</span>
     </button>
@@ -328,9 +338,94 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
   const setChatInput = useAppStore((state) => state.setChatInput);
   const counter = useAppStore((state) => state.cardCounter);
   const actions = useAppStore((state) => state.recentActions);
-  const open = drawer !== 'none';
+  const imeEnter = useImeSafeEnter();
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
-  if (!open) return null;
+  const open = drawer !== 'none';
+  const [renderedDrawer, setRenderedDrawer] = useState<UtilityDrawer>(drawer);
+  if (open && renderedDrawer !== drawer) {
+    setRenderedDrawer(drawer);
+  }
+  const activeDrawer = open ? drawer : renderedDrawer;
+
+  useLayoutEffect(() => {
+    const el = drawerRef.current;
+    if (open) {
+      const explicitTrigger = document.querySelector<HTMLElement>(`[data-drawer="${drawer}"]`);
+      const activeEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      if (explicitTrigger) {
+        triggerRef.current = explicitTrigger;
+      } else if (activeEl && activeEl !== document.body && !el?.contains(activeEl)) {
+        triggerRef.current = activeEl;
+      }
+
+      if (el && typeof el.showPopover === 'function') {
+        try {
+          el.showPopover();
+        } catch {
+          // Already promoted to top layer.
+        }
+      }
+      wasOpenRef.current = true;
+      closeBtnRef.current?.focus({ preventScroll: true });
+      return;
+    }
+
+    if (!wasOpenRef.current) return;
+    wasOpenRef.current = false;
+
+    if (el && typeof el.hidePopover === 'function') {
+      try {
+        el.hidePopover();
+      } catch {
+        // Already hidden.
+      }
+    }
+
+    const trigger = triggerRef.current;
+    triggerRef.current = null;
+    if (trigger && trigger.isConnected) {
+      trigger.focus({ preventScroll: true });
+    }
+
+    const animations = el && typeof el.getAnimations === 'function' ? el.getAnimations() : [];
+    if (!animations.length) {
+      setRenderedDrawer('none');
+      return;
+    }
+
+    let cancelled = false;
+    const finish = () => {
+      if (!cancelled) setRenderedDrawer('none');
+    };
+    const timer = window.setTimeout(finish, 260);
+    void Promise.allSettled(animations.map((animation) => animation.finished)).then(finish);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [drawer, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open]);
+
+  if (activeDrawer === 'none') return null;
+
+  const supportsPopover = typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.showPopover === 'function';
 
   function sendChat() {
     const content = chatInput.trim();
@@ -340,27 +435,42 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
   }
 
   return (
-    <aside className="utility-drawer is-open" aria-label={drawerTitle(drawer)}>
+    <aside
+      ref={drawerRef}
+      id="table-utility-drawer"
+      popover="manual"
+      className={`utility-drawer ${!supportsPopover && open ? 'is-open' : ''}`.trim()}
+      aria-label={drawerTitle(activeDrawer)}
+    >
       <header>
-        <strong>{drawerTitle(drawer)}</strong>
-        <button onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
+        <strong>{drawerTitle(activeDrawer)}</strong>
+        <button ref={closeBtnRef} type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
       </header>
-      {drawer === 'chat' ? (
+      {activeDrawer === 'chat' ? (
         <>
           <div className="chat-feed">
             {messages.filter((message) => message.scope === 'room').slice(-24).map((message, index) => (
               <p key={index}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
             ))}
           </div>
-          <div className="chat-input-row">
-            <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="房间聊天" onKeyDown={(event) => { if (event.key === 'Enter') sendChat(); }} />
-            <button onClick={sendChat}>发送</button>
-          </div>
+          <form className="chat-input-row" onSubmit={(event) => { event.preventDefault(); sendChat(); }}>
+            <label className="visually-hidden" htmlFor="room-chat-input">房间聊天消息</label>
+            <input
+              id="room-chat-input"
+              name="message"
+              enterKeyHint="send"
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              {...imeEnter}
+              placeholder="房间聊天"
+            />
+            <button type="submit">发送</button>
+          </form>
         </>
       ) : null}
-      {drawer === 'counter' ? <CounterPanel counter={counter} /> : null}
-      {drawer === 'history' ? <HistoryPanel actions={actions} /> : null}
-      {drawer === 'rules' ? <RulesPanel /> : null}
+      {activeDrawer === 'counter' ? <CounterPanel counter={counter} /> : null}
+      {activeDrawer === 'history' ? <HistoryPanel actions={actions} /> : null}
+      {activeDrawer === 'rules' ? <RulesPanel /> : null}
     </aside>
   );
 }
