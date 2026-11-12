@@ -99,11 +99,14 @@
 }
 
 @media (orientation: landscape) and (max-height: 520px) {
-  .hand-heading { display: none; }
-  .hand { height: 78px; }
+  .hand-heading { font-size: 10px; }
+  /* Share the action feedback row without hiding the hand count. */
+  .table-screen:has(.action-bar small) .hand-heading { position: absolute; top: -21px; right: 12px; }
+  .table-screen:has(.action-bar small) .hand-heading strong { display: none; }
+  .hand { height: 68px; }
   .hand .card { --w: 58px; --h: 60px; border-radius: 7px; }
   .hand__slot { left: calc(50% + var(--compact-x, 0px) - 29px); bottom: 4px; }
-  .hand__slot.is-selected { transform: translateY(-12px); }
+  .hand__slot.is-selected { transform: translateY(-2px); }
   .hand .card__index { font-size: 12px; }
   .hand .card__index i { font-size: 11px; }
   .hand .card__pip { --pip-size: 26px; }

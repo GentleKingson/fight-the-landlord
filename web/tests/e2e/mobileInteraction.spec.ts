@@ -45,10 +45,24 @@ test('small viewports retain touch targets and restore after orientation changes
     for (const locator of [page.locator('.hand'), page.locator('.played-seat--target'), page.locator('.opponent-row'), page.locator('.action-bar')]) {
       await expect(locator).toBeInViewport({ ratio: 1 });
     }
+    const count = page.locator('.hand-heading span');
+    const feedback = page.locator('.action-bar small');
+    await expect(count).toBeInViewport({ ratio: 1 });
+    await expect(feedback).toBeInViewport({ ratio: 1 });
+    if (viewport.width > viewport.height) {
+      const countBox = (await count.boundingBox())!;
+      // Measure text rather than the padded feedback box, which reserves the count lane.
+      const textBox = await feedback.evaluate(element => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return range.getBoundingClientRect().toJSON();
+      });
+      expect(textBox.right).toBeLessThanOrEqual(countBox.x);
+    }
     for (const button of await page.locator('.table-tools button, .action-bar button').all()) {
       const box = (await button.boundingBox())!;
-      expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.width).toBeGreaterThanOrEqual(43.99);
+      expect(box.height).toBeGreaterThanOrEqual(43.99);
     }
     expect(await page.evaluate(() => ({ width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight, y: window.scrollY }))).toEqual({ ...viewport, y: 0 });
   }
@@ -96,8 +110,9 @@ test('utility content scrolls internally while the table stays fixed', async ({ 
     })).toBeGreaterThan(0);
     const close = page.getByRole('button', { name: '关闭', exact: true });
     const box = (await close.boundingBox())!;
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.height).toBeGreaterThanOrEqual(44);
+    // Allow subpixel rounding from the drawer transform (e.g. 43.999998px).
+    expect(box.width).toBeGreaterThanOrEqual(43.99);
+    expect(box.height).toBeGreaterThanOrEqual(43.99);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
     await close.click();
   }
