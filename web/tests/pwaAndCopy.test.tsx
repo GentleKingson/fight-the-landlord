@@ -52,7 +52,7 @@ describe('RoomWaiting copy and share controls', () => {
       players: [{ id: 'p1', name: '青竹', seat: 0, ready: false, is_landlord: false, online: true, cards_count: 0 }]
     });
 
-    render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
+    render(<Lobby socket={{ subscribe: () => () => {}, send: vi.fn() } as unknown as GameSocket} />);
 
     expect(screen.queryByRole('button', { name: '分享房间号' })).toBeNull();
 
@@ -101,7 +101,7 @@ describe('RoomWaiting copy and share controls', () => {
       players: []
     });
 
-    render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
+    render(<Lobby socket={{ subscribe: () => () => {}, send: vi.fn() } as unknown as GameSocket} />);
     const copyBtn = screen.getByRole('button', { name: '复制房间号' });
 
     await act(async () => {
@@ -130,7 +130,7 @@ describe('RoomWaiting copy and share controls', () => {
       players: []
     });
 
-    render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
+    render(<Lobby socket={{ subscribe: () => () => {}, send: vi.fn() } as unknown as GameSocket} />);
     const shareBtn = screen.getByRole('button', { name: '分享房间号' });
     const liveStatus = screen.getByRole('status');
 

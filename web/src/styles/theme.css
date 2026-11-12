@@ -396,7 +396,7 @@
   box-shadow: 0 0 0 2px rgba(255, 203, 71, .2), 0 0 26px rgba(255, 196, 70, .25), 0 10px 30px rgba(0, 0, 0, .3);
 }
 
-.turn-banner.is-mine time {
+.turn-banner.is-mine.is-urgent time {
   background: radial-gradient(circle at 35% 30%, #ff8a6e, #c8352e 70%);
   animation: turn-timer-pulse 1.4s ease-in-out infinite;
 }
@@ -615,5 +615,68 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .turn-banner.is-mine time { animation: none; }
+  .turn-banner.is-mine.is-urgent time { animation: none; }
+}
+
+/* Live game information takes priority over decorative borders. */
+.player-badge .cards-warning {
+  display: block;
+  color: #fff5df;
+  background: #822b22;
+  border: 2px solid #ffc77d;
+  border-radius: 6px;
+  padding: 2px 5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.cards-warning b { font-size: 1.25em; }
+.player-badge .cards-remaining { color: #f5ecd8; }
+.player-badge .cards-remaining b { font-size: 1.15em; }
+.player-badge strong, .player-badge span, .turn-banner, .action-bar, .table-network { font-family: var(--font-sans); }
+.table-network.is-offline { color: #ffe2ba; }
+.table-network.is-offline .network-dot { background: #eb8c58; box-shadow: none; }
+.played-seat:not(.played-seat--target) .played-cards__meta { color: #dfebe4; background: #163d30; }
+.played-seat--target .played-cards__row { outline-width: 3px; box-shadow: 0 0 14px #ffe28e55; }
+.turn-banner.is-urgent time { border-color: #fff2c9; }
+.tool-button, .bottom-cards, .entry-tile { border-color: rgba(216, 231, 220, .22); }
+.counter-grid .is-zero { background: transparent; color: #a7b7ae; border: 1px dashed #778b80; }
+.counter-grid .is-zero strong { color: inherit; }
+.counter-note { color: #e1e9e3; font-size: 13px; line-height: 1.6; }
+.utility-drawer > div:has(.counter-grid) { min-height: 0; overflow: auto; }
+.history-list > div { grid-template-columns: auto 1fr; }
+.history-cards { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 3px; width: 100%; }
+.history-cards .card { flex: none; }
+.rules-panel { line-height: 1.7; color: #ecf2ec; }
+.lobby-screen > .rules-panel { overflow: auto; min-height: 0; background: #102c23; padding: 16px; border-radius: 12px; }
+.action-bar small { height: 16px; min-height: 16px; line-height: 16px; }
+.result-heading h1, .result-screen[data-outcome="defeat"] .result-heading h1 {
+  background: none; color: #ffebae; -webkit-text-fill-color: currentColor;
+}
+.action-bar small { color: #e8ede9; }
+.action-bar small.is-warning { color: #ffe1b1; }
+@media (max-width: 880px) {
+  .player-badge .player-avatar { box-shadow: none; }
+  .table-tools { gap: 3px; }
+}
+
+@media (max-width: 360px) and (orientation: portrait) {
+  .player-badge .player-avatar { display: none; }
+  .player-badge { width: 100%; }
+  .table-brand__logo { display: none; }
+}
+
+@media (max-width: 600px) and (orientation: portrait), (orientation: landscape) and (max-height: 520px) {
+  .player-identity { display: flex; align-items: baseline; gap: 4px; }
+  .player-identity span { flex: none; margin-top: 0; }
+  .player-info { min-width: 0; }
+  .player-badge { padding-block: 3px; }
+  .player-badge .cards-warning { padding: 1px 3px; border-width: 1px; }
+}
+@media (max-width: 600px) and (max-height: 600px) and (orientation: portrait) {
+  .turn-banner { padding-block: 2px; }
+  .player-badge { padding-block: 2px; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .table-screen, .table-arena { gap: 2px; }
+  .action-bar small { height: 14px; min-height: 14px; line-height: 14px; }
 }

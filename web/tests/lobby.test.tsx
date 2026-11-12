@@ -10,7 +10,7 @@ afterEach(cleanup);
 
 it.each(['lobby', 'matching', 'waiting'] as const)('shows the brand image beside the title while %s', (phase) => {
   useAppStore.setState({ phase, lobbyPanel: 'home', players: [] });
-  const { container } = render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  const { container } = render(<Lobby socket={{ subscribe: () => () => {}, send: vi.fn() } as unknown as GameSocket} />);
   const logo = container.querySelector<HTMLImageElement>('.lobby-header .brand-mark');
 
   expect(logo?.tagName).toBe('IMG');
@@ -41,7 +41,7 @@ it('shows a vacant middle seat without duplicating the third player', () => {
     { id: 'a', name: 'A', seat: 0, ready: false, is_landlord: false, online: true, cards_count: 0 },
     { id: 'c', name: 'C', seat: 2, ready: false, is_landlord: false, online: true, cards_count: 0 }
   ] });
-  render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  render(<Lobby socket={{ subscribe: () => () => {}, send: vi.fn() } as unknown as GameSocket} />);
   expect(screen.getAllByText('C')).toHaveLength(1);
   expect(screen.getAllByText('等待加入')).toHaveLength(1);
 });

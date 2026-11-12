@@ -76,6 +76,10 @@ export function Card({
     </>
   );
 
+  if (as !== 'option' && !onClick && !onKeyDown) {
+    return <div className={className} style={style} role="img" aria-label={face.label}>{content}</div>;
+  }
+
   if (as === 'option') {
     return (
       <div

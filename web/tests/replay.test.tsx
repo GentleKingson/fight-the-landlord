@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { GameResult } from '../src/features/table/GameResult';
 import { loadMatchMode, useAppStore } from '../src/stores/appStore';
@@ -9,7 +9,7 @@ afterEach(cleanup);
 
 it('replays practice after reloading and reconnecting, then allows switching to online', () => {
   sessionStorage.clear();
-  useAppStore.setState({ matchMode: 'online' });
+  act(() => useAppStore.setState({ matchMode: 'online' }));
   useAppStore.setState({ matchMode: 'practice' });
   const restoredMode = loadMatchMode();
   expect(restoredMode).toBe('practice');
@@ -18,11 +18,11 @@ it('replays practice after reloading and reconnecting, then allows switching to 
   useAppStore.getState().handleMessage({ type: MsgType.GameOver, payload: { winner_name: 'p1' } });
   const send = vi.fn().mockReturnValue(true);
   render(<GameResult socket={{ send } as unknown as GameSocket} />);
-  fireEvent.click(screen.getByRole('button', { name: '再来一局' }));
+  fireEvent.click(screen.getByRole('button', { name: '再练一局' }));
   expect(send).toHaveBeenLastCalledWith(MsgType.PracticeMatch);
-  useAppStore.setState({ matchMode: 'online', phase: 'game_over' });
+  act(() => useAppStore.setState({ matchMode: 'online', phase: 'game_over' }));
   expect(loadMatchMode()).toBe('online');
-  fireEvent.click(screen.getByRole('button', { name: '再来一局' }));
+  fireEvent.click(screen.getByRole('button', { name: '重新匹配' }));
   expect(send).toHaveBeenLastCalledWith(MsgType.QuickMatch);
 });
 
@@ -30,7 +30,7 @@ it('replays practice after reloading and reconnecting, then allows switching to 
 it('keeps the result available when replay matching fails', () => {
   useAppStore.setState({ phase: 'game_over', error: '' });
   render(<GameResult socket={{ send: vi.fn().mockReturnValue(false) } as unknown as GameSocket} />);
-  fireEvent.click(screen.getByRole('button', { name: '再来一局' }));
+  fireEvent.click(screen.getByRole('button', { name: /再练一局|重新匹配/ }));
   expect(useAppStore.getState().phase).toBe('game_over');
   expect(useAppStore.getState().error).toContain('匹配请求发送失败');
 });

@@ -55,6 +55,8 @@ var stringToProtoMap = map[string]pb.MessageType{
 	"maintenance":            pb.MessageType_MSG_MAINTENANCE,
 	"error":                  pb.MessageType_MSG_ERROR,
 	"practice_match":         pb.MessageType_MSG_PRACTICE_MATCH,
+	"cancel_match":           pb.MessageType_MSG_CANCEL_MATCH,
+	"match_cancelled":        pb.MessageType_MSG_MATCH_CANCELLED,
 }
 
 // protoToStringMap protobuf 枚举到字符串的映射表
@@ -106,6 +108,8 @@ var protoToStringMap = map[pb.MessageType]string{
 	pb.MessageType_MSG_MAINTENANCE:            "maintenance",
 	pb.MessageType_MSG_ERROR:                  "error",
 	pb.MessageType_MSG_PRACTICE_MATCH:         "practice_match",
+	pb.MessageType_MSG_CANCEL_MATCH:           "cancel_match",
+	pb.MessageType_MSG_MATCH_CANCELLED:        "match_cancelled",
 }
 
 // StringToProtoMessageType 字符串消息类型转 protobuf 枚举

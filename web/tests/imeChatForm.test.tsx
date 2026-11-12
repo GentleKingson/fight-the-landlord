@@ -23,7 +23,7 @@ describe('IME-safe chat and room-code forms', () => {
   it('suppresses Enter submission during IME composition and Safari 229 fallback in lobby chat, then submits once confirmed', () => {
     const send = vi.fn().mockReturnValue(true);
     useAppStore.setState({ phase: 'lobby', lobbyPanel: 'chat', chatInput: 'nihao' });
-    render(<Lobby socket={{ send } as unknown as GameSocket} />);
+    render(<Lobby socket={{ subscribe: () => () => {}, send } as unknown as GameSocket} />);
 
     const input = screen.getByLabelText('大厅聊天消息') as HTMLInputElement;
     const submitButton = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
@@ -62,7 +62,7 @@ describe('IME-safe chat and room-code forms', () => {
       drawer: 'chat',
       chatInput: '快点'
     });
-    render(<GameTable socket={{ send } as unknown as GameSocket} />);
+    render(<GameTable socket={{ subscribe: () => () => {}, send } as unknown as GameSocket} />);
 
     const input = screen.getByLabelText('房间聊天消息') as HTMLInputElement;
     const submitButton = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
@@ -83,7 +83,7 @@ describe('IME-safe chat and room-code forms', () => {
   it('submits room code via form with enterKeyHint="go" and autoComplete="off"', () => {
     const send = vi.fn().mockReturnValue(true);
     useAppStore.setState({ phase: 'lobby', lobbyPanel: 'home', roomCodeInput: '654321', error: '' });
-    render(<Lobby socket={{ send } as unknown as GameSocket} />);
+    render(<Lobby socket={{ subscribe: () => () => {}, send } as unknown as GameSocket} />);
 
     const input = screen.getByLabelText('加入房间') as HTMLInputElement;
     const submitButton = screen.getByRole('button', { name: '加入' }) as HTMLButtonElement;

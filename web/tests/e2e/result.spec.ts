@@ -41,7 +41,7 @@ for (const winner of ['p1', 'p2', 'p3']) {
     await expect(settle).toBeInViewport();
     await expect(page.getByRole('button', { name: '出牌', exact: true })).toHaveCount(0);
     await expect(board.locator('.card')).toHaveCount(54);
-    expect(await board.locator('.card').evaluateAll(cards => cards.every(card => (card as HTMLButtonElement).disabled))).toBe(true);
+    expect(await board.locator('.card').evaluateAll(cards => cards.every(card => card.getAttribute('role') === 'img' && (card as HTMLElement).tabIndex === -1))).toBe(true);
 
     for (const label of ['获胜最后一手', '上家剩余手牌', '下家剩余手牌', '我剩余手牌']) {
       const section = page.getByRole('region', { name: label });
@@ -93,7 +93,7 @@ test('auto settlement and keyboard review work without restarting the timer', as
   const review = page.getByRole('button', { name: '查看本局牌面' });
   await expect(review).toBeVisible();
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: '再来一局' })).toBeFocused();
+  await expect(page.getByRole('button', { name: '重新匹配' })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(review).toBeFocused();
   await page.keyboard.press('Enter');

@@ -121,7 +121,7 @@
   overscroll-behavior: contain;
 }
 
-.history-list div {
+.history-list > div {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { RulesPanel } from '../../shared/ui/RulesPanel';
 import { DealAnimation } from './DealAnimation';
 import { useDealPresentation } from './useDealPresentation';
 import { assignBotAvatars } from './botAvatars';
@@ -39,6 +40,7 @@ export function GameTable({ socket }: GameTableProps) {
   const seatActions = useAppStore((state) => state.seatActions);
   const multiplier = useAppStore((state) => state.multiplier);
   const roomCode = useAppStore((state) => state.roomCode);
+  const connected = useAppStore((state) => state.connected);
   const latency = useAppStore((state) => state.latency);
   const drawer = useAppStore((state) => state.drawer);
   const setDrawer = useAppStore((state) => state.setDrawer);
@@ -59,15 +61,16 @@ export function GameTable({ socket }: GameTableProps) {
           <span>底分 3</span>
           <strong>倍数 x{multiplier || 1}</strong>
         </div>
-        <div className="table-network">
+        <div className={`table-network ${connected ? '' : 'is-offline'}`} role="status">
           <span className="network-dot" />
-          <span>{latency ? `${latency}ms` : '在线'}</span>
+          <span>{!connected ? '连接中断' : latency ? `${latency}ms` : '已连接'}</span>
         </div>
         <div className="table-tools">
           <SoundToggle />
           <ToolButton drawer="counter" label="记牌器" icon="counter" />
           <ToolButton drawer="chat" label="聊天" icon="chat" />
           <ToolButton drawer="history" label="历史" icon="history" />
+          <ToolButton drawer="rules" label="规则" icon="rules" />
         </div>
       </header>
 
@@ -101,7 +104,7 @@ export function GameTable({ socket }: GameTableProps) {
       <section className="hand-zone">
         <div className="hand-heading">
           <strong>{seats.me?.name || '我'} · {phase === 'dealing' || phase === 'bidding' ? '等待定地主' : seats.me?.is_landlord ? '地主' : '农民'}</strong>
-          <span>手牌 {presentation.visibleCount} 张</span>
+          <span className={phase === 'playing' && hand.length <= 2 ? 'cards-warning' : undefined}>{phase === 'playing' && hand.length <= 2 ? '⚠ ' : ''}手牌 {presentation.visibleCount} 张</span>
         </div>
         <Hand
           cards={hand}
@@ -181,13 +184,17 @@ function SeatPanel({ player, avatarSrc, side, active, action }: { player?: Playe
 }
 
 function PlayerBadge({ player, avatarSrc, active, action }: { player: PlayerInfo; avatarSrc?: string; active: boolean; action?: SeatAction }) {
+  const phase = useAppStore(state => state.phase);
+  const pendingRole = phase === 'dealing' || phase === 'bidding';
+  const low = phase === 'playing' && player.cards_count > 0 && player.cards_count <= 2;
   const actionLabel = action?.type === 'bid' ? action.label : action?.type === 'pass' ? '不出' : '';
   return (
     <div className={`player-badge ${active ? 'is-active' : ''} ${player.is_landlord ? 'is-landlord' : ''}`}>
       <PlayerAvatar name={player.name} src={avatarSrc} />
-      <div>
-        <strong title={player.name}>{player.name}</strong>
-        <span>{player.is_landlord ? '地主' : '农民'} · 剩余 {player.cards_count || 0}</span>
+      <div className="player-info">
+        <div className="player-identity"><strong title={player.name}>{player.name}</strong>
+        <span>{pendingRole ? '身份待定' : player.is_landlord ? '地主' : '农民'}{active ? ' · 行动中' : ''}</span></div>
+        <span className={low ? 'cards-warning' : 'cards-remaining'} role={low ? 'status' : undefined}>{low ? '⚠ ' : ''}剩余 <b>{player.cards_count || 0}</b> 张</span>
       </div>
       {actionLabel ? <em className="player-action" title={actionLabel}>{actionLabel}</em> : null}
       {!player.online ? <em className="player-offline">离线</em> : null}
@@ -232,7 +239,7 @@ function TurnBanner() {
     : '出牌阶段';
 
   return (
-    <div className={`turn-banner ${isMe ? 'is-mine' : ''}`}>
+    <div className={`turn-banner ${isMe ? 'is-mine' : ''} ${isMe && remaining > 0 && remaining <= 5 ? 'is-urgent' : ''}`}>
       <div className="turn-banner__copy" role="status" aria-atomic="true">
         <strong>{phase === 'dealing' ? '正在发牌' : title}</strong>
         <span className={phase === 'playing' ? 'turn-banner__play-hint' : undefined}>{phase === 'dealing' ? '发牌结束后开始叫地主' : subtitle}</span>
@@ -320,6 +327,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
             <button className="secondary-action secondary-action--muted" disabled={blocked} onClick={() => socket.send(MsgType.Bid, { bid: false, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '不抢' : '不叫'}</button>
           </>
         ) : <span>等待其他玩家{isGrabTurn ? '抢地主' : '叫地主'}...</span>}
+        <ActionSummary selectedCount={0} summary="" />
       </section>
     );
   }
@@ -335,13 +343,15 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   );
 }
 
-function ActionSummary({ selectedCount, summary, reason }: { selectedCount: number; summary: string; reason: string }) {
+function ActionSummary({ selectedCount, summary, reason }: { selectedCount: number; summary: string; reason?: string }) {
   const tableMessage = useAppStore((state) => state.tableMessage);
+  const submissionMessage = useAppStore(state => state.submissionMessage);
+  const phase = useAppStore(state => state.phase);
   return (
-    <small id="play-action-summary" role="status" className={reason || tableMessage ? 'is-warning' : ''}>
+    <small id="play-action-summary" role="status" aria-live="polite" aria-atomic="true" className={reason || tableMessage ? 'is-warning' : ''}>
       {reason ? <span>{reason}</span> : null}
-      {reason && tableMessage ? ' · ' : null}
-      {tableMessage ? <span>{tableMessage}</span> : !reason ? (selectedCount ? `已选 ${selectedCount} 张 · ${summary}` : '选择手牌后出牌') : null}
+      {reason && (tableMessage || submissionMessage) ? ' · ' : null}
+      {tableMessage ? <span>{tableMessage}</span> : submissionMessage ? <span>{submissionMessage}</span> : !reason ? (phase === 'bidding' ? '请选择叫抢操作' : selectedCount ? `已选 ${selectedCount} 张 · ${summary}` : '选择手牌后出牌') : null}
     </small>
   );
 }
@@ -492,13 +502,16 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
 function CounterPanel({ counter }: { counter: Record<number, number> }) {
   if (!Object.keys(counter).length) return <p role="status">重连后缺少完整出牌记录，本局记牌器不可用。下一局将自动恢复。</p>;
   return (
+    <div>
+      <p className="counter-note">数字为你手牌以外尚未打出的张数；包含对手手牌及尚未归属的底牌，不含你的手牌。</p>
     <div className="counter-grid">
       {Object.entries(counter).map(([rank, count]) => (
-        <div key={rank}>
+        <div key={rank} className={count === 0 ? 'is-zero' : undefined}>
           <span>{rankName(Number(rank))}</span>
           <strong>{count}</strong>
         </div>
       ))}
+    </div>
     </div>
   );
 }
@@ -510,17 +523,9 @@ function HistoryPanel({ actions }: { actions: TableAction[] }) {
         <div key={index}>
           <span>{action.player_name || '系统'}</span>
           <strong>{action.label || (action.type === 'pass' ? '不出' : action.hand_type || '出牌')}</strong>
+          {action.cards?.length ? <div className="history-cards">{action.cards.map((card, i) => <Card key={i} card={card} size="mini" />)}</div> : null}
         </div>
       )) : <p className="empty-text">暂无动作</p>}
-    </div>
-  );
-}
-
-function RulesPanel() {
-  return (
-    <div className="rules-panel">
-      <p>新一轮开始必须出牌；跟牌时需要大过上一手。</p>
-      <p>炸弹可以压大多数牌型，王炸最大。</p>
     </div>
   );
 }

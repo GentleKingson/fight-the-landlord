@@ -47,7 +47,7 @@ describe('played-card display order', () => {
     expect(new Set(sorted)).toEqual(new Set(source));
 
     render(<PlayedCards cards={source} handType={type} />);
-    expect(screen.getAllByRole('button').map(card => card.getAttribute('aria-label'))).toEqual(sorted.map(cardLabel));
+    expect(screen.getAllByRole('img').map(card => card.getAttribute('aria-label'))).toEqual(sorted.map(cardLabel));
   });
 
   it('handles an empty play', () => {
