@@ -48,7 +48,7 @@ it.each(['bidding', 'game_over'] as const)('does not mark retained cards during 
 it('announces the target rather than stale bidding text and excludes the timer from announcements', () => {
   useAppStore.setState({ recentActions: [{ type: 'bid', player_id: 'p2', player_name: '山月', label: '叫地主' }] });
   renderTable();
-  const status = screen.getByText('跟牌目标：松风').closest('[role="status"]')!;
+  const status = screen.getByText('跟牌目标：松风').closest<HTMLElement>('[role="status"]')!;
   expect(status).not.toBeNull();
   expect(within(status).getByText('跟牌目标：松风')).toBeTruthy();
   expect(status.querySelector('time')).toBeNull();
