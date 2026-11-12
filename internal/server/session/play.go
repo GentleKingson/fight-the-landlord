@@ -21,7 +21,7 @@ func (gs *GameSession) HandlePlayCardsTurn(playerID string, cards []protocol.Car
 	if gs.store != nil && (token == "" || token != gs.playToken) {
 		return apperrors.ErrNotYourTurn
 	}
-	return gs.handlePlayCardsLocked(playerID, cards, "")
+	return gs.submitAction(playerID, token, func() error { return gs.handlePlayCardsLocked(playerID, cards, "") })
 }
 
 func (gs *GameSession) HandlePassTurn(playerID, token string) error {
@@ -30,7 +30,7 @@ func (gs *GameSession) HandlePassTurn(playerID, token string) error {
 	if gs.store != nil && (token == "" || token != gs.playToken) {
 		return apperrors.ErrNotYourTurn
 	}
-	return gs.handlePassLocked(playerID, "")
+	return gs.submitAction(playerID, token, func() error { return gs.handlePassLocked(playerID, "") })
 }
 
 func (gs *GameSession) HandlePlayCards(playerID string, cardInfos []protocol.CardInfo) error {
@@ -105,7 +105,7 @@ func (gs *GameSession) handlePlayCardsLocked(playerID string, cardInfos []protoc
 	gs.publicPlays = append(gs.publicPlays, protocol.PublicPlay{Type: "play", PlayerID: playerID, PlayerName: currentPlayer.Name, Cards: convert.CardsToInfos(sortedCards), HandType: handToPlay.Type.String(), NewTrick: isNewRound})
 	// 广播出牌信息
 	gs.broadcast(codec.MustNewMessage(protocol.MsgCardPlayed, protocol.CardPlayedPayload{
-		PlayerID:   playerID,
+		ActionToken: gs.submittingToken, PlayerID: playerID,
 		PlayerName: currentPlayer.Name,
 		Cards:      convert.CardsToInfos(sortedCards), // 使用排序后的牌
 		CardsLeft:  len(currentPlayer.Hand),
@@ -161,7 +161,7 @@ func (gs *GameSession) handlePassLocked(playerID, source string) error {
 	gs.publicPlays = append(gs.publicPlays, protocol.PublicPlay{Type: "pass", PlayerID: playerID, PlayerName: currentPlayer.Name})
 	// 广播不出
 	gs.broadcast(codec.MustNewMessage(protocol.MsgPlayerPass, protocol.PlayerPassPayload{
-		PlayerID:   playerID,
+		ActionToken: gs.submittingToken, PlayerID: playerID,
 		PlayerName: currentPlayer.Name,
 	}))
 
@@ -228,12 +228,13 @@ func (gs *GameSession) notifyPlayTurn() {
 		canBeat = rule.CanBeatWithHand(player.Hand, gs.lastPlayedHand)
 	}
 
+	gs.startPlayTimer()
 	gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+		ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
 		TurnToken: gs.playToken,
 		PlayerID:  player.ID,
 		Timeout:   gs.gameConfig.TurnTimeout,
 		MustPlay:  mustPlay,
 		CanBeat:   canBeat,
 	}))
-	gs.startPlayTimer()
 }

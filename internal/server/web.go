@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
 )
@@ -54,6 +55,9 @@ func (s *Server) routes() http.Handler {
 			}
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Cache-Control", "no-cache")
+			if existingHashedAsset(s.config.Server.WebDir, r.URL.Path) {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
 			files.ServeHTTP(w, r)
 		}))
 	}
@@ -63,4 +67,19 @@ func (s *Server) routes() http.Handler {
 func isWebAsset(path string) bool {
 	// Vite produces hashed files directly under /assets.
 	return filepath.Dir(path) == "/assets" && filepath.Ext(path) != ""
+}
+
+var hashedWebAsset = regexp.MustCompile(`^/assets/[^/]+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$`)
+
+func existingHashedAsset(dir, path string) bool {
+	if !hashedWebAsset.MatchString(path) {
+		return false
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = root.Close() }()
+	info, err := root.Stat(path[1:])
+	return err == nil && !info.IsDir()
 }

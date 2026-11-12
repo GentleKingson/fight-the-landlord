@@ -20,6 +20,7 @@ type SnapshotPlayer struct {
 
 // Snapshot is the private, versioned authority. Never use it as a client DTO.
 type Snapshot struct {
+	ActionReceipts                                                    map[string]string
 	Players                                                           []SnapshotPlayer
 	State                                                             GameState
 	Config                                                            config.GameConfig
@@ -55,7 +56,8 @@ func (gs *GameSession) snapshotLocked() Snapshot {
 		players[i] = SnapshotPlayer{GamePlayer: *p, IsBot: gs.room.Players[p.ID].Client.IsBot()}
 	}
 	return Snapshot{
-		Players: players, State: gs.state, Config: gs.gameConfig, CreatedAt: gs.room.CreatedAt,
+		ActionReceipts: gs.actionReceipts,
+		Players:        players, State: gs.state, Config: gs.gameConfig, CreatedAt: gs.room.CreatedAt,
 		AllOfflineAt: gs.allOfflineAt, EndedAt: gs.endedAt,
 		Deck: gs.deck, BottomCards: gs.bottomCards, PublicPlays: gs.publicPlays, Bids: gs.bidHistory, LastResult: result,
 		CurrentBidder: gs.currentBidder, LandlordCaller: gs.landlordCaller, LandlordCandidate: gs.landlordCandidate,
@@ -71,6 +73,7 @@ func (gs *GameSession) snapshotLocked() Snapshot {
 }
 
 func (gs *GameSession) loadSnapshot(s Snapshot) {
+	gs.actionReceipts = s.ActionReceipts
 	gs.players = make([]*GamePlayer, len(s.Players))
 	for i := range s.Players {
 		gs.players[i] = &s.Players[i].GamePlayer

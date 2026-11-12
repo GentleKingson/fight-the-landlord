@@ -88,7 +88,8 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 		plays[i].Cards = append([]protocol.CardInfo{}, p.Cards...)
 	}
 	return &protocol.GameStateDTO{
-		GameID: gs.gameID, StateVersion: gs.revision, TurnToken: gs.playToken,
+		LastActionToken: gs.actionReceipts[playerID],
+		GameID:          gs.gameID, StateVersion: gs.revision, TurnToken: gs.playToken,
 		Multiplier: max(gs.bidMultiplier, 1) << gs.bombCount, PublicPlays: plays,
 		TurnDeadline: deadline, TurnPaused: paused, LastHandType: lastType,
 		DealID:       gs.dealID,
@@ -162,6 +163,7 @@ func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 	case GameStateBidding:
 		player := gs.players[gs.currentBidder]
 		client.SendMessage(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
+			ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
 			BidToken:   gs.bidToken,
 			PlayerID:   player.ID,
 			Timeout:    gs.remainingTurnSeconds(gs.gameConfig.BidTimeout),
@@ -176,6 +178,7 @@ func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 			canBeat = rule.CanBeatWithHand(player.Hand, gs.lastPlayedHand)
 		}
 		client.SendMessage(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+			ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
 			TurnToken: gs.playToken,
 			PlayerID:  player.ID,
 			Timeout:   gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout),

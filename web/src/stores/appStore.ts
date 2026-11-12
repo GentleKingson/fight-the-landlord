@@ -1,9 +1,12 @@
+import { turnTiming, observeClock } from '../transport/clock';
 import { create } from 'zustand';
 import { MsgType, type DealTiming, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
 import { captureEndSnapshot, END_REVEAL_DURATION_MS, type EndSnapshot, type EndView } from './endGame';
 
 interface ConnectionSlice {
+  submission: "idle" | "pending" | "unknown" | "confirmed" | "rejected";
+  submissionMessage: string;
   connected: boolean;
   playerId: string;
   playerName: string;
@@ -51,6 +54,8 @@ interface TableSlice {
   isGrabTurn: boolean;
   timeout: number;
   timerStart: number;
+  serverDeadline: number;
+  serverTimestamp: number;
   winnerId: string;
   winnerName: string;
   winnerIsLandlord: boolean;
@@ -126,7 +131,7 @@ const initialTable: TableSlice = {
   multiplier: 1,
   isGrabTurn: false,
   timeout: 0,
-  timerStart: 0,
+  timerStart: 0, serverDeadline: 0, serverTimestamp: 0,
   winnerId: '',
   winnerName: '',
   winnerIsLandlord: false,
@@ -139,6 +144,7 @@ const initialTable: TableSlice = {
 };
 
 export const useAppStore = create<AppState>((set, get) => ({
+  submission: "idle", submissionMessage: "",
   connected: false,
   playerId: '',
   playerName: '',
@@ -220,8 +226,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.Pong: {
-        const payload = message.payload as { client_timestamp: number };
-        set({ latency: Date.now() - (payload.client_timestamp || Date.now()) });
+        const payload = message.payload as { client_timestamp: number; server_timestamp: number };
+        observeClock(payload.client_timestamp, payload.server_timestamp);
+        set({ latency: Date.now() - (payload.client_timestamp || Date.now()),
+          ...(state.serverDeadline && ['bidding', 'playing'].includes(state.phase)
+            ? turnTiming({ turn_deadline: state.serverDeadline, server_time: state.serverTimestamp }) : {}) });
         break;
       }
       case MsgType.Error: {
@@ -288,7 +297,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.BidTurn: {
         const payload = message.payload as { bid_token?: string; player_id: string; timeout: number; is_grab: boolean; multiplier: number };
-        set({ deal: null, bidToken: payload.bid_token ?? '', phase: 'bidding', currentTurn: payload.player_id, timeout: payload.timeout, isGrabTurn: payload.is_grab, multiplier: payload.multiplier || 1, timerStart: Date.now(), tableMessage: '' });
+        set({ deal: null, bidToken: payload.bid_token ?? '', phase: 'bidding', currentTurn: payload.player_id, isGrabTurn: payload.is_grab, multiplier: payload.multiplier || 1, ...turnTiming(payload), tableMessage: '' });
         break;
       }
       case MsgType.BidResult: {
@@ -320,7 +329,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayTurn: {
         const payload = message.payload as { turn_token?: string; player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
-        set({ deal: null, bidToken: '', turnToken: payload.turn_token ?? '', phase: 'playing', currentTurn: payload.player_id, timeout: payload.timeout, mustPlay: payload.must_play, canBeat: payload.can_beat, timerStart: Date.now(), tableMessage: '' });
+        set({ deal: null, bidToken: '', turnToken: payload.turn_token ?? '', phase: 'playing', currentTurn: payload.player_id, mustPlay: payload.must_play, canBeat: payload.can_beat, ...turnTiming(payload), tableMessage: '' });
         break;
       }
       case MsgType.CardPlayed: {
@@ -482,8 +491,7 @@ function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
     ...initialTable,
     roundId: dto.deal_id ?? '',
     multiplier: dto.multiplier || 1,
-    timeout: dto.turn_paused ? 0 : Math.max(0, Math.ceil(((dto.turn_deadline ?? 0) - (dto.server_time ?? 0)) / 1000)),
-    timerStart: Date.now(),
+    ...turnTiming({ ...dto, timeout: 0, turn_deadline: dto.turn_paused ? 0 : dto.turn_deadline }),
     deal: dto.phase === 'dealing' ? restoreDeal(dto) : null,
     selectedCards: new Set(),
     phase: dto.phase === 'dealing' ? 'dealing' : dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : dto.phase === 'ended' ? 'game_over' : 'lobby',

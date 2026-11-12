@@ -51,6 +51,7 @@ func TestAuthorityRoundTripAcrossStagesAndDuplicateActions(t *testing.T) {
 		require.Equal(t, gs.revision, restored.revision)
 		require.Equal(t, gs.state, restored.state)
 		require.Equal(t, gs.bidToken, restored.bidToken)
+		require.Equal(t, gs.actionReceipts, restored.actionReceipts)
 		require.Equal(t, gs.playToken, restored.playToken)
 		require.Equal(t, gs.bidHistory, restored.bidHistory)
 		require.Equal(t, gs.publicPlays, restored.publicPlays)
@@ -67,6 +68,7 @@ func TestAuthorityRoundTripAcrossStagesAndDuplicateActions(t *testing.T) {
 	token := gs.bidToken
 	require.NoError(t, gs.HandleBidTurn(caller, true, token))
 	require.Error(t, gs.HandleBidTurn(caller, true, token))
+	require.Equal(t, token, gs.actionReceipts[caller])
 	assertRestores()
 	for gs.state == GameStateBidding {
 		require.NoError(t, gs.HandleBidTurn(gs.players[gs.currentBidder].ID, false, gs.bidToken))
@@ -76,6 +78,7 @@ func TestAuthorityRoundTripAcrossStagesAndDuplicateActions(t *testing.T) {
 	cards := convert.CardsToInfos(p.Hand[:1])
 	require.NoError(t, gs.HandlePlayCardsTurn(p.ID, cards, playToken))
 	require.Error(t, gs.HandlePlayCardsTurn(p.ID, cards, playToken))
+	require.Equal(t, playToken, gs.actionReceipts[p.ID])
 	assertRestores()
 	passer := gs.players[gs.currentPlayer].ID
 	passToken := gs.playToken
@@ -154,6 +157,7 @@ func TestCrashAfterWriteBeforeAcknowledgementRecoversCommittedAction(t *testing.
 	restored, _, err := RestoreGame(record, gs.leaderboard, func(p SnapshotPlayer) types.ClientInterface { return testutil.NewSimpleClient(p.ID, p.Name) })
 	require.NoError(t, err)
 	t.Cleanup(restored.Suspend)
+	require.Equal(t, token, restored.actionReceipts[player])
 	require.Len(t, restored.bidHistory, 1)
 	require.True(t, restored.bidHistory[0].Bid)
 	require.Error(t, restored.HandleBidTurn(player, true, token), "replaying the unacknowledged request must not apply it again")
