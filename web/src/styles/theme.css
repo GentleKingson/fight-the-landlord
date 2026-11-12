@@ -660,7 +660,7 @@
 }
 
 @media (max-width: 360px) and (orientation: portrait) {
-  .player-badge .player-avatar { display: none; }
+  .player-badge .player-avatar { width: 26px; height: 26px; }
   .player-badge { width: 100%; }
   .table-brand__logo { display: none; }
 }
