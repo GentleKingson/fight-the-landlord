@@ -5,15 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "gen:proto": "pbjs -t ./scripts/pbjs-static-target.cjs --keep-case -p .. -o src/protocol/proto.generated.ts ../internal/protocol/proto/message.proto ../internal/protocol/proto/common.proto ../internal/protocol/proto/client.proto ../internal/protocol/proto/server.proto ../internal/protocol/proto/game.proto",
+    "build": "npm run gen:proto && tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
     "protobufjs": "^8.6.3",
-    "vite": "^6.3.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zustand": "^5.0.3"
@@ -25,8 +24,11 @@
     "@types/node": "^22.13.13",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.7.0",
     "jsdom": "^26.0.0",
+    "protobufjs-cli": "^2.7.1",
     "typescript": "^5.8.2",
+    "vite": "^6.4.6",
     "vitest": "^3.0.9"
   }
 }

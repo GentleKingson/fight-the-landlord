@@ -65,4 +65,16 @@ describe('protocol codec', () => {
       time: 1
     });
   });
+
+  it('preserves proto3 default values and 64-bit numeric fields with static codecs', () => {
+    const zeroOnline = decodeMessage(encodeMessage(MsgType.OnlineCount, { count: 0 }));
+    expect(zeroOnline).toEqual({ type: MsgType.OnlineCount, payload: { count: 0 } });
+
+    const ts = 1_794_481_363_471;
+    const pong = decodeMessage(encodeMessage(MsgType.Pong, { client_timestamp: ts - 25, server_timestamp: ts }));
+    expect(pong).toEqual({
+      type: MsgType.Pong,
+      payload: { client_timestamp: ts - 25, server_timestamp: ts }
+    });
+  });
 });
