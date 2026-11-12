@@ -34,7 +34,11 @@ export class GameSocket {
     document.addEventListener('visibilitychange', this.wake);
     this.ready = false;
     resetClock();
-    try { this.pending = JSON.parse(sessionStorage.getItem('ddz_pending_action') || 'null'); } catch { this.pending = null; }
+    // Storage only restores a fresh page. A reconnect must retain the in-memory
+    // submission even when storage was unavailable or its write failed.
+    if (!this.pending) {
+      try { this.pending = JSON.parse(sessionStorage.getItem('ddz_pending_action') || 'null'); } catch { /* optional reload recovery */ }
+    }
     if (this.pending) useAppStore.setState({ submission: 'unknown', submissionMessage: '正在核对上次操作，请勿重复提交' });
     const store = useAppStore.getState();
     store.setError('');
@@ -64,7 +68,9 @@ export class GameSocket {
       try { message = decodeMessage(event.data as ArrayBuffer); }
       catch { useAppStore.getState().setError('收到无效的服务器消息'); return; }
       if (message.type === MsgType.Pong) this.lastPong = Date.now();
-      if (message.type === MsgType.Connected || message.type === MsgType.Reconnected) {
+      // The server sends connected (identity) before reconnected (final recovery
+      // result). Only the latter can resolve a pending action or unlock sending.
+      if (message.type === MsgType.Reconnected) {
         this.ready = true;
         this.attempts = 0;
         if (this.pending) {

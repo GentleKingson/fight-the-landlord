@@ -134,7 +134,7 @@ test('reload relies on server cookie authentication and removes legacy JS creden
   }
 });
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 test('a replaced tab stops reconnecting while network failures still retry', () => {
   vi.useFakeTimers();
@@ -421,6 +421,7 @@ test.each([500, 1000, 2000])('RTT %d: one submission, matching acknowledgement, 
   const transport = FakeSocket.latest;
   transport.onopen?.();
   transport.receive('connected', { player_id: 'me' });
+  transport.receive('reconnected', { player_id: 'me' });
   useAppStore.setState({ currentTurn: 'me', bidToken: 'bid-1', timerStart: Date.now(), timeout: 15 });
   expect(socket.send('bid', { bid: true, bid_token: 'bid-1' })).toBe(true);
   expect(socket.send('bid', { bid: false, bid_token: 'bid-1' })).toBe(false);
@@ -439,6 +440,7 @@ test.each([true, false])('disconnect during submission resolves committed=%s fro
   let transport = FakeSocket.latest;
   transport.onopen?.();
   transport.receive('connected', { player_id: 'me' });
+  transport.receive('reconnected', { player_id: 'me' });
   useAppStore.setState({ currentTurn: 'me', turnToken: 'play-1', timerStart: Date.now(), timeout: 15 });
   socket.send('play_cards', { cards: [], turn_token: 'play-1' });
   transport.close(1006);
@@ -446,6 +448,9 @@ test.each([true, false])('disconnect during submission resolves committed=%s fro
   vi.advanceTimersByTime(2500);
   transport = FakeSocket.latest;
   transport.onopen?.();
+  transport.receive('connected', { player_id: 'me' });
+  expect(useAppStore.getState().submission).toBe('unknown');
+  expect(sessionStorage.getItem('ddz_pending_action')).toContain('play-1');
   transport.receive('reconnected', { player_id: 'me', game_state: { phase: 'playing', last_action_token: committed ? 'play-1' : '', hand: [{rank: 3}] } });
   expect(useAppStore.getState().submission).toBe(committed ? 'confirmed' : 'rejected');
   expect(useAppStore.getState().hand).toHaveLength(1);
@@ -522,4 +527,72 @@ test('late RTT sample corrects both the active countdown and its warning', () =>
   vi.advanceTimersByTime(5000);
   expect(audio.turn).toHaveBeenCalledOnce();
   close();
+});
+
+function submitPendingPlay() {
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  const transport = FakeSocket.latest;
+  transport.onopen?.();
+  transport.receive('connected', { player_id: 'me' });
+  transport.receive('reconnected', { player_id: 'me' });
+  useAppStore.setState({ currentTurn: 'me', turnToken: 'play-1', timerStart: Date.now(), timeout: 30 });
+  expect(socket.send('play_cards', { cards: [], turn_token: 'play-1' })).toBe(true);
+  return socket;
+}
+
+test.each(['quota', 'read-denied', 'storage-disabled'])('reconnect keeps memory pending when storage is %s', failure => {
+  vi.useFakeTimers();
+  if (failure !== 'read-denied') vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+  if (failure !== 'quota') vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('denied', 'SecurityError'); });
+  const socket = submitPendingPlay();
+  try {
+    FakeSocket.latest.close(1006);
+    vi.advanceTimersByTime(2500);
+    const transport = FakeSocket.latest;
+    transport.onopen?.();
+    transport.receive('connected', { player_id: 'me' });
+    expect(useAppStore.getState().submission).toBe('unknown');
+    transport.receive('reconnected', { player_id: 'me', game_state: {
+      phase: 'playing', current_turn: 'me', turn_token: 'play-2', last_action_token: 'play-1',
+      turn_deadline: Date.now() + 30000, server_time: Date.now(),
+    } });
+    expect(useAppStore.getState().submission).toBe('confirmed');
+    expect(sentTypes(transport)).not.toContain('play_cards');
+    // The recovered page can submit a new turn instead of remaining locked.
+    expect(socket.send('pass', { turn_token: 'play-2' })).toBe(true);
+  } finally { socket.close(); }
+});
+
+test.each([true, false])('reload waits for final recovery response, snapshot available=%s', hasSnapshot => {
+  vi.useFakeTimers();
+  submitPendingPlay().close();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  try {
+    const transport = FakeSocket.latest;
+    transport.onopen?.();
+    transport.receive('connected', { player_id: 'me' });
+    expect(useAppStore.getState().submission).toBe('unknown');
+    expect(sessionStorage.getItem('ddz_pending_action')).toContain('play-1');
+    transport.receive('reconnected', { player_id: 'me', ...(hasSnapshot ? {
+      game_state: { phase: 'playing', last_action_token: 'play-1' },
+    } : {}) });
+    expect(useAppStore.getState().submission).toBe(hasSnapshot ? 'confirmed' : 'idle');
+    expect(sessionStorage.getItem('ddz_pending_action')).toBeNull();
+    expect(sentTypes(transport)).not.toContain('play_cards');
+  } finally { socket.close(); }
+});
+
+test('identity message alone does not unlock game submissions', () => {
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  try {
+    const transport = FakeSocket.latest;
+    transport.onopen?.();
+    transport.receive('connected', { player_id: 'me' });
+    useAppStore.setState({ currentTurn: 'me', bidToken: 'bid-1', timerStart: Date.now(), timeout: 30 });
+    expect(socket.send('bid', { bid: true, bid_token: 'bid-1' })).toBe(false);
+    expect(sentTypes(transport)).not.toContain('bid');
+  } finally { socket.close(); }
 });
