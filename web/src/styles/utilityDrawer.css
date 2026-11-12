@@ -25,7 +25,7 @@
     display .22s allow-discrete;
 }
 
-.utility-drawer:popover-open,
+/* Keep the fallback independent of unsupported popover selectors. */
 .utility-drawer.is-open {
   display: grid;
   transform: translateY(0);
@@ -33,9 +33,20 @@
   pointer-events: auto;
 }
 
+.utility-drawer:popover-open {
+  display: grid;
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
 @starting-style {
-  .utility-drawer:popover-open,
   .utility-drawer.is-open {
+    transform: translateY(calc(100% + 20px));
+    opacity: 0;
+  }
+
+  .utility-drawer:popover-open {
     transform: translateY(calc(100% + 20px));
     opacity: 0;
   }
