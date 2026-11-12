@@ -3,6 +3,7 @@ import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore } from '../../stores/appStore';
 import { Card } from '../../shared/cards/Card';
 import { Icon } from '../../shared/ui/Icon';
+import { useImeSafeEnter } from '../../shared/ui/imeSafeSubmit';
 import landlordLogo from '../../assets/landlord-logo-176.webp';
 
 interface LobbyProps {
@@ -59,6 +60,7 @@ function LobbyHome({ socket }: LobbyProps) {
   const roomList = useAppStore((state) => state.roomList);
   const setRoomCodeInput = useAppStore((state) => state.setRoomCodeInput);
   const setError = useAppStore((state) => state.setError);
+  const imeEnter = useImeSafeEnter();
 
   function joinRoom() {
     const roomCode = roomCodeInput.trim();
@@ -110,11 +112,25 @@ function LobbyHome({ socket }: LobbyProps) {
         </button>
       </div>
 
-      <div className="join-strip">
+      <form className="join-strip" onSubmit={(event) => { event.preventDefault(); joinRoom(); }}>
         <label htmlFor="room-code">加入房间</label>
-        <input id="room-code" value={roomCodeInput} onChange={(event) => setRoomCodeInput(event.target.value)} maxLength={8} placeholder="输入房间号" />
-        <button onClick={joinRoom}>加入</button>
-      </div>
+        <input
+          id="room-code"
+          name="room_code"
+          value={roomCodeInput}
+          onChange={(event) => setRoomCodeInput(event.target.value)}
+          {...imeEnter}
+          maxLength={8}
+          placeholder="输入房间号"
+          inputMode="numeric"
+          enterKeyHint="go"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+        />
+        <button type="submit">加入</button>
+      </form>
 
       <section className="room-browser" aria-label="可加入房间">
         <div className="room-browser__head">
@@ -227,6 +243,7 @@ function LobbyChat({ socket }: LobbyProps) {
   const messages = useChatStore((state) => state.messages);
   const chatInput = useAppStore((state) => state.chatInput);
   const setChatInput = useAppStore((state) => state.setChatInput);
+  const imeEnter = useImeSafeEnter();
 
   function send() {
     const content = chatInput.trim();
@@ -243,10 +260,19 @@ function LobbyChat({ socket }: LobbyProps) {
           <p key={index}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
         ))}
       </div>
-      <div className="chat-input-row">
-        <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="和大厅里的玩家聊聊" onKeyDown={(event) => { if (event.key === 'Enter') send(); }} />
-        <button onClick={send}>发送</button>
-      </div>
+      <form className="chat-input-row" onSubmit={(event) => { event.preventDefault(); send(); }}>
+        <label className="visually-hidden" htmlFor="lobby-chat-input">大厅聊天消息</label>
+        <input
+          id="lobby-chat-input"
+          name="message"
+          enterKeyHint="send"
+          value={chatInput}
+          onChange={(event) => setChatInput(event.target.value)}
+          {...imeEnter}
+          placeholder="和大厅里的玩家聊聊"
+        />
+        <button type="submit">发送</button>
+      </form>
     </section>
   );
 }

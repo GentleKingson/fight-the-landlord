@@ -12,6 +12,7 @@ import { Card } from '../../shared/cards/Card';
 import { Hand } from '../../shared/cards/Hand';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
 import { Icon } from '../../shared/ui/Icon';
+import { useImeSafeEnter } from '../../shared/ui/imeSafeSubmit';
 import { SoundToggle } from '../../audio/SoundToggle';
 import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
 
@@ -328,6 +329,7 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
   const setChatInput = useAppStore((state) => state.setChatInput);
   const counter = useAppStore((state) => state.cardCounter);
   const actions = useAppStore((state) => state.recentActions);
+  const imeEnter = useImeSafeEnter();
   const open = drawer !== 'none';
 
   if (!open) return null;
@@ -343,7 +345,7 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
     <aside className="utility-drawer is-open" aria-label={drawerTitle(drawer)}>
       <header>
         <strong>{drawerTitle(drawer)}</strong>
-        <button onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
+        <button type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
       </header>
       {drawer === 'chat' ? (
         <>
@@ -352,10 +354,19 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
               <p key={index}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
             ))}
           </div>
-          <div className="chat-input-row">
-            <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="房间聊天" onKeyDown={(event) => { if (event.key === 'Enter') sendChat(); }} />
-            <button onClick={sendChat}>发送</button>
-          </div>
+          <form className="chat-input-row" onSubmit={(event) => { event.preventDefault(); sendChat(); }}>
+            <label className="visually-hidden" htmlFor="room-chat-input">房间聊天消息</label>
+            <input
+              id="room-chat-input"
+              name="message"
+              enterKeyHint="send"
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              {...imeEnter}
+              placeholder="房间聊天"
+            />
+            <button type="submit">发送</button>
+          </form>
         </>
       ) : null}
       {drawer === 'counter' ? <CounterPanel counter={counter} /> : null}

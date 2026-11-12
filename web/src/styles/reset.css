@@ -19,6 +19,10 @@ body {
   color: var(--text);
 }
 
+form {
+  margin: 0;
+}
+
 button, input {
   font: inherit;
 }
