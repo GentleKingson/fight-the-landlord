@@ -61,7 +61,6 @@ test('practice loads only two distinct small portraits and preserves them on rel
     expect(await image.evaluate(async element => (await (await fetch((element as HTMLImageElement).src)).arrayBuffer()).byteLength)).toBeLessThan(12 * 1024);
   }
   await expectLayout(page);
-  await page.screenshot({ path: test.info().outputPath('practice-table.png') });
   const card = page.getByLabel('手牌').getByRole('button').first();
   await card.click();
   await expect(card).toHaveAttribute('aria-pressed', 'true');
@@ -89,7 +88,6 @@ test('avatars, role and card count fit narrow portrait and landscape while rotat
     await expectLayout(page);
     expect(await sources(page)).toEqual(initial);
     await expect(page.getByRole('button', { name: '出牌', exact: true })).toBeInViewport({ ratio: 1 });
-    await page.screenshot({ path: test.info().outputPath(`practice-${viewport.width}x${viewport.height}.png`) });
   }
   await page.evaluate(async () => {
     const path = '/src/stores/appStore.ts';
@@ -102,11 +100,8 @@ test('avatars, role and card count fit narrow portrait and landscape while rotat
   await expect(page.getByRole('button', { name: '叫地主', exact: true })).toBeInViewport({ ratio: 1 });
   await expectLayout(page);
   expect(await sources(page)).toEqual(initial);
-  await page.screenshot({ path: test.info().outputPath('bidding-long-names.png') });
-  await expectLayout(page);
   for (const viewport of [{ width: 320, height: 844 }, { width: 375, height: 667 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(viewport);
-    await page.screenshot({ path: test.info().outputPath(`bidding-${viewport.width}x${viewport.height}.png`) });
     await expectLayout(page);
     expect(await sources(page)).toEqual(initial);
   }

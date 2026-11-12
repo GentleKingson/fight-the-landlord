@@ -45,6 +45,9 @@ async function bid(page: Page) {
 
 test('deal cards travel to three seats, then wait for server authorization', async ({ page }) => {
   await setup(page);
+  const startedAt = Date.now();
+  // Freeze Date while leaving timers and animation frames running for layout.
+  await page.clock.setFixedTime(startedAt);
   await deal(page);
   await expect(page.locator('.deal-card')).toHaveCount(52);
   await expect(page.getByRole('button', { name: '叫地主', exact: true })).toHaveCount(0);
@@ -61,11 +64,12 @@ test('deal cards travel to three seats, then wait for server authorization', asy
   expect(layout.targets.length).toBeGreaterThan(3);
   await expect(page.getByRole('option')).toHaveCount(0);
   await expect(page.getByText('手牌 0 张')).toBeVisible();
-  // Each count lasts only ~206ms. Browser polling may skip a particular number;
-  // exact per-card boundaries are covered with the fake clock in deal.test.tsx.
+  // Hold a partial deal independently of runner speed. Exact per-card
+  // boundaries are covered in deal.test.tsx.
+  await page.clock.setFixedTime(startedAt + 1000);
   await expect(page.getByText(/^手牌 [1-9] 张$/)).toBeVisible();
   await expectLandingTargets(page);
-  await page.screenshot({ path: `/tmp/deal-${test.info().project.name}.png` });
+  await page.clock.setFixedTime(startedAt + 4000);
   await expect(page.getByText('等待叫地主通知…')).toBeVisible({ timeout: 5000 });
   await expect(page.getByRole('option')).toHaveCount(17);
   await expect(page.getByText('手牌 17 张')).toBeVisible();
