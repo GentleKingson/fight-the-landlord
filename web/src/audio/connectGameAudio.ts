@@ -8,15 +8,13 @@ const WARNING_SECONDS = 5;
 // App lifetime, not table-render lifetime: only live socket messages can speak.
 export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudio): () => void {
   let warningTimer: number | undefined;
-  let expiryTimer: number | undefined;
   let replayTurn: { type: string; playerId: string } | null = null;
   let replayResult = false;
   let dealt = false;
   let dealID = '';
   const endTurn = () => {
-    window.clearTimeout(warningTimer);
-    window.clearTimeout(expiryTimer);
-    warningTimer = expiryTimer = undefined;
+    window.clearInterval(warningTimer);
+    warningTimer = undefined;
     audio.endTurn();
   };
   const stop = () => { endTurn(); audio.stop(); };
@@ -65,12 +63,19 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
         const restored = replayTurn?.type === message.type && replayTurn.playerId === payload.player_id;
         replayTurn = null;
         if (restored || payload.player_id !== state.playerId || payload.timeout <= 0 || document.hidden || !audio.getEnabled()) break;
-        const deadline = Date.now() + payload.timeout * 1000;
-        warningTimer = window.setTimeout(() => {
-          // A throttled background timer must never announce an expired turn.
-          if (Date.now() < deadline) audio.turn(true, deadline);
-        }, Math.max(0, (payload.timeout - WARNING_SECONDS) * 1000));
-        expiryTimer = window.setTimeout(endTurn, payload.timeout * 1000);
+        let warned = false;
+        // Poll the shared corrected deadline so a later RTT sample updates audio
+        // as well as the visible countdown, without repeating a warning.
+        warningTimer = window.setInterval(() => {
+          const current = useAppStore.getState();
+          const deadline = current.timerStart + current.timeout * 1000;
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) { endTurn(); return; }
+          if (!warned && remaining <= WARNING_SECONDS * 1000) {
+            warned = true;
+            audio.turn(true, deadline);
+          }
+        }, 100);
         break;
       }
       case MsgType.BidResult: {

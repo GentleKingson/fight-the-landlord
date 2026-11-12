@@ -27,6 +27,15 @@ func TestWebRoutesAndPrivateDataIsolation(t *testing.T) {
 			require.JSONEq(t, `{"collect_training_data":true}`, r.Body.String())
 		}
 	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "assets", "app-Ab12_cd3.js"), []byte("js"), 0o600))
+	for path, cache := range map[string]string{
+		"/": "no-cache", "/assets/app.js": "no-cache", "/assets/app-Ab12_cd3.js": "public, max-age=31536000, immutable",
+		"/assets/missing-Ab12_cd3.js": "", "/api/config": "no-store",
+	} {
+		response := httptest.NewRecorder()
+		s.routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, http.NoBody))
+		require.Equal(t, cache, response.Header().Get("Cache-Control"), path)
+	}
 	cfg.Server.WebDir = filepath.Join(dir, "missing")
 	require.Error(t, validateWebConfig(cfg))
 }

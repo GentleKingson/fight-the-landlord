@@ -243,7 +243,8 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   const selected = hand.filter((card) => selectedCards.has(cardKey(card)));
   const summary = summarizeHand(selected);
   const parsedHand = parseHand(selected);
-  const canPlay = isMyTurn && phase === 'playing' && parsedHand !== null &&
+  const blocked = useAppStore(state => !state.connected || state.submission === "pending" || state.submission === "unknown");
+  const canPlay = !blocked && isMyTurn && phase === 'playing' && parsedHand !== null &&
     (mustPlay || lastPlayed.length === 0 || canBeat(parsedHand, parseHand(lastPlayed)));
 
   function play() {
@@ -259,8 +260,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       useAppStore.setState({ tableMessage: '本轮必须出牌' });
       return;
     }
-    socket.send(MsgType.Pass, { turn_token: useAppStore.getState().turnToken });
-    clearSelection();
+    if (socket.send(MsgType.Pass, { turn_token: useAppStore.getState().turnToken })) clearSelection();
   }
 
   function hint() {
@@ -294,8 +294,8 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       <section className="action-bar action-bar--bidding" aria-label="叫地主操作">
         {isMyTurn ? (
           <>
-            <button className="primary-action" onClick={() => socket.send(MsgType.Bid, { bid: true, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '抢地主' : '叫地主'}</button>
-            <button className="secondary-action secondary-action--muted" onClick={() => socket.send(MsgType.Bid, { bid: false, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '不抢' : '不叫'}</button>
+            <button className="primary-action" disabled={blocked} onClick={() => socket.send(MsgType.Bid, { bid: true, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '抢地主' : '叫地主'}</button>
+            <button className="secondary-action secondary-action--muted" disabled={blocked} onClick={() => socket.send(MsgType.Bid, { bid: false, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '不抢' : '不叫'}</button>
           </>
         ) : <span>等待其他玩家{isGrabTurn ? '抢地主' : '叫地主'}...</span>}
       </section>
@@ -304,7 +304,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
 
   return (
     <section className="action-bar" aria-label="出牌操作">
-      <button className="secondary-action secondary-action--blue" disabled={!isMyTurn || mustPlay} onClick={pass}>不出</button>
+      <button className="secondary-action secondary-action--blue" disabled={blocked || !isMyTurn || mustPlay} onClick={pass}>不出</button>
       <button className="secondary-action secondary-action--green" disabled={!isMyTurn} onClick={hint}>提示</button>
       <button className="secondary-action secondary-action--muted" disabled={!selectedCards.size} onClick={clearSelection}>重选</button>
       <button className="primary-action" disabled={!canPlay} onClick={play}>出牌</button>

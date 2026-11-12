@@ -398,7 +398,7 @@ it('restores the counter, public history, current trick and timer after a fresh 
   } } as never);
   const state = useAppStore.getState();
   expect(state.multiplier).toBe(8);
-  expect(state.timeout).toBe(8);
+  expect(state.timeout).toBe(7.5);
   expect(state.recentActions).toHaveLength(4);
   expect(Object.keys(state.seatActions)).toEqual(['me']);
   expect(state.lastHandType).toBe('单张');

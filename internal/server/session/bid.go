@@ -34,7 +34,7 @@ func (gs *GameSession) HandleBidTurn(playerID string, bid bool, token string) er
 	if token == "" || token != gs.bidToken {
 		return apperrors.ErrNotYourTurn
 	}
-	return gs.handleBidLocked(playerID, bid, "")
+	return gs.submitAction(playerID, token, func() error { return gs.handleBidLocked(playerID, bid, "") })
 }
 
 func (gs *GameSession) handleBidLocked(playerID string, bid bool, source string) error {
@@ -135,7 +135,7 @@ func (gs *GameSession) nextGrabber(from int) int {
 func (gs *GameSession) broadcastBidResult(player *GamePlayer, bid, isGrab bool) {
 	gs.bidHistory = append(gs.bidHistory, protocol.BidResultPayload{PlayerID: player.ID, PlayerName: player.Name, Bid: bid, IsGrab: isGrab, Multiplier: gs.bidMultiplier})
 	gs.broadcast(codec.MustNewMessage(protocol.MsgBidResult, protocol.BidResultPayload{
-		PlayerID:   player.ID,
+		ActionToken: gs.submittingToken, PlayerID: player.ID,
 		PlayerName: player.Name,
 		Bid:        bid,
 		IsGrab:     isGrab,
@@ -189,12 +189,13 @@ func (gs *GameSession) notifyBidTurn() {
 	gs.decisionStarted = time.Now()
 	gs.turnID++
 	player := gs.players[gs.currentBidder]
+	gs.startBidTimer()
 	gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
+		ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
 		BidToken:   gs.bidToken,
 		PlayerID:   player.ID,
 		Timeout:    gs.gameConfig.BidTimeout,
 		IsGrab:     gs.landlordCaller != -1,
 		Multiplier: gs.bidMultiplier,
 	}))
-	gs.startBidTimer()
 }

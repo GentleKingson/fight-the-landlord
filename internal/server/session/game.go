@@ -86,11 +86,13 @@ type GameSession struct {
 	consecutivePasses int             // 连续 PASS 次数
 
 	// 发牌计时由会话锁保护；不受玩家掉线或音频播放影响。
-	dealID      string
-	dealStartAt time.Time
-	dealEndAt   time.Time
-	dealTimer   *time.Timer
-	bidToken    string
+	dealID          string
+	dealStartAt     time.Time
+	dealEndAt       time.Time
+	dealTimer       *time.Timer
+	bidToken        string
+	submittingToken string
+	actionReceipts  map[string]string
 
 	// 超时控制
 	turnTimer        *time.Timer

@@ -380,11 +380,13 @@ func decodeBiddingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.BidTurnPayload) = protocol.BidTurnPayload{
-			BidToken:   pbMsg.BidToken,
-			PlayerID:   pbMsg.PlayerId,
-			Timeout:    int(pbMsg.Timeout),
-			IsGrab:     pbMsg.IsGrab,
-			Multiplier: int(pbMsg.Multiplier),
+			TurnDeadline: pbMsg.TurnDeadline,
+			ServerTime:   pbMsg.ServerTime,
+			BidToken:     pbMsg.BidToken,
+			PlayerID:     pbMsg.PlayerId,
+			Timeout:      int(pbMsg.Timeout),
+			IsGrab:       pbMsg.IsGrab,
+			Multiplier:   int(pbMsg.Multiplier),
 		}
 		return true, nil
 	case protocol.MsgBidResult:
@@ -393,11 +395,12 @@ func decodeBiddingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.BidResultPayload) = protocol.BidResultPayload{
-			PlayerID:   pbMsg.PlayerId,
-			PlayerName: pbMsg.PlayerName,
-			Bid:        pbMsg.Bid,
-			IsGrab:     pbMsg.IsGrab,
-			Multiplier: int(pbMsg.Multiplier),
+			ActionToken: pbMsg.ActionToken,
+			PlayerID:    pbMsg.PlayerId,
+			PlayerName:  pbMsg.PlayerName,
+			Bid:         pbMsg.Bid,
+			IsGrab:      pbMsg.IsGrab,
+			Multiplier:  int(pbMsg.Multiplier),
 		}
 		return true, nil
 	case protocol.MsgLandlord:
@@ -425,11 +428,13 @@ func decodePlayingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.PlayTurnPayload) = protocol.PlayTurnPayload{
-			TurnToken: pbMsg.TurnToken,
-			PlayerID:  pbMsg.PlayerId,
-			Timeout:   int(pbMsg.Timeout),
-			MustPlay:  pbMsg.MustPlay,
-			CanBeat:   pbMsg.CanBeat,
+			TurnDeadline: pbMsg.TurnDeadline,
+			ServerTime:   pbMsg.ServerTime,
+			TurnToken:    pbMsg.TurnToken,
+			PlayerID:     pbMsg.PlayerId,
+			Timeout:      int(pbMsg.Timeout),
+			MustPlay:     pbMsg.MustPlay,
+			CanBeat:      pbMsg.CanBeat,
 		}
 		return true, nil
 	case protocol.MsgCardPlayed:
@@ -438,11 +443,12 @@ func decodePlayingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.CardPlayedPayload) = protocol.CardPlayedPayload{
-			PlayerID:   pbMsg.PlayerId,
-			PlayerName: pbMsg.PlayerName,
-			Cards:      convert.ProtoToCards(pbMsg.Cards),
-			CardsLeft:  int(pbMsg.CardsLeft),
-			HandType:   pbMsg.HandType,
+			ActionToken: pbMsg.ActionToken,
+			PlayerID:    pbMsg.PlayerId,
+			PlayerName:  pbMsg.PlayerName,
+			Cards:       convert.ProtoToCards(pbMsg.Cards),
+			CardsLeft:   int(pbMsg.CardsLeft),
+			HandType:    pbMsg.HandType,
 		}
 		return true, nil
 	case protocol.MsgPlayerPass:
@@ -451,8 +457,9 @@ func decodePlayingMessages(msgType protocol.MessageType, data []byte, target any
 			return true, err
 		}
 		*target.(*protocol.PlayerPassPayload) = protocol.PlayerPassPayload{
-			PlayerID:   pbMsg.PlayerId,
-			PlayerName: pbMsg.PlayerName,
+			ActionToken: pbMsg.ActionToken,
+			PlayerID:    pbMsg.PlayerId,
+			PlayerName:  pbMsg.PlayerName,
 		}
 		return true, nil
 	case protocol.MsgGameOver:

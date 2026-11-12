@@ -106,7 +106,7 @@ export interface GameStateDTO extends DealTiming {
   turn_token?: string;
  multiplier?: number;
  public_plays?: PublicPlay[];
- turn_deadline?: number;
+ last_action_token?: string; turn_deadline?: number;
  turn_paused?: boolean;
  last_hand_type?: string;
   phase: 'bidding' | 'playing' | string;
@@ -181,10 +181,10 @@ export interface IncomingPayloadMap {
   match_found: Record<string, never>;
   game_start: { players: PlayerInfo[] };
   deal_cards: DealTiming & { cards: CardInfo[]; bottom_cards: CardInfo[] };
-  bid_turn: { bid_token?: string; player_id: string; timeout: number; is_grab: boolean; multiplier: number };
+  bid_turn: { server_time?: number; turn_deadline?: number; bid_token?: string; player_id: string; timeout: number; is_grab: boolean; multiplier: number };
   bid_result: { player_id: string; player_name: string; bid: boolean; is_grab: boolean; multiplier: number };
   landlord: { player_id: string; player_name: string; bottom_cards: CardInfo[]; multiplier: number };
-  play_turn: { turn_token?: string; player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
+  play_turn: { server_time?: number; turn_deadline?: number; turn_token?: string; player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
   card_played: { player_id: string; player_name: string; cards: CardInfo[]; cards_left: number; hand_type: string };
   player_pass: { player_id: string; player_name: string };
   game_over: { winner_id: string; winner_name: string; is_landlord: boolean; player_hands: PlayerHand[]; multiplier: number; scores: PlayerScore[] };

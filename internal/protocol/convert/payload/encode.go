@@ -241,20 +241,23 @@ func encodeServerGameMessages(msgType protocol.MessageType, payload any) (proto.
 	case protocol.MsgBidTurn:
 		p := payload.(protocol.BidTurnPayload)
 		return &pb.BidTurnPayload{
-			BidToken:   p.BidToken,
-			PlayerId:   p.PlayerID,
-			Timeout:    int64(p.Timeout),
-			IsGrab:     p.IsGrab,
-			Multiplier: int64(p.Multiplier),
+			TurnDeadline: p.TurnDeadline,
+			ServerTime:   p.ServerTime,
+			BidToken:     p.BidToken,
+			PlayerId:     p.PlayerID,
+			Timeout:      int64(p.Timeout),
+			IsGrab:       p.IsGrab,
+			Multiplier:   int64(p.Multiplier),
 		}, true
 	case protocol.MsgBidResult:
 		p := payload.(protocol.BidResultPayload)
 		return &pb.BidResultPayload{
-			PlayerId:   p.PlayerID,
-			PlayerName: p.PlayerName,
-			Bid:        p.Bid,
-			IsGrab:     p.IsGrab,
-			Multiplier: int64(p.Multiplier),
+			ActionToken: p.ActionToken,
+			PlayerId:    p.PlayerID,
+			PlayerName:  p.PlayerName,
+			Bid:         p.Bid,
+			IsGrab:      p.IsGrab,
+			Multiplier:  int64(p.Multiplier),
 		}, true
 	case protocol.MsgLandlord:
 		p := payload.(protocol.LandlordPayload)
@@ -267,26 +270,30 @@ func encodeServerGameMessages(msgType protocol.MessageType, payload any) (proto.
 	case protocol.MsgPlayTurn:
 		p := payload.(protocol.PlayTurnPayload)
 		return &pb.PlayTurnPayload{
-			TurnToken: p.TurnToken,
-			PlayerId:  p.PlayerID,
-			Timeout:   int64(p.Timeout),
-			MustPlay:  p.MustPlay,
-			CanBeat:   p.CanBeat,
+			TurnDeadline: p.TurnDeadline,
+			ServerTime:   p.ServerTime,
+			TurnToken:    p.TurnToken,
+			PlayerId:     p.PlayerID,
+			Timeout:      int64(p.Timeout),
+			MustPlay:     p.MustPlay,
+			CanBeat:      p.CanBeat,
 		}, true
 	case protocol.MsgCardPlayed:
 		p := payload.(protocol.CardPlayedPayload)
 		return &pb.CardPlayedPayload{
-			PlayerId:   p.PlayerID,
-			PlayerName: p.PlayerName,
-			Cards:      convert.CardsToProto(p.Cards),
-			CardsLeft:  int64(p.CardsLeft),
-			HandType:   p.HandType,
+			ActionToken: p.ActionToken,
+			PlayerId:    p.PlayerID,
+			PlayerName:  p.PlayerName,
+			Cards:       convert.CardsToProto(p.Cards),
+			CardsLeft:   int64(p.CardsLeft),
+			HandType:    p.HandType,
 		}, true
 	case protocol.MsgPlayerPass:
 		p := payload.(protocol.PlayerPassPayload)
 		return &pb.PlayerPassPayload{
-			PlayerId:   p.PlayerID,
-			PlayerName: p.PlayerName,
+			ActionToken: p.ActionToken,
+			PlayerId:    p.PlayerID,
+			PlayerName:  p.PlayerName,
 		}, true
 	case protocol.MsgGameOver:
 		p := payload.(protocol.GameOverPayload)

@@ -56,6 +56,8 @@ message DealCardsPayload {
 
 // BidTurnPayload 轮到叫地主通知
 message BidTurnPayload {
+ int64 turn_deadline = 7;
+ int64 server_time = 6;
   string bid_token = 5;
   string player_id = 1;
   int64 timeout = 2;
@@ -65,6 +67,7 @@ message BidTurnPayload {
 
 // BidResultPayload 叫地主结果通知
 message BidResultPayload {
+ string action_token = 10;
   string player_id = 1;
   string player_name = 2;
   bool bid = 3;         // 是否叫/抢
@@ -82,6 +85,8 @@ message LandlordPayload {
 
 // PlayTurnPayload 轮到出牌通知
 message PlayTurnPayload {
+ int64 turn_deadline = 7;
+ int64 server_time = 6;
   string turn_token = 5;
   string player_id = 1;
   int64 timeout = 2;
@@ -91,6 +96,7 @@ message PlayTurnPayload {
 
 // CardPlayedPayload 出牌通知
 message CardPlayedPayload {
+ string action_token = 10;
   string player_id = 1;
   string player_name = 2;
   repeated CardInfo cards = 3;
@@ -100,6 +106,7 @@ message CardPlayedPayload {
 
 // PlayerPassPayload 不出通知
 message PlayerPassPayload {
+ string action_token = 10;
   string player_id = 1;
   string player_name = 2;
 }

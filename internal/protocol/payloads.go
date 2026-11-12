@@ -65,18 +65,19 @@ type PublicPlay struct {
 }
 
 type GameStateDTO struct {
-	GameID       string       `json:"game_id"`
-	StateVersion int64        `json:"state_version"`
-	TurnToken    string       `json:"turn_token"`
-	Multiplier   int          `json:"multiplier"`
-	PublicPlays  []PublicPlay `json:"public_plays"`
-	TurnDeadline int64        `json:"turn_deadline"`
-	TurnPaused   bool         `json:"turn_paused"`
-	LastHandType string       `json:"last_hand_type"`
-	DealID       string       `json:"deal_id"`
-	DealStartAt  int64        `json:"deal_start_at"`
-	DealEndAt    int64        `json:"deal_end_at"`
-	ServerTime   int64        `json:"server_time"`
+	LastActionToken string       `json:"last_action_token"`
+	GameID          string       `json:"game_id"`
+	StateVersion    int64        `json:"state_version"`
+	TurnToken       string       `json:"turn_token"`
+	Multiplier      int          `json:"multiplier"`
+	PublicPlays     []PublicPlay `json:"public_plays"`
+	TurnDeadline    int64        `json:"turn_deadline"`
+	TurnPaused      bool         `json:"turn_paused"`
+	LastHandType    string       `json:"last_hand_type"`
+	DealID          string       `json:"deal_id"`
+	DealStartAt     int64        `json:"deal_start_at"`
+	DealEndAt       int64        `json:"deal_end_at"`
+	ServerTime      int64        `json:"server_time"`
 
 	Phase        string       `json:"phase"`          // dealing/bidding/playing
 	Players      []PlayerInfo `json:"players"`        // 所有玩家信息
@@ -161,20 +162,23 @@ type DealCardsPayload struct {
 
 // BidTurnPayload 轮到叫地主通知
 type BidTurnPayload struct {
-	BidToken   string `json:"bid_token"`
-	PlayerID   string `json:"player_id"`
-	Timeout    int    `json:"timeout"`    // 超时时间（秒）
-	IsGrab     bool   `json:"is_grab"`    // true=抢地主阶段, false=叫地主阶段
-	Multiplier int    `json:"multiplier"` // 当前倍数
+	TurnDeadline int64  `json:"turn_deadline"`
+	ServerTime   int64  `json:"server_time"`
+	BidToken     string `json:"bid_token"`
+	PlayerID     string `json:"player_id"`
+	Timeout      int    `json:"timeout"`    // 超时时间（秒）
+	IsGrab       bool   `json:"is_grab"`    // true=抢地主阶段, false=叫地主阶段
+	Multiplier   int    `json:"multiplier"` // 当前倍数
 }
 
 // BidResultPayload 叫地主结果通知
 type BidResultPayload struct {
-	PlayerID   string `json:"player_id"`
-	PlayerName string `json:"player_name"`
-	Bid        bool   `json:"bid"`        // 是否叫/抢
-	IsGrab     bool   `json:"is_grab"`    // 该决策是否处于抢地主阶段
-	Multiplier int    `json:"multiplier"` // 决策后的当前倍数
+	ActionToken string `json:"action_token"`
+	PlayerID    string `json:"player_id"`
+	PlayerName  string `json:"player_name"`
+	Bid         bool   `json:"bid"`        // 是否叫/抢
+	IsGrab      bool   `json:"is_grab"`    // 该决策是否处于抢地主阶段
+	Multiplier  int    `json:"multiplier"` // 决策后的当前倍数
 }
 
 // LandlordPayload 地主确定通知
@@ -187,26 +191,30 @@ type LandlordPayload struct {
 
 // PlayTurnPayload 轮到出牌通知
 type PlayTurnPayload struct {
-	TurnToken string `json:"turn_token"`
-	PlayerID  string `json:"player_id"`
-	Timeout   int    `json:"timeout"`   // 超时时间（秒）
-	MustPlay  bool   `json:"must_play"` // 是否必须出牌（新一轮开始时为 true）
-	CanBeat   bool   `json:"can_beat"`  // 是否有牌能打过上家
+	TurnDeadline int64  `json:"turn_deadline"`
+	ServerTime   int64  `json:"server_time"`
+	TurnToken    string `json:"turn_token"`
+	PlayerID     string `json:"player_id"`
+	Timeout      int    `json:"timeout"`   // 超时时间（秒）
+	MustPlay     bool   `json:"must_play"` // 是否必须出牌（新一轮开始时为 true）
+	CanBeat      bool   `json:"can_beat"`  // 是否有牌能打过上家
 }
 
 // CardPlayedPayload 出牌通知
 type CardPlayedPayload struct {
-	PlayerID   string     `json:"player_id"`
-	PlayerName string     `json:"player_name"`
-	Cards      []CardInfo `json:"cards"`
-	CardsLeft  int        `json:"cards_left"` // 剩余手牌数
-	HandType   string     `json:"hand_type"`  // 牌型名称
+	ActionToken string     `json:"action_token"`
+	PlayerID    string     `json:"player_id"`
+	PlayerName  string     `json:"player_name"`
+	Cards       []CardInfo `json:"cards"`
+	CardsLeft   int        `json:"cards_left"` // 剩余手牌数
+	HandType    string     `json:"hand_type"`  // 牌型名称
 }
 
 // PlayerPassPayload 不出通知
 type PlayerPassPayload struct {
-	PlayerID   string `json:"player_id"`
-	PlayerName string `json:"player_name"`
+	ActionToken string `json:"action_token"`
+	PlayerID    string `json:"player_id"`
+	PlayerName  string `json:"player_name"`
 }
 
 // GameOverPayload 游戏结束通知

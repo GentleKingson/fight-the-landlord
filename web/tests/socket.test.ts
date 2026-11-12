@@ -14,7 +14,11 @@ class FakeSocket {
   onmessage?: (event: { data: Uint8Array }) => void;
   onclose?: (event: { code: number }) => void;
   constructor() { FakeSocket.latest = this; }
-  send(data: Uint8Array) { this.sent.push(data); }
+  send(data: Uint8Array) {
+    this.sent.push(data);
+    const message = decodeMessage(data);
+    if (message.type === 'ping') this.receive('pong', { client_timestamp: (message.payload as { timestamp: number }).timestamp, server_timestamp: Date.now() });
+  }
   close(code = 1000) { this.onclose?.({ code }); }
   receive(type: string, payload: Record<string, unknown>) { this.onmessage?.({ data: encodeMessage(type, payload) }); }
 }
@@ -29,9 +33,9 @@ test('opening queries online count immediately and applies online_count response
   socket.connect();
   const transport = FakeSocket.latest;
   expect(transport.sent).toHaveLength(0);
-  expect(vi.getTimerCount()).toBe(0);
+  expect(vi.getTimerCount()).toBe(1);
   transport.onopen?.();
-  expect(sentTypes(transport)).toEqual(['get_online_count', 'get_maintenance_status']);
+  expect(sentTypes(transport)).toEqual(['ping', 'get_online_count', 'get_maintenance_status']);
   expect(vi.getTimerCount()).toBe(1);
   for (const count of [12, 8, 0]) {
     transport.receive('online_count', { count });
@@ -91,17 +95,17 @@ test('reconnect queries immediately and restarts the full heartbeat cycle withou
     transport.close(1006);
     const previous = transport;
     const previousMessages = sentTypes(previous);
-    vi.advanceTimersByTime(2500);
+    vi.advanceTimersByTime(2500 * 2 ** cycle);
     transport = FakeSocket.latest;
     expect(transport).not.toBe(previous);
     vi.advanceTimersByTime(10000);
     expect(sentTypes(previous)).toEqual(previousMessages);
     expect(transport.sent).toHaveLength(0);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
     transport.onopen?.();
     socket.connect();
     expect(FakeSocket.latest).toBe(transport);
-    expect(sentTypes(transport)).toEqual(['get_online_count', 'get_maintenance_status']);
+    expect(sentTypes(transport)).toEqual(['ping', 'get_online_count', 'get_maintenance_status']);
     expect(vi.getTimerCount()).toBe(1);
     transport.sent = [];
     vi.advanceTimersByTime(5000);
@@ -407,5 +411,115 @@ test('authoritative deal rounds replay audio, seek on reconnect, and stop at the
   expect(audio.deal).toHaveBeenLastCalledWith(now, now + 3870);
   receive('reconnected', { player_id: 'me', game_state: { phase: 'playing', hand: [] } });
   expect(audio.deal).toHaveBeenCalledTimes(3);
+  close();
+});
+
+test.each([500, 1000, 2000])('RTT %d: one submission, matching acknowledgement, no replay', (rtt) => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  const transport = FakeSocket.latest;
+  transport.onopen?.();
+  transport.receive('connected', { player_id: 'me' });
+  useAppStore.setState({ currentTurn: 'me', bidToken: 'bid-1', timerStart: Date.now(), timeout: 15 });
+  expect(socket.send('bid', { bid: true, bid_token: 'bid-1' })).toBe(true);
+  expect(socket.send('bid', { bid: false, bid_token: 'bid-1' })).toBe(false);
+  expect(useAppStore.getState().submission).toBe('pending');
+  vi.advanceTimersByTime(rtt);
+  transport.receive('bid_result', { player_id: 'me', action_token: 'bid-1', bid: true });
+  expect(useAppStore.getState().submission).toBe('confirmed');
+  expect(sentTypes(transport).filter(t => t === 'bid')).toHaveLength(1);
+  socket.close();
+});
+
+test.each([true, false])('disconnect during submission resolves committed=%s from snapshot', committed => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  let transport = FakeSocket.latest;
+  transport.onopen?.();
+  transport.receive('connected', { player_id: 'me' });
+  useAppStore.setState({ currentTurn: 'me', turnToken: 'play-1', timerStart: Date.now(), timeout: 15 });
+  socket.send('play_cards', { cards: [], turn_token: 'play-1' });
+  transport.close(1006);
+  expect(useAppStore.getState().submission).toBe('unknown');
+  vi.advanceTimersByTime(2500);
+  transport = FakeSocket.latest;
+  transport.onopen?.();
+  transport.receive('reconnected', { player_id: 'me', game_state: { phase: 'playing', last_action_token: committed ? 'play-1' : '', hand: [{rank: 3}] } });
+  expect(useAppStore.getState().submission).toBe(committed ? 'confirmed' : 'rejected');
+  expect(useAppStore.getState().hand).toHaveLength(1);
+  expect(sentTypes(transport)).not.toContain('play_cards');
+  socket.close();
+});
+
+test('half-open socket times out and ignores messages from the old transport', () => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  const transport = FakeSocket.latest;
+  transport.onopen?.();
+  transport.send = data => { transport.sent.push(data); }; // blackhole pong
+  vi.advanceTimersByTime(15000);
+  expect(useAppStore.getState().connected).toBe(false);
+  vi.advanceTimersByTime(2500);
+  expect(FakeSocket.latest).not.toBe(transport);
+  const count = useAppStore.getState().onlineCount;
+  transport.receive('online_count', { count: 999 });
+  expect(useAppStore.getState().onlineCount).toBe(count);
+  socket.close();
+});
+
+test.each([1, 5])('%d%% heartbeat response loss does not cause false disconnects', loss => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  const transport = FakeSocket.latest;
+  transport.onopen?.();
+  let pings = 0;
+  transport.send = data => {
+    transport.sent.push(data);
+    const m = decodeMessage(data);
+    if (m.type === 'ping' && ++pings % (100 / loss) !== 0) {
+      transport.receive('pong', { client_timestamp: Date.now(), server_timestamp: Date.now() });
+    }
+  };
+  vi.advanceTimersByTime(500000);
+  expect(useAppStore.getState().connected).toBe(true);
+  expect(FakeSocket.latest).toBe(transport);
+  socket.close();
+});
+
+test('offline submission is explicit; online and background recovery never replay it', () => {
+  vi.useFakeTimers();
+  const socket = new GameSocket('ws://localhost/ws');
+  expect(socket.send('bid', { bid: true })).toBe(false);
+  expect(useAppStore.getState().submissionMessage).toContain('未发送');
+  socket.connect();
+  const transport = FakeSocket.latest;
+  transport.onopen?.();
+  transport.close(1006);
+  window.dispatchEvent(new Event('online'));
+  expect(FakeSocket.latest).not.toBe(transport);
+  const replacement = FakeSocket.latest;
+  replacement.onopen?.();
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(sentTypes(replacement)).not.toContain('bid');
+  socket.close();
+});
+
+test('late RTT sample corrects both the active countdown and its warning', () => {
+  vi.useFakeTimers();
+  const { audio, receive, close } = audioSession();
+  const now = Date.now();
+  // Server clock is 20 seconds ahead; frame spent one second in transit.
+  receive('play_turn', { player_id: 'me', timeout: 10, server_time: now + 19000, turn_deadline: now + 29000 });
+  receive('pong', { client_timestamp: now - 2000, server_timestamp: now + 19000 });
+  const state = useAppStore.getState();
+  expect(state.timerStart + state.timeout * 1000).toBe(now + 9000);
+  vi.advanceTimersByTime(4000);
+  expect(audio.turn).toHaveBeenCalledExactlyOnceWith(true, now + 9000);
+  vi.advanceTimersByTime(5000);
+  expect(audio.turn).toHaveBeenCalledOnce();
   close();
 });

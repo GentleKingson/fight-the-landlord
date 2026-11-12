@@ -51,6 +51,7 @@ message PublicPlay {
 }
 
 message GameStateDTO {
+ string last_action_token = 22;
  string game_id = 19;
  int64 state_version = 20;
  string turn_token = 21;

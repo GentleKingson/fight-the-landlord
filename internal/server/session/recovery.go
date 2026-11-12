@@ -66,6 +66,7 @@ func (gs *GameSession) resumeBotTurn() {
 	switch gs.state {
 	case GameStateBidding:
 		gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
+			ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
 			BidToken: gs.bidToken, PlayerID: gs.players[gs.currentBidder].ID,
 			Timeout: gs.remainingTurnSeconds(gs.gameConfig.BidTimeout), IsGrab: gs.landlordCaller != -1, Multiplier: gs.bidMultiplier,
 		}))
@@ -73,6 +74,7 @@ func (gs *GameSession) resumeBotTurn() {
 		player := gs.players[gs.currentPlayer]
 		mustPlay := gs.lastPlayedHand.IsEmpty() || gs.lastPlayerIdx == gs.currentPlayer
 		gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+			ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
 			TurnToken: gs.playToken,
 			PlayerID:  player.ID, Timeout: gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout), MustPlay: mustPlay, CanBeat: true,
 		}))
