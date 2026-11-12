@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { CardInfo } from '../../protocol/types';
 import { cardKey } from './cardModel';
 import { Card } from './Card';
@@ -33,6 +33,24 @@ interface HandGroup {
   startIndex: number;
 }
 
+export type SpatialDirection = 'left' | 'right' | 'up' | 'down';
+
+export interface SpatialBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+const ARROW_TO_DIRECTION: Record<string, SpatialDirection> = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'up',
+  ArrowDown: 'down'
+};
+
 export function Hand({ cards, visibleCount = cards.length, selected, disabled = false, onToggle, onRangeSelect }: HandProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const lastPointerDownIndex = useRef<number | null>(null);
@@ -41,6 +59,8 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
   const [dragStart, setDragStart] = useState<number | null>(null);
   const [dragMoved, setDragMoved] = useState(false);
   const [dragKeys, setDragKeys] = useState<Set<string>>(new Set());
+  const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [fallbackIndex, setFallbackIndex] = useState(0);
   const [width, setWidth] = useState(280);
   useEffect(() => {
     const root = rootRef.current;
@@ -53,6 +73,23 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
   }, []);
   const layout = useMemo(() => buildHandLayout(cards, width), [cards, width]);
   const keys = useMemo(() => layout.map((item) => item.key), [layout]);
+  const exposedCount = Math.max(0, Math.min(layout.length, visibleCount));
+
+  const resolvedActiveIndex = useMemo(() => {
+    if (exposedCount === 0) return -1;
+    if (activeCardId !== null) {
+      const matched = layout.findIndex((item) => item.index < exposedCount && item.key === activeCardId);
+      if (matched >= 0) return matched;
+    }
+    return Math.min(fallbackIndex, exposedCount - 1);
+  }, [activeCardId, exposedCount, fallbackIndex, layout]);
+
+  function setRovingFocus(index: number) {
+    const item = layout[index];
+    if (!item) return;
+    setActiveCardId(item.key);
+    setFallbackIndex(index);
+  }
 
   function indexFromPoint(clientX: number, clientY: number): number {
     const target = document.elementFromPoint(clientX, clientY);
@@ -89,18 +126,84 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
     onRangeSelect([...next]);
   }
 
+  function handleSpatialKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const direction = ARROW_TO_DIRECTION[event.key];
+    if (!direction || disabled) return;
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+
+    const rawTarget = event.nativeEvent.composedPath?.()[0] ?? event.target;
+    if (rawTarget instanceof Element && rawTarget.matches(':read-write, select, input[type="range"], [role="slider"]')) {
+      return;
+    }
+
+    const root = rootRef.current;
+    if (!root) return;
+
+    const optionElements = Array.from(root.querySelectorAll<HTMLElement>('[role="option"]')).filter((el) => {
+      if (el.getAttribute('aria-disabled') === 'true') return false;
+      if (el.closest('[inert], [aria-hidden="true"]')) return false;
+      if (typeof el.checkVisibility === 'function' && !el.checkVisibility()) return false;
+      return true;
+    });
+
+    const currentEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!currentEl || !optionElements.includes(currentEl)) return;
+
+    const boxForElement = (el: HTMLElement): SpatialBox => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height
+        };
+      }
+      // Fallback for non-layout test environments (e.g. jsdom where getBoundingClientRect is 0x0).
+      const slot = el.closest<HTMLElement>('[data-card-index]');
+      const cardIdx = slot ? Number(slot.dataset.cardIndex) : 0;
+      const item = layout[cardIdx];
+      const left = width > 80 && item ? item.singleX + 500 : cardIdx * 32;
+      const top = selected.has(item?.key ?? '') ? 0 : 22;
+      return { left, top, right: left + 72, bottom: top + 104, width: 72, height: 104 };
+    };
+
+    const currentBox = boxForElement(currentEl);
+    const candidates = optionElements
+      .filter((el) => el !== currentEl)
+      .map((el) => ({ element: el, box: boxForElement(el) }));
+
+    const next = pickSpatialCandidate(currentBox, candidates, direction);
+    if (!next) {
+      // Preserve native boundary scrolling when no focusable target exists in the pressed direction.
+      return;
+    }
+
+    event.preventDefault();
+    const nextSlot = next.closest<HTMLElement>('[data-card-index]');
+    const nextIndex = nextSlot ? Number(nextSlot.dataset.cardIndex) : -1;
+    if (nextIndex >= 0) setRovingFocus(nextIndex);
+    next.focus();
+    next.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }
+
   return (
     <div
       ref={rootRef}
       className={`hand ${disabled ? 'is-disabled' : ''} ${dragStart !== null ? 'is-dragging' : ''}`}
       style={{ '--hand-count': cards.length } as CSSProperties}
-      role="listbox"
+      role={exposedCount > 0 ? 'listbox' : 'group'}
       aria-label="手牌"
-      aria-disabled={disabled}
+      aria-multiselectable={exposedCount > 0 ? true : undefined}
+      aria-disabled={disabled || undefined}
+      onKeyDown={handleSpatialKeyDown}
       onPointerDown={(event) => {
         if (disabled) return;
         const index = indexFromTarget(event.target);
-        if (index >= 0) {
+        if (index >= 0 && index < exposedCount) {
+          setRovingFocus(index);
           sameCardPointerDown.current = lastPointerDownIndex.current === index;
           lastPointerDownIndex.current = index;
           setDragStart(index);
@@ -140,10 +243,13 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
     >
       {layout.map((item) => {
         const pending = item.index >= visibleCount;
+        const isOptionDisabled = disabled || pending;
         const isSelected = selected.has(item.key) || dragKeys.has(item.key);
+        const tabIndex = isOptionDisabled ? -1 : item.index === resolvedActiveIndex ? 0 : -1;
         return (
           <div
             key={`${item.key}_${item.index}`}
+            role="none"
             className={`hand__slot ${pending ? 'is-pending' : ''} ${isSelected ? 'is-selected' : ''}`}
             data-card-index={item.index}
             data-group-index={item.groupIndex}
@@ -162,22 +268,150 @@ export function Hand({ cards, visibleCount = cards.length, selected, disabled = 
               '--row-x': `${item.rowX}px`,
               zIndex: item.index + (item.row === 1 ? 40 : 0)
             } as CSSProperties}
-            role="option"
             aria-hidden={pending || undefined}
             inert={pending}
-            aria-selected={isSelected}
             onDoubleClick={() => {
               if (!disabled && sameCardPointerDown.current) selectGroup(item.groupIndex);
             }}
           >
-            <Card card={item.card} selected={isSelected} disabled={disabled || pending} onClick={(event) => {
-              if (!disabled && event.detail === 0) onToggle(item.key);
-            }} />
+            <Card
+              as="option"
+              card={item.card}
+              selected={isSelected}
+              disabled={isOptionDisabled}
+              tabIndex={tabIndex}
+              onFocus={() => {
+                if (!isOptionDisabled) setRovingFocus(item.index);
+              }}
+              onClick={(event) => {
+                if (!isOptionDisabled && event.detail === 0) onToggle(item.key);
+              }}
+              onKeyDown={(event) => {
+                if (isOptionDisabled || event.altKey || event.ctrlKey || event.metaKey) return;
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onToggle(item.key);
+                } else if (event.key === ' ') {
+                  // Prevent page scrolling on Spacebar keydown; activation occurs on keyup.
+                  event.preventDefault();
+                }
+              }}
+              onKeyUp={(event) => {
+                if (isOptionDisabled || event.altKey || event.ctrlKey || event.metaKey) return;
+                if (event.key === ' ') {
+                  event.preventDefault();
+                  onToggle(item.key);
+                }
+              }}
+            />
           </div>
         );
       })}
     </div>
   );
+}
+
+export function pickSpatialCandidate<T>(
+  current: SpatialBox,
+  candidates: Array<{ element: T; box: SpatialBox }>,
+  direction: SpatialDirection
+): T | null {
+  const tolerance = 1;
+  const fallbackWeight = 2;
+  const currCenterX = (current.left + current.right) / 2;
+  const currCenterY = (current.top + current.bottom) / 2;
+
+  interface ScoredCandidate {
+    element: T;
+    aligned: boolean;
+    primaryDistance: number;
+    perpOffset: number;
+    fallbackScore: number;
+  }
+
+  const valid: ScoredCandidate[] = [];
+
+  for (const { element, box: cand } of candidates) {
+    const minH = Math.min(current.height, cand.height);
+    const overlapX = Math.min(current.right, cand.right) - Math.max(current.left, cand.left);
+    const overlapY = Math.min(current.bottom, cand.bottom) - Math.max(current.top, cand.top);
+    const sameVisualRow = overlapY > minH * 0.4;
+    const candCenterX = (cand.left + cand.right) / 2;
+    const candCenterY = (cand.top + cand.bottom) / 2;
+
+    if (direction === 'right' || direction === 'left') {
+      const strictEdgePass = direction === 'right'
+        ? cand.left >= current.right - tolerance
+        : cand.right <= current.left + tolerance;
+      const fannedRowPass = sameVisualRow && (direction === 'right'
+        ? cand.left > current.left + tolerance && cand.right > current.right + tolerance
+        : cand.right < current.right - tolerance && cand.left < current.left - tolerance);
+
+      if (!strictEdgePass && !fannedRowPass) continue;
+
+      const edgeGap = direction === 'right'
+        ? Math.max(0, cand.left - current.right)
+        : Math.max(0, current.left - cand.right);
+      const leadingStep = direction === 'right'
+        ? cand.left - current.left
+        : current.right - cand.right;
+      const perpOffset = Math.abs(candCenterY - currCenterY);
+
+      if (sameVisualRow) {
+        valid.push({
+          element,
+          aligned: true,
+          primaryDistance: leadingStep,
+          perpOffset,
+          fallbackScore: edgeGap + fallbackWeight * perpOffset
+        });
+      } else if (strictEdgePass) {
+        valid.push({
+          element,
+          aligned: false,
+          primaryDistance: edgeGap,
+          perpOffset,
+          fallbackScore: edgeGap + fallbackWeight * perpOffset
+        });
+      }
+    } else {
+      // Exclude neighbors in the same row whose selected transform lifts them slightly.
+      if (sameVisualRow) continue;
+
+      const strictEdgePass = direction === 'down'
+        ? cand.top >= current.bottom - tolerance
+        : cand.bottom <= current.top + tolerance;
+      const liftedRowPass = direction === 'down'
+        ? cand.top > current.top + tolerance && cand.bottom > current.bottom + tolerance
+        : cand.bottom < current.bottom - tolerance && cand.top < current.top - tolerance;
+
+      if (!strictEdgePass && !liftedRowPass) continue;
+
+      const edgeGap = direction === 'down'
+        ? Math.max(0, cand.top - current.bottom)
+        : Math.max(0, current.top - cand.bottom);
+      const perpOffset = Math.abs(candCenterX - currCenterX);
+
+      valid.push({
+        element,
+        aligned: overlapX > 0,
+        primaryDistance: edgeGap,
+        perpOffset,
+        fallbackScore: edgeGap + fallbackWeight * perpOffset
+      });
+    }
+  }
+
+  if (!valid.length) return null;
+
+  const aligned = valid.filter((item) => item.aligned);
+  if (aligned.length > 0) {
+    aligned.sort((a, b) => (a.primaryDistance - b.primaryDistance) || (a.perpOffset - b.perpOffset));
+    return aligned[0].element;
+  }
+
+  valid.sort((a, b) => a.fallbackScore - b.fallbackScore);
+  return valid[0].element;
 }
 
 export function buildHandLayout(cards: CardInfo[], width = 280): HandCardLayout[] {

@@ -61,9 +61,9 @@ test('practice loads only two distinct small portraits and preserves them on rel
     expect(await image.evaluate(async element => (await (await fetch((element as HTMLImageElement).src)).arrayBuffer()).byteLength)).toBeLessThan(12 * 1024);
   }
   await expectLayout(page);
-  const card = page.getByLabel('手牌').getByRole('button').first();
+  const card = page.getByLabel('手牌').getByRole('option').first();
   await card.click();
-  await expect(card).toHaveAttribute('aria-pressed', 'true');
+  await expect(card).toHaveAttribute('aria-selected', 'true');
   for (let i = 0; i < 2; i++) {
     await page.getByRole('button', { name: '聊天', exact: true }).click();
     await page.getByRole('button', { name: '关闭', exact: true }).click();

@@ -1,11 +1,11 @@
 .utility-drawer {
   position: fixed;
+  inset: auto 16px 16px auto;
   z-index: 40;
-  right: 16px;
-  bottom: 16px;
+  margin: 0;
   width: min(380px, calc(100vw - 32px));
   max-height: min(620px, calc(100dvh - 32px));
-  display: grid;
+  display: none;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
   padding: 12px;
@@ -18,13 +18,33 @@
   transform: translateY(calc(100% + 20px));
   opacity: 0;
   pointer-events: none;
-  transition: transform .22s ease, opacity .22s ease;
+  transition:
+    transform .22s ease,
+    opacity .22s ease,
+    overlay .22s allow-discrete,
+    display .22s allow-discrete;
 }
 
+.utility-drawer:popover-open,
 .utility-drawer.is-open {
+  display: grid;
   transform: translateY(0);
   opacity: 1;
   pointer-events: auto;
+}
+
+@starting-style {
+  .utility-drawer:popover-open,
+  .utility-drawer.is-open {
+    transform: translateY(calc(100% + 20px));
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .utility-drawer {
+    transition: none;
+  }
 }
 
 .utility-drawer header {
@@ -103,9 +123,7 @@
 
 @media (max-width: 880px) {
   .utility-drawer {
-    left: auto;
-    right: max(8px, env(safe-area-inset-right));
-    bottom: max(8px, env(safe-area-inset-bottom));
+    inset: auto max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) auto;
     width: min(380px, calc(100% - 16px));
     max-height: calc(100dvh - 16px);
   }

@@ -45,14 +45,14 @@ test('sound defaults on and both preferences survive reload and reopening the si
 
 test('hand supports keyboard activation without double toggling pointer clicks', async ({ page }) => {
   await page.goto('/?demo=table');
-  const card = page.getByLabel('手牌').getByRole('button').first();
+  const card = page.getByLabel('手牌').getByRole('option').first();
   await card.focus();
   await page.keyboard.press('Enter');
-  await expect(card).toHaveAttribute('aria-pressed', 'true');
+  await expect(card).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Space');
-  await expect(card).toHaveAttribute('aria-pressed', 'false');
+  await expect(card).toHaveAttribute('aria-selected', 'false');
   await card.click();
-  await expect(card).toHaveAttribute('aria-pressed', 'true');
+  await expect(card).toHaveAttribute('aria-selected', 'true');
 });
 
 test('small lobby keeps room controls and navigation visible without page scrolling', async ({ page }) => {
@@ -81,14 +81,14 @@ test('small lobby keeps room controls and navigation visible without page scroll
 
 test('pointer jitter within one card toggles exactly once', async ({ page }) => {
   await page.goto('/?demo=table');
-  const card = page.getByLabel('手牌').getByRole('button').first();
+  const card = page.getByLabel('手牌').getByRole('option').first();
   for (const selected of ['true', 'false']) {
     const box = (await card.boundingBox())!;
     await page.mouse.move(box.x + 8, box.y + 40);
     await page.mouse.down();
     await page.mouse.move(box.x + 9, box.y + 41);
     await page.mouse.up();
-    await expect(card).toHaveAttribute('aria-pressed', selected);
+    await expect(card).toHaveAttribute('aria-selected', selected);
   }
 });
 
@@ -97,7 +97,7 @@ test('all dense portrait hand cards remain visible and selectable at 320px', asy
   await page.goto('/?demo=table');
   for (const ranks of [[14,14,14,14,13,13,13,13,12,12,12,12,11,11,11,10,10], Array.from({ length: 20 }, (_, i) => 14 - Math.floor(i / 4))]) {
     await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => useAppStore.setState({ hand: ${JSON.stringify(ranks.map((rank, i) => ({ rank, suit: i % 4, color: i % 2 })))}, selectedCards: new Set(), currentTurn: 'p1' }))`);
-    const cards = page.getByLabel('手牌').getByRole('button');
+    const cards = page.getByLabel('手牌').getByRole('option');
     await expect(cards).toHaveCount(ranks.length);
     for (let index = 0; index < ranks.length; index++) {
       const card = cards.nth(index);
@@ -108,7 +108,7 @@ test('all dense portrait hand cards remain visible and selectable at 320px', asy
       expect(box.y + box.height).toBeLessThanOrEqual(568);
       if (isMobile) await page.touchscreen.tap(box.x + 5, box.y + 30);
       else await page.mouse.click(box.x + 5, box.y + 30);
-      await expect(card).toHaveAttribute('aria-pressed', 'true');
+      await expect(card).toHaveAttribute('aria-selected', 'true');
     }
   }
 });
@@ -118,7 +118,7 @@ test('narrow landscape keeps all 20 cards reachable', async ({ page, isMobile })
   await page.goto('/?demo=table');
   const ranks = [17,16,15,14,13,12,11,10,9,8,7,7,6,6,5,5,4,4,3,3];
   await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => useAppStore.setState({ hand: ${JSON.stringify(ranks.map((rank, i) => ({ rank, suit: i % 4, color: i % 2 })))}, selectedCards: new Set(), currentTurn: 'p1' }))`);
-  const cards = page.getByLabel('手牌').getByRole('button');
+  const cards = page.getByLabel('手牌').getByRole('option');
   await expect(cards).toHaveCount(20);
   for (let index = 0; index < ranks.length; index++) {
     const card = cards.nth(index);
@@ -129,7 +129,7 @@ test('narrow landscape keeps all 20 cards reachable', async ({ page, isMobile })
     expect(box.y + box.height).toBeLessThanOrEqual(375);
     if (isMobile) await page.touchscreen.tap(box.x + 5, box.y + 25);
     else await page.mouse.click(box.x + 5, box.y + 25);
-    await expect(card).toHaveAttribute('aria-pressed', 'true');
+    await expect(card).toHaveAttribute('aria-selected', 'true');
   }
 });
 

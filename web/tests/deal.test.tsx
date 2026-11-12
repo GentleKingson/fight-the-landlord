@@ -101,14 +101,14 @@ test('faces and count advance on each landing while all final slots stay reserve
     expect(screen.getAllByRole('option')).toHaveLength(count);
     expect(screen.getByText(`手牌 ${count} 张`)).toBeTruthy();
     expect(slots.map(slot => slot.style.cssText)).toEqual(positions);
-    const face = screen.getAllByRole('option')[0].querySelector('button')!;
-    expect(face.disabled).toBe(true);
+    const face = screen.getAllByRole('option')[0];
+    expect(face.getAttribute('aria-disabled')).toBe('true');
     fireEvent.click(face);
     expect(useAppStore.getState().selectedCards.size).toBe(0);
   }
   receive(MsgType.PlayTurn, { player_id: 'me', timeout: 30, must_play: true });
-  const face = screen.getAllByRole('option')[0].querySelector('button')!;
-  expect(face.disabled).toBe(false);
+  const face = screen.getAllByRole('option')[0];
+  expect(face.getAttribute('aria-disabled')).toBeNull();
   fireEvent.click(face);
   expect(useAppStore.getState().selectedCards.size).toBe(1);
 });

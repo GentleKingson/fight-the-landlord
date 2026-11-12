@@ -25,6 +25,7 @@
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.7.0",
+    "axe-core": "^4.14.0",
     "jsdom": "^26.0.0",
     "protobufjs-cli": "^2.7.1",
     "typescript": "^5.8.2",

@@ -60,7 +60,6 @@
   transform: translateY(0);
   transform-origin: 50% 115%;
   transition: transform .14s ease, filter .14s ease;
-  will-change: transform, left, bottom;
 }
 
 .hand.is-dragging .hand__slot {
