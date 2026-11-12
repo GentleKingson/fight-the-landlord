@@ -34,7 +34,7 @@ it.each([
   const button = screen.getByRole('button', { name: /^出牌$/ }) as HTMLButtonElement;
   expect(button.disabled).toBe(!allowed);
   if (ranks.length === 2 && ranks[0] !== ranks[1] && ranks[1] < 16) {
-    expect(screen.getByText('已选 2 张 · 无效牌型')).toBeDefined();
+    expect(screen.getByText('牌型错误，请重新选牌')).toBeDefined();
   }
   fireEvent.click(button);
   if (allowed) {
@@ -85,4 +85,36 @@ it.each([0, 1, 2])('keeps previous player left and next player right with their 
   expect(right.classList.contains('played-seat--right')).toBe(true);
   expect(within(left).getByRole('button', { name: '10♠' })).toBeDefined();
   expect(within(right).getByRole('button', { name: '9♥' })).toBeDefined();
+});
+
+it('retains preselection and revalidates against another player’s new play', () => {
+  const card = { rank: 8, suit: 0, color: 0 };
+  useAppStore.setState({ phase: 'playing', connected: true, submission: 'idle', playerId: 'a',
+    currentTurn: 'b', hand: [card], selectedCards: new Set([cardKey(card)]), players: [],
+    mustPlay: false, lastPlayed: [], drawer: 'none', tableMessage: '' });
+  const receive = useAppStore.getState().handleMessage;
+  receive({ type: MsgType.CardPlayed, payload: { player_id: 'b', cards: [{ rank: 9, suit: 1, color: 1 }], cards_left: 1 } });
+  receive({ type: MsgType.PlayTurn, payload: { player_id: 'a', must_play: false, timeout: 20 } });
+  render(<GameTable socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  expect(useAppStore.getState().selectedCards.has(cardKey(card))).toBe(true);
+  expect(screen.getByText('点数不足，需要大于当前出牌')).toBeDefined();
+  expect((screen.getByRole('button', { name: '出牌' }) as HTMLButtonElement).disabled).toBe(true);
+  cleanup();
+  receive({ type: MsgType.CardPlayed, payload: { player_id: 'b', cards: [{ rank: 7, suit: 1, color: 1 }], cards_left: 0 } });
+  render(<GameTable socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  expect((screen.getByRole('button', { name: '出牌' }) as HTMLButtonElement).disabled).toBe(false);
+  receive({ type: MsgType.CardPlayed, payload: { player_id: 'a', cards: [card], cards_left: 0 } });
+  expect(useAppStore.getState().selectedCards.size).toBe(0);
+});
+
+it.each([
+  { connected: false, submission: 'idle' as const, text: '网络已断开，请等待连接恢复' },
+  { connected: true, submission: 'pending' as const, text: '等待服务器确认，请勿重复提交' },
+  { connected: true, submission: 'unknown' as const, text: '操作结果待核对，请勿重复提交' }
+])('explains blocking state $submission / $connected', ({ connected, submission, text }) => {
+  useAppStore.setState({ phase: 'playing', connected, submission, playerId: 'a', currentTurn: 'a',
+    hand: [], players: [], selectedCards: new Set(), drawer: 'none', tableMessage: '旧提示' });
+  render(<GameTable socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  expect(screen.getByText(text)).toBeDefined();
+  expect(screen.getByRole('button', { name: '出牌' }).getAttribute('aria-describedby')).toBe('play-action-summary');
 });

@@ -40,7 +40,7 @@ for (const { rtt, storageFailure } of scenarios) test(`submission recovery with 
   await expect(page.getByText('操作已提交，等待服务器确认…', { exact: true })).toBeVisible();
   expect(await page.evaluate('window.submissions')).toBe(1);
   await page.evaluate('window.transport.onclose({ code: 1006 })');
-  await expect(page.getByText(/操作结果待核对/)).toBeVisible();
+  await expect(page.locator('.submission-notice')).toContainText('操作结果待核对');
   await page.waitForTimeout(2600);
   await page.evaluate(`window.transport.onopen(); window.transport.receive('connected', { player_id: 'me' });`);
   await expect(page.getByText('正在核对上次操作，请勿重复提交', { exact: true })).toBeVisible();

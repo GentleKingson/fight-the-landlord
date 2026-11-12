@@ -17,6 +17,17 @@ export function GameResult({ socket }: { socket: GameSocket }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus(); }, []);
 
+  function playAgain() {
+    const state = useAppStore.getState();
+    if (state.phase === 'matching') return;
+    if (socket.send(state.matchMode === 'practice' ? MsgType.PracticeMatch : MsgType.QuickMatch)) {
+      state.leaveLocalRoom();
+      useAppStore.setState({ phase: 'matching', error: '' });
+    } else {
+      state.setError('匹配请求发送失败，请等待连接恢复后重试');
+    }
+  }
+
   return (
     <main className="result-screen" data-outcome={outcome}>
       <section className="result-panel">
@@ -34,7 +45,7 @@ export function GameResult({ socket }: { socket: GameSocket }) {
           ))}
         </div>
         <div className="result-actions">
-          <button className="primary-action" onClick={() => { const mode = useAppStore.getState().matchMode; useAppStore.getState().leaveLocalRoom(); useAppStore.setState({ phase: 'matching' }); socket.send(mode === 'practice' ? MsgType.PracticeMatch : MsgType.QuickMatch); }}>再来一局</button>
+          <button className="primary-action" onClick={playAgain}>再来一局</button>
           <div className="room-actions">
             {snapshot ? <button className="secondary-action" onClick={reviewEndTable}>查看本局牌面</button> : null}
             <button className="secondary-action" onClick={() => { useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>

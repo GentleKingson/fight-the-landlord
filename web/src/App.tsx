@@ -20,6 +20,7 @@ export function App({ demo = null }: { demo?: string | null }) {
   const endView = useAppStore((state) => state.endView);
   const connected = useAppStore((state) => state.connected);
   const error = useAppStore((state) => state.error);
+  const submission = useAppStore(state => state.submission);
   const submissionMessage = useAppStore(state => state.submissionMessage);
   const maintenance = useAppStore((state) => state.maintenance);
   const scene = resolveBackgroundScene(phase);
@@ -47,6 +48,15 @@ export function App({ demo = null }: { demo?: string | null }) {
   }, []);
 
   useEffect(() => {
+    if (submission !== 'confirmed') return;
+    const timeout = window.setTimeout(() => {
+      useAppStore.setState({ submission: 'idle', submissionMessage: '' });
+    }, 3000);
+    return () => window.clearTimeout(timeout);
+  }, [submission, submissionMessage]);
+
+
+  useEffect(() => {
     if (!connected || !error) return;
 
     const timeout = window.setTimeout(() => {
@@ -65,7 +75,14 @@ export function App({ demo = null }: { demo?: string | null }) {
   return (
     <div className="app-shell" data-scene={scene}>
       {collecting ? <div className="collection-notice" role="status">本服务已启用训练数据采集：记录匿名牌局、操作及胜负；不记录昵称、聊天或重连令牌。</div> : null}
-      {submissionMessage ? <div className="collection-notice" role="status">{submissionMessage}</div> : null}
+      {submissionMessage ? (
+        <div className="submission-notice" data-state={submission} role={submission === 'rejected' ? 'alert' : 'status'}>
+          <span>{submissionMessage}</span>
+          {submission !== 'pending' && submission !== 'unknown' ? (
+            <button onClick={() => useAppStore.setState({ submission: 'idle', submissionMessage: '' })}>关闭提示</button>
+          ) : null}
+        </div>
+      ) : null}
       {maintenance ? <div className="maintenance-banner">服务器维护中，暂时无法开始新对局</div> : null}
       {!connected && !demo ? (
         <ConnectionState error={error} />

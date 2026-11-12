@@ -253,13 +253,25 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   const selected = hand.filter((card) => selectedCards.has(cardKey(card)));
   const summary = summarizeHand(selected);
   const parsedHand = parseHand(selected);
-  const blocked = useAppStore(state => !state.connected || state.submission === "pending" || state.submission === "unknown");
-  const canPlay = !blocked && isMyTurn && phase === 'playing' && parsedHand !== null &&
-    (mustPlay || lastPlayed.length === 0 || canBeat(parsedHand, parseHand(lastPlayed)));
+  const connected = useAppStore(state => state.connected);
+  const submission = useAppStore(state => state.submission);
+  const blocked = !connected || submission === 'pending' || submission === 'unknown';
+  const target = parseHand(lastPlayed);
+  const reason = submission === 'unknown' ? '操作结果待核对，请勿重复提交'
+    : submission === 'pending' ? '等待服务器确认，请勿重复提交'
+    : !connected ? '网络已断开，请等待连接恢复'
+    : !isMyTurn ? '未轮到自己，可提前选牌'
+    : !selected.length ? '请选择要出的牌'
+    : !parsedHand ? '牌型错误，请重新选牌'
+    : !mustPlay && lastPlayed.length > 0 && !canBeat(parsedHand, target)
+      ? (target && parsedHand.type === target.type && parsedHand.length === target.length
+        ? '点数不足，需要大于当前出牌' : '牌型不匹配，无法压过当前出牌')
+      : '';
+  const canPlay = phase === 'playing' && !reason;
 
   function play() {
     if (!canPlay) {
-      useAppStore.setState({ tableMessage: selected.length ? '当前牌型不可出' : '请选择要出的牌' });
+      useAppStore.setState({ tableMessage: reason });
       return;
     }
     socket.send(MsgType.PlayCards, { cards: selected, turn_token: useAppStore.getState().turnToken });
@@ -317,17 +329,19 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       <button className="secondary-action secondary-action--blue" disabled={blocked || !isMyTurn || mustPlay} onClick={pass}>不出</button>
       <button className="secondary-action secondary-action--green" disabled={!isMyTurn} onClick={hint}>提示</button>
       <button className="secondary-action secondary-action--muted" disabled={!selectedCards.size} onClick={clearSelection}>重选</button>
-      <button className="primary-action" disabled={!canPlay} onClick={play}>出牌</button>
-      <ActionSummary selectedCount={selected.length} summary={summary} />
+      <button className="primary-action" disabled={!canPlay} aria-describedby="play-action-summary" onClick={play}>出牌</button>
+      <ActionSummary selectedCount={selected.length} summary={summary} reason={reason} />
     </section>
   );
 }
 
-function ActionSummary({ selectedCount, summary }: { selectedCount: number; summary: string }) {
+function ActionSummary({ selectedCount, summary, reason }: { selectedCount: number; summary: string; reason: string }) {
   const tableMessage = useAppStore((state) => state.tableMessage);
   return (
-    <small className={tableMessage ? 'is-warning' : ''}>
-      {tableMessage || (selectedCount ? `已选 ${selectedCount} 张 · ${summary}` : '选择手牌后出牌')}
+    <small id="play-action-summary" role="status" className={reason || tableMessage ? 'is-warning' : ''}>
+      {reason ? <span>{reason}</span> : null}
+      {reason && tableMessage ? ' · ' : null}
+      {tableMessage ? <span>{tableMessage}</span> : !reason ? (selectedCount ? `已选 ${selectedCount} 张 · ${summary}` : '选择手牌后出牌') : null}
     </small>
   );
 }
@@ -430,8 +444,8 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
   function sendChat() {
     const content = chatInput.trim();
     if (!content) return;
-    socket.send(MsgType.Chat, { content, scope: 'room' });
-    setChatInput('');
+    if (socket.send(MsgType.Chat, { content, scope: 'room' })) setChatInput('');
+    else useAppStore.getState().setError('聊天发送失败，草稿已保留，请等待连接恢复后重试');
   }
 
   return (

@@ -169,7 +169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatInput: '',
   tableMessage: '',
 
-  setConnected: (connected) => set({ connected }),
+  setConnected: (connected) => set({ connected, ...(!connected && get().phase === 'matching' ? { phase: 'lobby' as const } : {}) }),
   setError: (error) => set({ error }),
   setLobbyPanel: (lobbyPanel) => set({ lobbyPanel }),
   setRoomCodeInput: (roomCodeInput) => set({ roomCodeInput }),
@@ -183,7 +183,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setSelection: (keys) => set({ selectedCards: new Set(keys), tableMessage: '' }),
   clearSelection: () => set({ selectedCards: new Set(), tableMessage: '' }),
-  leaveLocalRoom: () => set({ roomCode: '', players: [], phase: 'lobby', ...initialTable, selectedCards: new Set() }),
+  leaveLocalRoom: () => set({ roomCode: '', players: [], phase: 'lobby', ...initialTable, selectedCards: new Set(), tableMessage: '', ...(!['pending', 'unknown'].includes(get().submission) ? { submission: 'idle', submissionMessage: '' } as const : {}) }),
   showSettlement: () => {
     if (get().phase === 'game_over' && get().endSnapshot) set({ endView: 'result', revealDeadline: null });
   },
@@ -199,6 +199,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({
           ...(!keepResult ? { ...initialTable, players: [], roomCode: '', selectedCards: new Set<string>() } : {}),
           connected: true,
+          ...(!['pending', 'unknown'].includes(state.submission) ? { submission: 'idle', submissionMessage: '' } as const : {}),
           error: '',
           phase: keepResult ? 'game_over' : 'lobby',
           playerId: payload.player_id,
@@ -354,7 +355,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           cardCounter: isMe || !Object.keys(state.cardCounter).length ? state.cardCounter : deductCounter(state.cardCounter, payload.cards ?? []),
           recentActions: pushAction(state.recentActions, action),
           seatActions: setSeatAction(state.mustPlay ? {} : state.seatActions, action),
-          selectedCards: new Set()
+          selectedCards: new Set(state.hand.filter(card => state.selectedCards.has(cardKey(card)) && (!isMe || !playedKeys.has(cardKey(card)))).map(cardKey)),
+          tableMessage: ''
         });
         break;
       }
