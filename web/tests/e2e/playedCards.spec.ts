@@ -238,3 +238,48 @@ test('mobile portrait shows full opponent plays without clipping', async ({ page
     expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(leftRowBox.x + leftRowBox.width + 1);
   }
 });
+
+test('a full hand leaves room for a straight and bidding keeps the felt stationary', async ({ page }) => {
+  await page.route('**/api/config', route => route.fulfill({ json: { collect_training_data: true } }));
+  await page.goto('/?demo=table');
+  await page.evaluate(async () => {
+    const path = '/src/stores/appStore.ts';
+    const { useAppStore } = await import(/* @vite-ignore */ path) as typeof import('../../src/stores/appStore');
+    const hand = Array.from({ length: 20 }, (_, i) => ({ rank: 14 - Math.floor(i / 2), suit: i % 2, color: i % 2 }));
+    const straight = Array.from({ length: 12 }, (_, i) => ({ rank: 3 + i, suit: 0, color: 0 }));
+    useAppStore.setState({ hand, lastPlayed: straight, lastPlayedBy: 'p3', seatActions: {
+      p3: { type: 'play', player_id: 'p3', cards: straight, hand_type: '顺子' }
+    } });
+  });
+
+  const { width, height } = page.viewportSize()!;
+  const hand = page.getByRole('option');
+  await expect(hand).toHaveCount(20);
+  const rowCount = await hand.evaluateAll(cards => new Set(cards.map(c => c.getBoundingClientRect().top)).size);
+  expect(rowCount).toBe(width < height ? 2 : 1);
+  const ten = hand.filter({ has: page.getByText('10', { exact: true }) }).first();
+  await ten.click({ position: { x: 8, y: 12 } });
+  await expect(ten).toHaveAttribute('aria-selected', 'true');
+  const row = page.locator('.played-seat--target .played-cards__row');
+  await expect(row.locator('.card')).toHaveCount(12);
+  expect(await row.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  if (width > height && height <= 520) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(40);
+
+  const felt = page.locator('.felt-table');
+  let initialBounds;
+  for (const [id, grab] of [['p1', false], ['p2', false], ['p3', true], ['p1', true]] as const) {
+    await page.evaluate(async ([actor, isGrab]) => {
+      const path = '/src/stores/appStore.ts';
+      const { useAppStore } = await import(/* @vite-ignore */ path) as typeof import('../../src/stores/appStore');
+      useAppStore.getState().handleMessage({ type: 'bid_turn', payload: { player_id: actor, is_grab: isGrab, timeout: 15, multiplier: 1 } });
+    }, [id, grab] as const);
+    const bar = page.getByLabel('叫地主操作');
+    await expect(bar).toBeVisible();
+    const buttons = bar.getByRole('button');
+    await expect(buttons).toHaveCount(id === 'p1' ? 2 : 0);
+    const host = width <= height ? '.table-arena' : id === 'p1' ? '.table-controls' : '.seat-panel.is-active';
+    await expect(page.locator(host + ' .turn-banner time')).toBeVisible();
+    initialBounds ??= await felt.boundingBox();
+    expect(await felt.boundingBox()).toEqual(initialBounds);
+  }
+});

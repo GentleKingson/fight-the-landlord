@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { RulesPanel } from '../../shared/ui/RulesPanel';
 import { ChatFeed } from '../../shared/ui/ChatFeed';
 import { DealAnimation } from './DealAnimation';
@@ -21,6 +21,13 @@ import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
 interface GameTableProps {
   socket: GameSocket;
 }
+
+const landscape = window.matchMedia?.('(orientation: landscape)');
+function subscribeOrientation(update: () => void) {
+  landscape?.addEventListener('change', update);
+  return () => landscape?.removeEventListener('change', update);
+}
+const isLandscape = () => landscape?.matches ?? false;
 
 function selectTargetPlayerId(state: AppState): string {
   return state.phase === 'playing' && !state.mustPlay && state.lastPlayed.length > 0
@@ -60,6 +67,8 @@ export function GameTable({ socket }: GameTableProps) {
   const toggleCard = useAppStore((state) => state.toggleCard);
   const setSelection = useAppStore((state) => state.setSelection);
   const isMyTurn = (phase === 'bidding' || phase === 'playing') && currentTurn === playerId;
+  const landscapeView = useSyncExternalStore(subscribeOrientation, isLandscape);
+  const placeTurnAtSeat = landscapeView && (phase === 'bidding' || phase === 'playing');
   const seats = useMemo(() => arrangeSeats(players, playerId), [players, playerId]);
   const botAvatars = useMemo(() => assignBotAvatars(players), [players]);
   const showSeatPlays = phase === 'playing' || phase === 'game_over';
@@ -119,9 +128,9 @@ export function GameTable({ socket }: GameTableProps) {
 
       <section className={`table-arena${hasOpponentAction ? ' table-arena--has-opp-action' : ''}`} aria-label="斗地主牌桌">
         <div className="opponent-row">
-          <SeatPanel player={seats.left} avatarSrc={seats.left ? botAvatars.get(seats.left.id) : undefined} side="left" active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
+          <SeatPanel player={seats.left} avatarSrc={seats.left ? botAvatars.get(seats.left.id) : undefined} side="left" showTurn={placeTurnAtSeat} active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
           <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
-          <SeatPanel player={seats.right} avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
+          <SeatPanel player={seats.right} avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined} side="right" showTurn={placeTurnAtSeat} active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
         </div>
 
         <div className={feltTableClassName}>
@@ -139,10 +148,13 @@ export function GameTable({ socket }: GameTableProps) {
             </>
           )}
         </div>
-        <TurnBanner />
+        {!placeTurnAtSeat && <TurnBanner />}
       </section>
 
-      <ActionBar socket={socket} isMyTurn={isMyTurn} phase={phase} />
+      <div className={placeTurnAtSeat ? 'table-controls table-controls--with-turn' : 'table-controls'}>
+        {placeTurnAtSeat && isMyTurn && <TurnBanner />}
+        <ActionBar socket={socket} isMyTurn={isMyTurn} phase={phase} />
+      </div>
 
       <section className="hand-zone">
         <div className="hand-heading">
@@ -229,13 +241,14 @@ function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: str
   );
 }
 
-function SeatPanel({ player, avatarSrc, side, active, action }: { player?: PlayerInfo; avatarSrc?: string; side: 'left' | 'right'; active: boolean; action?: SeatAction }) {
+function SeatPanel({ player, avatarSrc, side, active, action, showTurn }: { player?: PlayerInfo; avatarSrc?: string; side: 'left' | 'right'; active: boolean; showTurn: boolean; action?: SeatAction }) {
   if (!player) {
     return <aside className={`seat-panel seat-panel--${side}`} aria-hidden="true" />;
   }
   return (
     <aside className={`seat-panel seat-panel--${side} ${active ? 'is-active' : ''}`}>
       <PlayerBadge player={player} avatarSrc={avatarSrc} active={active} action={action} />
+      {showTurn && active && <TurnBanner />}
     </aside>
   );
 }

@@ -91,7 +91,19 @@
   .hand__slot { left: calc(50% + var(--row-x, 0px) - 29px); }
   .hand__slot[data-row="0"] { bottom: 86px; }
   .hand__slot[data-row="1"] { bottom: 6px; }
-  .hand__slot.is-selected { transform: translateY(-2px); }
+  .hand__slot.is-selected { transform: translateY(-6px); }
+  .hand .card.is-selected::after {
+    content: "";
+    position: absolute;
+    left: 3px;
+    bottom: 4px;
+    width: 11px;
+    height: 6px;
+    border: solid #71500a;
+    border-width: 0 0 3px 3px;
+    transform: rotate(-45deg);
+    pointer-events: none;
+  }
 }
 
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {

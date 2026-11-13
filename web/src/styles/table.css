@@ -464,6 +464,40 @@
   font-weight: 950;
 }
 
+/* Keep the action buttons in the same column throughout the turn. */
+.table-controls { display: contents; }
+.table-controls--with-turn {
+  display: grid;
+  grid-template-columns: clamp(92px, 16vw, 158px) minmax(0, 680px);
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.table-controls--with-turn > .action-bar { grid-area: 1 / 2; }
+.table-controls--with-turn > .turn-banner { grid-area: 1 / 1; }
+
+@media (orientation: landscape) {
+  .table-arena:has(+ .table-controls--with-turn) { grid-template-rows: auto minmax(0, 1fr); }
+  .seat-panel { display: flex; align-items: center; gap: 6px; }
+  .seat-panel--right { flex-direction: row-reverse; }
+  .seat-panel--right .player-badge { margin-left: 0; }
+  .seat-panel .turn-banner, .table-controls .turn-banner {
+    width: auto;
+    max-width: 100%;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 2px 4px;
+    gap: 4px;
+  }
+  .seat-panel .turn-banner time, .table-controls .turn-banner time { grid-area: 1 / 1; }
+  .seat-panel .turn-banner__copy, .table-controls .turn-banner__copy { display: block; grid-column: 2; }
+  .seat-panel .turn-banner__copy strong, .table-controls .turn-banner__copy strong {
+    max-width: 100%; font-size: 13px;
+  }
+  .seat-panel .turn-banner__copy span, .table-controls .turn-banner__copy span {
+    font-size: 11px; margin-top: 0;
+  }
+}
+
 /* ---------- Action Bar ---------- */
 .action-bar {
   --action-control-min: 48px;
