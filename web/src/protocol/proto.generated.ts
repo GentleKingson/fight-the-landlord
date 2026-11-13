@@ -753,6 +753,7 @@ export function decodeMaintenancePayload(input: ProtoReader | Uint8Array, length
 export function encodeErrorPayload(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
   wI64(w, 8, msg.code);
   wStr(w, 18, msg.message);
+  wStr(w, 26, msg.request_type);
   return w;
 }
 
@@ -762,12 +763,14 @@ export function decodeErrorPayload(input: ProtoReader | Uint8Array, length?: num
   const out: MsgRecord = {
     code: 0,
     message: '',
+    request_type: '',
   };
   while (r.pos < end) {
     const tag = r.uint32();
     switch (tag) {
       case 8: out.code = rI64(r); break;
       case 18: out.message = r.string(); break;
+      case 26: out.request_type = r.string(); break;
       default: r.skipType(tag & 7); break;
     }
   }

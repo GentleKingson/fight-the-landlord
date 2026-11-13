@@ -197,8 +197,9 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 	t.Run("Error", func(t *testing.T) {
 		t.Parallel()
 		original := protocol.ErrorPayload{
-			Code:    404,
-			Message: "Not found",
+			Code:        404,
+			Message:     "Not found",
+			RequestType: protocol.MsgJoinRoom,
 		}
 
 		data, err := EncodePayload(protocol.MsgError, original)
@@ -210,6 +211,7 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 
 		assert.Equal(t, original.Code, result.Code)
 		assert.Equal(t, original.Message, result.Message)
+		assert.Equal(t, original.RequestType, result.RequestType)
 	})
 }
 

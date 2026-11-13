@@ -74,18 +74,15 @@ func ParsePayload[T any](msg *protocol.Message) (*T, error) {
 
 // NewErrorMessage 创建错误消息
 func NewErrorMessage(code int) *protocol.Message {
-	msg, _ := NewMessage(protocol.MsgError, protocol.ErrorPayload{
-		Code:    code,
-		Message: protocol.ErrorMessages[code],
-	})
-	return msg
+	return NewErrorMessageWithText(code, protocol.ErrorMessages[code])
 }
 
 // NewErrorMessageWithText 创建带自定义文本的错误消息
 func NewErrorMessageWithText(code int, text string) *protocol.Message {
-	msg, _ := NewMessage(protocol.MsgError, protocol.ErrorPayload{
-		Code:    code,
-		Message: text,
-	})
-	return msg
+	return NewRequestError("", code, text)
+}
+
+// NewRequestError associates a rejection with the request that failed.
+func NewRequestError(request protocol.MessageType, code int, text string) *protocol.Message {
+	return MustNewMessage(protocol.MsgError, protocol.ErrorPayload{Code: code, Message: text, RequestType: request})
 }

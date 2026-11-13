@@ -200,7 +200,7 @@ export interface IncomingPayloadMap {
   maintenance_status: { maintenance: boolean };
   maintenance_push: { maintenance: boolean };
   maintenance_pull: { maintenance: boolean };
-  error: { code: number; message: string };
+  error: { code: number; message: string; request_type?: MessageType };
 }
 
 export type IncomingMessage = {

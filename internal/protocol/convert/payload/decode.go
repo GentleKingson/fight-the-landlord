@@ -164,8 +164,9 @@ func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target 
 			return true, err
 		}
 		*target.(*protocol.ErrorPayload) = protocol.ErrorPayload{
-			Code:    int(pbMsg.Code),
-			Message: pbMsg.Message,
+			Code:        int(pbMsg.Code),
+			Message:     pbMsg.Message,
+			RequestType: protocol.MessageType(pbMsg.RequestType),
 		}
 		return true, nil
 	}

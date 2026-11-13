@@ -8,6 +8,7 @@ interface ConnectionSlice {
   submission: "idle" | "pending" | "unknown" | "confirmed" | "rejected";
   submissionMessage: string;
   connected: boolean;
+  sessionReplaced: boolean;
   playerId: string;
   playerName: string;
   reconnectToken: string;
@@ -17,7 +18,7 @@ interface ConnectionSlice {
 }
 
 interface LobbySlice {
-  roomRequest: '创建房间' | '加入房间' | '准备' | '取消准备' | null;
+  roomRequest: 'create_room' | 'join_room' | 'ready' | 'cancel_ready' | null;
   cancellingMatch: boolean;
   matchMode: 'practice' | 'online';
   phase: Phase;
@@ -148,6 +149,7 @@ const initialTable: TableSlice = {
 export const useAppStore = create<AppState>((set, get) => ({
   submission: "idle", submissionMessage: "",
   connected: false,
+  sessionReplaced: false,
   playerId: '',
   playerName: '',
   reconnectToken: '',
@@ -246,8 +248,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.Error: {
-        const payload = message.payload as { message?: string };
-        set({ error: payload.message || '未知错误', roomRequest: null, cancellingMatch: false, phase: state.phase === 'matching' && !state.cancellingMatch ? 'lobby' : state.phase });
+        const payload = message.payload as { message?: string; request_type?: string };
+        set({ error: payload.message || '未知错误', roomRequest: payload.request_type === state.roomRequest ? null : state.roomRequest,
+          cancellingMatch: false, phase: state.phase === 'matching' && !state.cancellingMatch ? 'lobby' : state.phase });
         break;
       }
       case MsgType.OnlineCount:
@@ -279,7 +282,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayerReady: {
         const payload = message.payload as { player_id: string; ready: boolean };
-        set({ ...(payload.player_id === state.playerId ? { roomRequest: null } : {}), players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
+        const confirmed = payload.player_id === state.playerId && state.roomRequest === (payload.ready ? MsgType.Ready : MsgType.CancelReady);
+        set({ ...(confirmed ? { roomRequest: null } : {}), players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
         break;
       }
       case MsgType.MatchCanceled:

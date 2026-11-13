@@ -72,9 +72,10 @@ for (const scope of ['lobby', 'room'] as const) {
     await page.goto(scope === 'room' ? '/?demo=table' : '/?demo=lobby');
     const push = (count: number, own = false) => page.evaluate(async ({ count, scope, own }) => {
       const path = '/src/stores/appStore.ts';
-      const { useAppStore } = await import(/* @vite-ignore */ path);
+      const { useAppStore, useChatStore } = await import(/* @vite-ignore */ path);
+      const first = (useChatStore.getState().messages.at(-1)?.id ?? 0) + 1;
       for (let i = 0; i < count; i++) useAppStore.getState().handleMessage({ type: 'chat',
-        payload: { scope, sender_id: own ? 'p1' : 'peer', content: '第一行消息，第二行还有一些内容。'.repeat(3) + i } });
+        payload: { scope, sender_id: own ? 'p1' : 'peer', content: '第一行消息，第二行还有一些内容。'.repeat(3) + (first + i) } });
     }, { count, scope, own });
     await push(30);
     await page.getByRole('button', { name: '聊天', exact: true }).click();
@@ -84,22 +85,28 @@ for (const scope of ['lobby', 'room'] as const) {
     await push(1);
     await expect.poll(gap).toBeLessThanOrEqual(1);
     const newer = page.getByRole('button', { name: '有新消息，查看最新' });
-    for (const own of [false, true]) {
-      const anchor = feed.locator('p').nth(5);
+    for (const action of ['button', 'scroll', 'own']) {
+      const anchor = feed.locator('p').first();
       await anchor.evaluate(el => el.scrollIntoView({ block: 'start' }));
       await expect.poll(gap).toBeGreaterThan(100);
-      const top = (await anchor.boundingBox())!.y;
+      const top = await feed.evaluate(el => el.scrollTop);
       const anchorText = await anchor.textContent();
-      await push(1, own);
-      if (!own) {
+      await push(action === 'own' ? 1 : 85, action === 'own');
+      if (action !== 'own') {
         await expect(newer).toBeVisible();
-        const rect = await feed.getByText(anchorText!, { exact: true }).boundingBox();
-        expect(Math.abs(rect!.y - top)).toBeLessThan(2);
-        await newer.focus();
-        await newer.press('Enter');
+        await expect(feed.locator('p').first()).toHaveText(anchorText!);
+        expect(await feed.evaluate(el => el.scrollTop)).toBe(top);
+        if (action === 'button') {
+          await newer.focus();
+          await newer.press('Enter');
+        } else {
+          await feed.evaluate(el => { el.scrollTop = el.scrollHeight; });
+        }
       }
       await expect.poll(gap).toBeLessThanOrEqual(1);
       await expect(newer).toHaveCount(0);
+      await expect(feed.locator('p')).toHaveCount(scope === 'room' ? 24 : 20);
+      if (action !== 'own') await expect(feed.getByText(anchorText!, { exact: true })).toHaveCount(0);
     }
   });
 }

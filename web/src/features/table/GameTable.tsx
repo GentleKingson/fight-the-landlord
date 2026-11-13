@@ -160,7 +160,7 @@ export function GameTable({ socket }: GameTableProps) {
       </section>
 
       {phase === 'dealing' && <DealAnimation deal={deal} count={hand.length} {...presentation} />}
-      <UtilityDrawer socket={socket} drawer={drawer} onClose={() => setDrawer('none')} />
+      <UtilityDrawer key={roomCode} socket={socket} drawer={drawer} onClose={() => setDrawer('none')} />
     </main>
   );
 }
@@ -352,6 +352,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   function hint() {
     const state = useAppStore.getState();
     if (state.phase !== 'playing' || state.currentTurn !== state.playerId) return;
+    if (state.submission === 'rejected') useAppStore.setState({ submission: 'idle', submissionMessage: '' });
     const context = JSON.stringify([state.roundId, state.playerId, state.currentTurn, state.turnToken,
       state.hand.map(cardKey).sort(), state.lastPlayedBy, handSignature(state.lastPlayed), state.mustPlay]);
     const isNewContext = hintSession.current?.context !== context;

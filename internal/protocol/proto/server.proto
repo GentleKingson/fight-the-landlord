@@ -61,6 +61,7 @@ message MaintenancePayload {
 message ErrorPayload {
   int64 code = 1;
   string message = 2;
+  string request_type = 3; // Rejected request; absent for general notices.
 }
 
 // StatsResultPayload 个人统计结果

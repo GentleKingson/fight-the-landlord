@@ -158,8 +158,9 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 	case protocol.MsgError:
 		p := payload.(protocol.ErrorPayload)
 		return &pb.ErrorPayload{
-			Code:    int64(p.Code),
-			Message: p.Message,
+			Code:        int64(p.Code),
+			Message:     p.Message,
+			RequestType: string(p.RequestType),
 		}, true
 	}
 	return nil, false

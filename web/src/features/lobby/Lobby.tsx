@@ -73,7 +73,7 @@ function submitRoomRequest(socket: GameSocket, type: keyof typeof roomRequestLab
   if (state.roomRequest) return;
   const label = roomRequestLabels[type];
   if (socket.send(type, roomCode ? { room_code: roomCode } : undefined)) {
-    useAppStore.setState({ roomRequest: label, error: '', matchMode: type === MsgType.CreateRoom || type === MsgType.JoinRoom ? 'online' : state.matchMode });
+    useAppStore.setState({ roomRequest: type, error: '', matchMode: type === MsgType.CreateRoom || type === MsgType.JoinRoom ? 'online' : state.matchMode });
   } else {
     state.setError(`${label}请求未发送，请连接恢复后重试`);
   }
@@ -135,7 +135,7 @@ function LobbyHome({ socket }: LobbyProps) {
       <div className="entry-grid">
         <button className="entry-tile" disabled={!!pending} onClick={() => submitRoomRequest(socket, MsgType.CreateRoom)}>
           <Icon name="room" />
-          <strong>{pending === '创建房间' ? '正在创建…' : '创建房间'}</strong>
+          <strong>{pending === MsgType.CreateRoom ? '正在创建…' : '创建房间'}</strong>
           <span>好友同玩</span>
         </button>
         <button className="entry-tile" disabled={!!pending} onClick={() => startMatch('practice')}>
@@ -162,7 +162,7 @@ function LobbyHome({ socket }: LobbyProps) {
           autoCapitalize="none"
           spellCheck={false}
         />
-        <button type="submit" disabled={!!pending}>{pending === '加入房间' ? '正在加入…' : '加入'}</button>
+        <button type="submit" disabled={!!pending}>{pending === MsgType.JoinRoom ? '正在加入…' : '加入'}</button>
       </form>
 
       <section className="room-browser" aria-label="可加入房间">
@@ -368,7 +368,7 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
       </div>
       <div className="room-actions">
         <button className="primary-action" disabled={!!pending} onClick={() => submitRoomRequest(socket, me?.ready ? MsgType.CancelReady : MsgType.Ready)}>
-          {pending ? `正在${pending}…` : me?.ready ? '取消准备' : '准备开始'}
+          {pending ? `正在${roomRequestLabels[pending]}…` : me?.ready ? '取消准备' : '准备开始'}
         </button>
         <button className="secondary-action" disabled={!!pending} onClick={() => {
           if (socket.send(MsgType.LeaveRoom)) useAppStore.getState().leaveLocalRoom();

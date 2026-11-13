@@ -151,7 +151,7 @@ test('a replaced tab stops reconnecting while network failures still retry', () 
   vi.advanceTimersByTime(15000);
   expect(FakeSocket.latest).toBe(second);
   expect(useAppStore.getState().connected).toBe(false);
-  expect(useAppStore.getState().error).toContain('本页面已停止重连');
+  expect(useAppStore.getState().sessionReplaced).toBe(true);
   socket.close();
 });
 

@@ -88,7 +88,13 @@ it.each([
   fireEvent.click(button);
   expect(send).toHaveBeenCalledTimes(2);
   expect(send).toHaveBeenLastCalledWith(type, type === MsgType.JoinRoom ? { room_code: '123456' } : undefined);
-  act(() => useAppStore.getState().handleMessage({ type: MsgType.Error, payload: { message: '服务器拒绝请求' } }));
+  for (const request_type of [MsgType.GetStats, undefined]) {
+    act(() => useAppStore.getState().handleMessage({ type: MsgType.Error, payload: { message: '其他请求或限流告警', request_type } }));
+    fireEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(send).toHaveBeenCalledTimes(2);
+  }
+  act(() => useAppStore.getState().handleMessage({ type: MsgType.Error, payload: { message: '服务器拒绝请求', request_type: type } }));
   expect(button).toBeEnabled();
   fireEvent.click(button);
   act(() => useAppStore.getState().handleMessage({ type: type === MsgType.CreateRoom ? MsgType.RoomCreated : MsgType.RoomJoined,
@@ -119,6 +125,7 @@ it('waits for our own ready update and unlocks a pending cancel on disconnect', 
   expect(useAppStore.getState().error).toContain('准备请求未发送');
   fireEvent.click(ready);
   act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'peer', ready: true } }));
+  act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'me', ready: false } }));
   expect(screen.getByRole('button', { name: '正在准备…' })).toBeDisabled();
   act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'me', ready: true } }));
   const cancel = screen.getByRole('button', { name: '取消准备' });

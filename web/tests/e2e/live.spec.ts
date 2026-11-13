@@ -59,6 +59,11 @@ test('three people can join, restore a waiting room and start bidding', async ({
     const code = pages[0].locator('.room-code-panel strong');
     await expect(code).toHaveText(/^\d{6}$/);
     const roomCode = (await code.textContent())!;
+    const joiner = pages[1];
+    await joiner.getByRole('textbox', { name: '加入房间', exact: true }).fill('0');
+    await joiner.getByRole('button', { name: '加入', exact: true }).click();
+    await expect(joiner.getByRole('alert')).toContainText('房间不存在');
+    await expect(joiner.getByRole('button', { name: '加入', exact: true })).toBeEnabled();
     for (const page of pages.slice(1)) {
       await page.getByRole('textbox', { name: '加入房间', exact: true }).fill(roomCode);
       await page.getByRole('button', { name: '加入', exact: true }).click();
@@ -97,6 +102,8 @@ test('duplicated credentials replace the old tab without a reconnect loop', asyn
   const duplicate = await context.newPage();
   await duplicate.goto(process.env.DDZ_LIVE_URL!);
   await expect(page.getByText('此账号已在另一个页面继续游戏，本页面已停止重连')).toBeVisible();
+  await page.getByRole('button', { name: /创建房间/ }).click();
+  await expect(page.getByText(/本页面已停止重连.*重新加载页面/)).toBeVisible();
   // Observe more than two retry intervals; the displaced page must stay stopped.
   await page.waitForTimeout(6000);
   await expect(page.getByText('此账号已在另一个页面继续游戏，本页面已停止重连')).toBeVisible();

@@ -127,8 +127,8 @@ func (h *Handler) initHandlers() {
 		},
 		protocol.MsgQuickMatch:    func(c types.ClientInterface, _ *protocol.Message) { h.handleQuickMatch(c) },
 		protocol.MsgPracticeMatch: func(c types.ClientInterface, _ *protocol.Message) { h.handlePracticeMatch(c) },
-		protocol.MsgReady:         func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, true) },
-		protocol.MsgCancelReady:   func(c types.ClientInterface, _ *protocol.Message) { h.handleReady(c, false) },
+		protocol.MsgReady:         h.handleReady,
+		protocol.MsgCancelReady:   h.handleReady,
 
 		// 游戏操作
 		protocol.MsgBid:       h.handleBid,

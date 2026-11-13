@@ -254,8 +254,9 @@ type MaintenanceStatusPayload struct {
 
 // ErrorPayload 错误响应
 type ErrorPayload struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code        int         `json:"code"`
+	Message     string      `json:"message"`
+	RequestType MessageType `json:"request_type,omitempty"`
 }
 
 // StatsResultPayload 个人统计结果
