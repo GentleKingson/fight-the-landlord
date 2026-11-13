@@ -93,11 +93,12 @@ it('cycles freely led hands including pairs and sequences', () => {
 });
 
 it('handles one or no suggestion without pretending there is another choice', () => {
-  useAppStore.setState({ hand: [card(5), card(5, 1)] });
+  const rejection = { submission: 'rejected', submissionMessage: '上次操作未发送' } as const;
+  useAppStore.setState({ hand: [card(5), card(5, 1)], ...rejection });
   setup(); hint(); hint();
   expect(selectedRanks()).toEqual([5, 5]);
   expect(screen.getByText('提示 1/1：对子')).toBeTruthy();
-  act(() => useAppStore.setState({ lastPlayed: [card(8), card(8, 1)], selectedCards: new Set() }));
+  act(() => useAppStore.setState({ lastPlayed: [card(8), card(8, 1)], selectedCards: new Set(), ...rejection }));
   hint();
   expect(selectedRanks()).toEqual([]);
   expect(screen.getByText('暂无提示，请手动选牌')).toBeTruthy();

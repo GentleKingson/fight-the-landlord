@@ -527,7 +527,7 @@
   overscroll-behavior: contain;
 }
 
-.sub-panel .chat-feed {
+.sub-panel .chat-history {
   flex: 1;
   margin-bottom: 10px;
 }
@@ -595,6 +595,15 @@
   box-shadow: inset 0 0 0 1px rgba(255, 224, 138, .22);
 }
 
+.nav-session {
+  grid-column: 1 / -1;
+  align-self: center;
+  padding: 8px;
+  text-align: center;
+  color: var(--text-light);
+  font-size: 13px;
+}
+
 @media (max-width: 600px) and (orientation: portrait) {
   .lobby-screen { gap: 8px; padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)); }
   .brand-mark { width: 36px; height: 36px; }
@@ -602,7 +611,7 @@
   .brand-lockup h1 { font-size: 22px; }
   .brand-lockup p { font-size: 11px; }
   .lobby-status { padding: 7px 10px; font-size: 12px; }
-  .lobby-home { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(96px, 1fr) auto auto minmax(80px, 1fr); gap: 8px; padding: 10px; }
+  .lobby-home { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(min-content, 1fr) auto auto minmax(80px, 1fr); gap: 8px; padding: 10px; overflow-y: auto; }
   .lobby-home > * { grid-column: 1; grid-row: auto; }
   .quick-card { gap: 10px; padding: 12px; }
   .quick-card h2 { font-size: 28px; }

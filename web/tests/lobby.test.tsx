@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Lobby } from '../src/features/lobby/Lobby';
 import { useAppStore } from '../src/stores/appStore';
@@ -58,4 +59,79 @@ it('leaves matching when the connection drops', () => {
   useAppStore.setState({ phase: 'matching', connected: true });
   useAppStore.getState().setConnected(false);
   expect(useAppStore.getState().phase).toBe('lobby');
+});
+
+it.each(['waiting', 'matching'] as const)('explains why lobby navigation is unavailable while %s', phase => {
+  useAppStore.setState({ phase, lobbyPanel: 'rules', matchMode: 'online', connected: true });
+  render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  const rules = screen.getByRole('button', { name: '规则' });
+  expect(rules).toBeDisabled();
+  expect(rules).toHaveAccessibleDescription(/可使用大厅导航/);
+  expect(rules).not.toHaveAttribute('aria-current');
+  expect(screen.getByRole('button', { name: phase === 'waiting' ? '离开房间' : '取消匹配' })).toBeEnabled();
+});
+
+it.each([
+  [MsgType.CreateRoom, /创建房间/, '创建房间'],
+  [MsgType.JoinRoom, /^加入$/, '加入房间'],
+  [MsgType.JoinRoom, /123456/, '加入房间']
+] as const)('reports failed %s from %s and waits for the response before allowing another request', (type, name, label) => {
+  useAppStore.setState({ phase: 'lobby', lobbyPanel: 'home', roomRequest: null, error: '', roomCodeInput: '123456',
+    roomList: [{ room_code: '123456', player_count: 1, max_players: 3 }] });
+  const send = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+  render(<Lobby socket={{ send } as unknown as GameSocket} />);
+  const button = screen.getByRole('button', { name });
+  fireEvent.click(button);
+  expect(useAppStore.getState().error).toContain(label + '请求未发送');
+  fireEvent.click(button);
+  expect(button).toBeDisabled();
+  fireEvent.click(button);
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send).toHaveBeenLastCalledWith(type, type === MsgType.JoinRoom ? { room_code: '123456' } : undefined);
+  for (const request_type of [MsgType.GetStats, undefined]) {
+    act(() => useAppStore.getState().handleMessage({ type: MsgType.Error, payload: { message: '其他请求或限流告警', request_type } }));
+    fireEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(send).toHaveBeenCalledTimes(2);
+  }
+  act(() => useAppStore.getState().handleMessage({ type: MsgType.Error, payload: { message: '服务器拒绝请求', request_type: type } }));
+  expect(button).toBeEnabled();
+  fireEvent.click(button);
+  act(() => useAppStore.getState().handleMessage({ type: type === MsgType.CreateRoom ? MsgType.RoomCreated : MsgType.RoomJoined,
+    payload: { room_code: '123456', player: { id: 'me', name: '我', seat: 0 }, players: [] } }));
+  expect(screen.getByRole('button', { name: '离开房间' })).toBeEnabled();
+});
+
+it('preserves the waiting room on failed leave and accepts a retry after reconnect', () => {
+  useAppStore.setState({ phase: 'waiting', roomCode: '123456', roomRequest: null, connected: false });
+  const send = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+  render(<Lobby socket={{ send } as unknown as GameSocket} />);
+  const leave = screen.getByRole('button', { name: '离开房间' });
+  fireEvent.click(leave);
+  expect(useAppStore.getState()).toMatchObject({ phase: 'waiting', roomCode: '123456', error: expect.stringContaining('离房请求未发送') });
+  act(() => useAppStore.getState().setConnected(true));
+  fireEvent.click(leave);
+  expect(useAppStore.getState()).toMatchObject({ phase: 'lobby', roomCode: '' });
+});
+
+it('waits for our own ready update and unlocks a pending cancel on disconnect', () => {
+  useAppStore.setState({ phase: 'waiting', playerId: 'me', roomRequest: null, players: [
+    { id: 'me', name: '我', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 },
+  ] });
+  const send = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+  render(<Lobby socket={{ send } as unknown as GameSocket} />);
+  const ready = screen.getByRole('button', { name: '准备开始' });
+  fireEvent.click(ready);
+  expect(useAppStore.getState().error).toContain('准备请求未发送');
+  fireEvent.click(ready);
+  act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'peer', ready: true } }));
+  act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'me', ready: false } }));
+  expect(screen.getByRole('button', { name: '正在准备…' })).toBeDisabled();
+  act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'me', ready: true } }));
+  const cancel = screen.getByRole('button', { name: '取消准备' });
+  fireEvent.click(cancel);
+  expect(send).toHaveBeenLastCalledWith(MsgType.CancelReady, undefined);
+  expect(cancel).toBeDisabled();
+  act(() => useAppStore.getState().setConnected(false));
+  expect(cancel).toBeEnabled();
 });

@@ -104,7 +104,7 @@
   .end-table__heading h1 { font-size: 18px; margin: 0; }
   .end-table__eyebrow { font-size: 11px; }
   .end-table__footer p { font-size: 13px; }
-  .table-arena.end-table__board { padding: 8px; gap: 8px; }
+  .table-arena.end-table__board { grid-template-areas: "winning winning" "left right" "me me"; padding: 8px; gap: 8px; }
   .end-table__hand,
   .end-table__winning { padding: 10px; }
   .end-table__cards .card { --w: 44px; --h: 64px; }

@@ -40,8 +40,7 @@ export class GameSocket {
       try { this.pending = JSON.parse(sessionStorage.getItem('ddz_pending_action') || 'null'); } catch { /* optional reload recovery */ }
     }
     if (this.pending) useAppStore.setState({ submission: 'unknown', submissionMessage: '正在核对上次操作，请勿重复提交' });
-    const store = useAppStore.getState();
-    store.setError('');
+    useAppStore.setState({ error: '', sessionReplaced: false });
 
     // Authentication and recovery happen during the cookie-authenticated handshake.
     try { sessionStorage.removeItem('ddz_next_reconnect'); } catch { /* storage may be disabled */ }
@@ -104,7 +103,7 @@ export class GameSocket {
       useAppStore.getState().setConnected(false);
       if (event.code === 4001) {
         this.intentionalClose = true;
-        useAppStore.getState().setError('此账号已在另一个页面继续游戏，本页面已停止重连');
+        useAppStore.setState({ sessionReplaced: true });
         return;
       }
       if (!this.intentionalClose) {

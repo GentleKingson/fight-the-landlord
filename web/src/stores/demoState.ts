@@ -23,9 +23,10 @@ export function seedDemoState(mode: string): void {
     is_bot: mode === 'practice' && player.id !== 'p1'
   }));
   useChatStore.setState({
+    roomCode: '836219',
     messages: [
-      { sender_name: '山月', content: '这局节奏很快。', scope: 'room', time: Date.now() / 1000 },
-      { sender_name: '青竹', content: '我先看一手。', scope: 'room', time: Date.now() / 1000 }
+      { id: 1, sender_name: '山月', content: '这局节奏很快。', scope: 'room', time: Date.now() / 1000 },
+      { id: 2, sender_name: '青竹', content: '我先看一手。', scope: 'room', time: Date.now() / 1000 }
     ]
   });
   useAppStore.setState({

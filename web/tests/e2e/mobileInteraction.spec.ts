@@ -91,7 +91,7 @@ test('utility content scrolls internally while the table stays fixed', async ({ 
   await page.evaluate(async () => {
     const path = '/src/stores/appStore.ts';
     const { useAppStore, useChatStore } = await import(/* @vite-ignore */ path);
-    useChatStore.setState({ messages: Array.from({ length: 24 }, () => ({ scope: 'room', sender_name: '玩家', content: '较长的聊天消息，用来验证内容区域独立滚动。'.repeat(3) })) });
+    useChatStore.setState({ messages: Array.from({ length: 24 }, (_, id) => ({ id, scope: 'room', sender_name: '玩家', content: '较长的聊天消息，用来验证内容区域独立滚动。'.repeat(3) })) });
     useAppStore.setState({ recentActions: Array.from({ length: 40 }, () => ({ type: 'pass', player_name: '玩家' })) });
   });
   for (const [drawer, selector] of [['chat', '.chat-feed'], ['history', '.history-list'], ['rules', '.rules-panel']]) {

@@ -20,6 +20,7 @@ export function App({ demo = null }: { demo?: string | null }) {
   const phase = useAppStore((state) => state.phase);
   const endView = useAppStore((state) => state.endView);
   const connected = useAppStore((state) => state.connected);
+  const sessionReplaced = useAppStore(state => state.sessionReplaced);
   const error = useAppStore((state) => state.error);
   const submission = useAppStore(state => state.submission);
   const submissionMessage = useAppStore(state => state.submissionMessage);
@@ -87,7 +88,7 @@ export function App({ demo = null }: { demo?: string | null }) {
       ) : null}
       {maintenance ? <div className="maintenance-banner">服务器维护中，暂时无法开始新对局</div> : null}
       {!connected && !demo ? (
-        <ConnectionState error={error} />
+        <ConnectionState error={sessionReplaced ? '此账号已在另一个页面继续游戏，本页面已停止重连。如需在此继续，请重新加载页面。' : error} />
       ) : null}
       {connected && error ? <div className="connection-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError('')}>关闭</button></div> : null}
       {phase === 'game_over' ? (

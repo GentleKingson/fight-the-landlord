@@ -8,6 +8,7 @@ interface ConnectionSlice {
   submission: "idle" | "pending" | "unknown" | "confirmed" | "rejected";
   submissionMessage: string;
   connected: boolean;
+  sessionReplaced: boolean;
   playerId: string;
   playerName: string;
   reconnectToken: string;
@@ -17,6 +18,7 @@ interface ConnectionSlice {
 }
 
 interface LobbySlice {
+  roomRequest: 'create_room' | 'join_room' | 'ready' | 'cancel_ready' | null;
   cancellingMatch: boolean;
   matchMode: 'practice' | 'online';
   phase: Phase;
@@ -147,6 +149,7 @@ const initialTable: TableSlice = {
 export const useAppStore = create<AppState>((set, get) => ({
   submission: "idle", submissionMessage: "",
   connected: false,
+  sessionReplaced: false,
   playerId: '',
   playerName: '',
   reconnectToken: '',
@@ -154,6 +157,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: '',
   maintenance: false,
   phase: 'connecting',
+  roomRequest: null,
   matchMode: loadMatchMode(),
   cancellingMatch: false,
   roomCode: '',
@@ -171,7 +175,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatInput: '',
   tableMessage: '',
 
-  setConnected: (connected) => set({ connected, ...(!connected ? { latency: 0, cancellingMatch: false } : {}), ...(!connected && get().phase === 'matching' ? { phase: 'lobby' as const } : {}) }),
+  setConnected: (connected) => set({ connected, ...(!connected ? { latency: 0, cancellingMatch: false, roomRequest: null } : {}), ...(!connected && get().phase === 'matching' ? { phase: 'lobby' as const } : {}) }),
   setError: (error) => set({ error }),
   setLobbyPanel: (lobbyPanel) => set({ lobbyPanel }),
   setRoomCodeInput: (roomCodeInput) => set({ roomCodeInput }),
@@ -185,7 +189,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setSelection: (keys) => set({ selectedCards: new Set(keys), tableMessage: '' }),
   clearSelection: () => set({ selectedCards: new Set(), tableMessage: '' }),
-  leaveLocalRoom: () => set({ roomCode: '', players: [], phase: 'lobby', ...initialTable, selectedCards: new Set(), tableMessage: '', ...(!['pending', 'unknown'].includes(get().submission) ? { submission: 'idle', submissionMessage: '' } as const : {}) }),
+  leaveLocalRoom: () => {
+    useChatStore.getState().setRoom('');
+    set({ roomCode: '', roomRequest: null, players: [], phase: 'lobby', ...initialTable, selectedCards: new Set(), tableMessage: '', ...(!['pending', 'unknown'].includes(get().submission) ? { submission: 'idle', submissionMessage: '' } as const : {}) });
+  },
   showSettlement: () => {
     if (get().phase === 'game_over' && get().endSnapshot) set({ endView: 'result', revealDeadline: null });
   },
@@ -198,11 +205,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       case MsgType.Connected: {
         const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
         const keepResult = state.phase === 'game_over' && state.endSnapshot && state.playerId === payload.player_id;
+        if (state.playerId !== payload.player_id) useChatStore.getState().setRoom('');
         set({
           ...(!keepResult ? { ...initialTable, players: [], roomCode: '', selectedCards: new Set<string>() } : {}),
           connected: true,
           ...(!['pending', 'unknown'].includes(state.submission) ? { submission: 'idle', submissionMessage: '' } as const : {}),
           cancellingMatch: false,
+          roomRequest: null,
           error: '',
           phase: keepResult ? 'game_over' : 'lobby',
           playerId: payload.player_id,
@@ -222,6 +231,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({ playerName: payload.player_name });
           break;
         }
+        useChatStore.getState().setRoom(payload.room_code ?? '');
         if (payload.game_state) {
           set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
         } else {
@@ -238,8 +248,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.Error: {
-        const payload = message.payload as { message?: string };
-        set({ error: payload.message || '未知错误', cancellingMatch: false, phase: state.phase === 'matching' && !state.cancellingMatch ? 'lobby' : state.phase });
+        const payload = message.payload as { message?: string; request_type?: string };
+        set({ error: payload.message || '未知错误', roomRequest: payload.request_type === state.roomRequest ? null : state.roomRequest,
+          cancellingMatch: false, phase: state.phase === 'matching' && !state.cancellingMatch ? 'lobby' : state.phase });
         break;
       }
       case MsgType.OnlineCount:
@@ -247,12 +258,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.RoomCreated: {
         const payload = message.payload as { room_code: string; player: PlayerInfo };
-        set({ ...initialTable, roomCode: payload.room_code, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
+        useChatStore.getState().setRoom(payload.room_code);
+        set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.RoomJoined: {
         const payload = message.payload as { room_code: string; players: PlayerInfo[] };
-        set({ ...initialTable, roomCode: payload.room_code, players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
+        useChatStore.getState().setRoom(payload.room_code);
+        set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.PlayerJoined: {
@@ -269,7 +282,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayerReady: {
         const payload = message.payload as { player_id: string; ready: boolean };
-        set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
+        const confirmed = payload.player_id === state.playerId && state.roomRequest === (payload.ready ? MsgType.Ready : MsgType.CancelReady);
+        set({ ...(confirmed ? { roomRequest: null } : {}), players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
         break;
       }
       case MsgType.MatchCanceled:
@@ -280,7 +294,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.GameStart: {
         const payload = message.payload as { players: PlayerInfo[] };
-        set({ ...initialTable, players: normalizeGamePlayers(payload.players ?? [], state.playerId), phase: 'dealing', selectedCards: new Set() });
+        set({ ...initialTable, roomRequest: null, players: normalizeGamePlayers(payload.players ?? [], state.playerId), phase: 'dealing', selectedCards: new Set() });
         break;
       }
       case MsgType.DealCards: {
@@ -421,9 +435,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }));
 
-export const useChatStore = create<{ messages: ChatPayload[]; push: (message: ChatPayload) => void; clear: () => void }>((set, get) => ({
+export const useChatStore = create<{
+  roomCode: string;
+  messages: (ChatPayload & { id: number })[];
+  push: (message: ChatPayload) => void;
+  setRoom: (roomCode: string) => void;
+  clear: () => void;
+}>((set, get) => ({
+  roomCode: '',
   messages: [],
-  push: (message) => set({ messages: [...get().messages, message].slice(-80) }),
+  push: (message) => set(({ messages }) => ({ messages: [...messages, { ...message, id: (messages.at(-1)?.id ?? 0) + 1 }].slice(-80) })),
+  setRoom: (roomCode) => {
+    if (roomCode !== get().roomCode) set({ roomCode, messages: get().messages.filter(message => message.scope !== 'room') });
+  },
   clear: () => set({ messages: [] })
 }));
 

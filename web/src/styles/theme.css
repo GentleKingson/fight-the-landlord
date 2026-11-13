@@ -84,7 +84,8 @@
 }
 
 .bottom-nav button { transition: color .16s ease, background .16s ease, box-shadow .16s ease; }
-.bottom-nav button:not(.is-active):hover { color: #ffe9b0; background: rgba(255, 218, 128, .07); }
+.bottom-nav button:not(.is-active):enabled:hover { color: #ffe9b0; background: rgba(255, 218, 128, .07); }
+.bottom-nav button:disabled { opacity: .55; }
 
 .bottom-nav button.is-active {
   color: #3a1f00;
@@ -608,6 +609,7 @@
 }
 
 @media (max-width: 360px) and (orientation: portrait) {
+  .quick-card__art,
   .quick-card::after { display: none; }
   .table-arena::after { display: none; }
 }
@@ -646,7 +648,7 @@
 .history-cards .card { flex: none; }
 .rules-panel { line-height: 1.7; color: #ecf2ec; }
 .lobby-screen > .rules-panel { overflow: auto; min-height: 0; background: #102c23; padding: 16px; border-radius: 12px; }
-.action-bar small { height: 16px; min-height: 16px; line-height: 16px; }
+.action-bar small { line-height: 16px; }
 .result-heading h1, .result-screen[data-outcome="defeat"] .result-heading h1 {
   background: none; color: #ffebae; -webkit-text-fill-color: currentColor;
 }
@@ -676,7 +678,7 @@
 }
 @media (orientation: landscape) and (max-height: 520px) {
   .table-screen, .table-arena { gap: 2px; }
-  .action-bar small { height: 14px; min-height: 14px; line-height: 14px; }
+  .action-bar small { min-height: 14px; line-height: 14px; }
 }
 @media (max-width: 430px) and (orientation: portrait) {
   /* Keep five 44px tool targets without widening the hand's grid track. */

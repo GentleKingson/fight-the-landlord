@@ -36,6 +36,11 @@ func TestRoomOperationsCannotRemoveActivePlayer(t *testing.T) {
 		require.Len(t, r.Players, 3)
 		messages := clients[0].(*testutil.SimpleClient).SentMessages()
 		require.Equal(t, protocol.MsgError, messages[len(messages)-1].Type)
+		if msg.Type == protocol.MsgCreateRoom || msg.Type == protocol.MsgJoinRoom {
+			rejection, err := codec.ParsePayload[protocol.ErrorPayload](messages[len(messages)-1])
+			require.NoError(t, err)
+			require.Equal(t, msg.Type, rejection.RequestType)
+		}
 	}
 }
 

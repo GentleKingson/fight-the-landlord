@@ -118,6 +118,20 @@
   box-shadow: var(--shadow-soft);
 }
 
+@media (max-width: 600px) {
+  .app-shell[data-scene="lobby"] .connection-toast {
+    position: static;
+    transform: none;
+    align-self: stretch;
+    flex: none;
+    max-width: none;
+    justify-content: center;
+    padding: max(6px, env(safe-area-inset-top)) 10px 6px;
+    border-radius: 0;
+    font-size: 13px;
+  }
+}
+
 /* ---------- Shared Primitives ---------- */
 .spinner {
   width: 16px;
@@ -222,7 +236,23 @@ summary:focus-visible {
   color: rgba(255, 255, 255, .7);
 }
 
+.chat-history {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-latest {
+  flex: none;
+  align-self: center;
+  padding: 6px 12px;
+  color: #fff;
+  background: #254e41;
+  border-radius: var(--radius-sm);
+}
+
 .chat-feed {
+  flex: 1 1 auto;
   display: grid;
   gap: 8px;
   min-height: 0;

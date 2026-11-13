@@ -99,7 +99,7 @@ test('auto settlement and keyboard review work without restarting the timer', as
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: '本局牌面' })).toBeFocused();
   await page.keyboard.press('Tab'); // Audio remains available in the read-only table.
-  await expect(page.getByRole('button', { name: /^(开启音效|关闭音效)$/ })).toBeFocused();
+  await expect(page.getByRole('button', { name: /^(开启声音|关闭声音)$/ })).toBeFocused();
   await page.keyboard.press('Tab'); // Scrollable board is keyboard reachable.
   await expect(page.getByRole('region', { name: '终局牌桌' })).toBeFocused();
   await page.keyboard.press('Tab');
@@ -125,7 +125,7 @@ for (const muted of [false, true]) {
     await expect(settle).toBeDisabled();
     await page.clock.runFor(RESULT_ACTION_GUARD_MS);
     await expect(settle).toBeEnabled();
-    await expect(page.getByRole('button', { name: muted ? '开启音效' : '关闭音效' })).toBeVisible();
+    await expect(page.getByRole('button', { name: muted ? '开启声音' : '关闭声音' })).toBeVisible();
     await settle.click();
     await expect(page.getByRole('button', { name: '查看本局牌面' })).toBeVisible();
   });

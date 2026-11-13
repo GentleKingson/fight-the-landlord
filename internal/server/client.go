@@ -103,12 +103,17 @@ func (c *Client) ReadPump() {
 		allowed, warning := c.server.messageLimiter.AllowMessage(c.GetID())
 		if !allowed {
 			log.Printf("⚠️ 客户端 %s (IP: %s) 消息过于频繁", c.GetName(), c.IP)
-			c.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeRateLimit, "消息发送过于频繁"))
 			// 如果警告次数过多，断开连接
 			if c.server.messageLimiter.GetWarningCount(c.GetID()) > 5 {
 				log.Printf("🚫 客户端 %s 因多次超速被断开连接", c.GetName())
 				break
 			}
+			var request protocol.MessageType
+			if msg, err := codec.Decode(message); err == nil {
+				request = msg.Type
+				codec.PutMessage(msg)
+			}
+			c.SendMessage(codec.NewRequestError(request, protocol.ErrCodeRateLimit, "消息发送过于频繁"))
 			continue
 		}
 		if warning {
