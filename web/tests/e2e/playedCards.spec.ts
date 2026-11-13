@@ -69,7 +69,7 @@ test('target label and long hands fit the table and clear for a new trick', asyn
   await expect(page.getByText('新一轮，请出牌')).toBeVisible();
 });
 
-test('target ring follows visible cards for short and long plays', async ({ page }, testInfo) => {
+test('target ring follows visible cards for short and long plays', async ({ page }) => {
   await page.route('**/api/config', route => route.fulfill({ json: {} }));
   await page.goto('/?demo=table');
   for (const count of [1, 2, 4, 5, 12, 20]) {
@@ -110,7 +110,6 @@ test('target ring follows visible cards for short and long plays', async ({ page
         expect(Math.abs(geometry.right - geometry.rawLast)).toBeLessThan(1);
       }
     }
-    if (count === 4) await page.screenshot({ path: `/tmp/ddz-layout-${testInfo.project.name}.png` });
     for (const row of await page.locator('.felt-table .played-cards__row').all()) {
       const readable = await row.evaluate(element => {
         const cards = [...element.children];
@@ -129,11 +128,10 @@ test('target ring follows visible cards for short and long plays', async ({ page
   }
   await page.goto('/?demo=lobby');
   await expect(page.locator('.quick-card__art .card')).toHaveCount(2);
-  await page.screenshot({ path: `/tmp/ddz-lobby-${testInfo.project.name}.png` });
 });
 
 test('mobile portrait shows full opponent plays without clipping', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'mobile-portrait', 'Portrait viewport sweep runs once');
+  test.skip(!['mobile-portrait', 'webkit-portrait'].includes(testInfo.project.name), 'Portrait viewport sweep runs once');
   await page.route('**/api/config', route => route.fulfill({ json: {} }));
   const leftCards = [
     { suit: 0, rank: 10, color: 0 },

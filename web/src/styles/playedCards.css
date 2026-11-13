@@ -40,7 +40,11 @@
 }
 
 .played-cards__meta strong {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .played-cards__row {
@@ -111,6 +115,7 @@
   --played-card-h: 82px;
   --played-min-step: 21px;
   --played-step: 32px;
+  grid-template-columns: minmax(0, 1fr);
   width: fit-content;
   min-width: 0;
   max-width: 100%;
@@ -131,7 +136,7 @@
   grid-template-columns: repeat(calc(var(--played-count) - 1), minmax(var(--played-min-step), 1fr)) var(--played-card-w);
   gap: 0;
   max-width: 100%;
-  width: min(100%, calc((var(--played-count) - 1) * max(var(--played-step), var(--played-min-step)) + var(--played-card-w)));
+  width: calc((var(--played-count) - 1) * max(var(--played-step), var(--played-min-step)) + var(--played-card-w));
   padding-right: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -139,6 +144,7 @@
   scrollbar-width: thin;
 }
 
+.felt-table .played-cards__row--single,
 .felt-table .played-cards__row:has(> .card:only-child) {
   grid-template-columns: var(--played-card-w);
   width: var(--played-card-w);
@@ -166,17 +172,34 @@
 }
 
 @media (max-width: 600px) and (orientation: portrait) {
-  .felt-table--seats { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) auto; gap: 4px; }
+  .felt-table--seats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+    column-gap: 4px;
+    row-gap: 0;
+  }
+  .felt-table--seats:not(.felt-table--has-me) > .played-seat--me {
+    display: none;
+  }
+  .felt-table--seats.felt-table--has-me {
+    grid-template-rows: minmax(0, 1fr) auto;
+    row-gap: 4px;
+  }
   .felt-table .played-cards { padding-inline: 3px; }
+  .felt-table .played-cards__meta { font-size: 10px; padding: 2px 5px; gap: 3px; }
+  .felt-table .played-cards__meta span { flex: 1 1 2.4em; min-width: 2.2em; }
+  .felt-table .played-cards__meta strong { min-width: 2.2em; }
+  .played-cards__target-label { padding: 1px 3px; font-size: 9px; }
+  .played-cards__scroll-hint { font-size: 9px; }
   .played-seat--left { grid-column: 1; grid-row: 1; }
   .played-seat--right { grid-column: 2; grid-row: 1; }
   .played-seat--me { grid-column: 1 / -1; grid-row: 2; }
-  .felt-table--seats:where(:has(> .played-seat--left .played-cards):has(> .played-seat--right:empty)) > .played-seat--right,
-  .felt-table--seats:where(:has(> .played-seat--right .played-cards):has(> .played-seat--left:empty)) > .played-seat--left {
+  .felt-table--seats.felt-table--only-left > .played-seat--right,
+  .felt-table--seats.felt-table--only-right > .played-seat--left {
     display: none;
   }
-  .felt-table--seats:where(:has(> .played-seat--left .played-cards):has(> .played-seat--right:empty)) > .played-seat--left,
-  .felt-table--seats:where(:has(> .played-seat--right .played-cards):has(> .played-seat--left:empty)) > .played-seat--right {
+  .felt-table--seats.felt-table--only-left > .played-seat--left,
+  .felt-table--seats.felt-table--only-right > .played-seat--right {
     grid-column: 1 / -1;
   }
 }
@@ -184,14 +207,24 @@
 /* Short screens must keep target, name and hand type on one metadata row. */
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
   .felt-table .played-cards { --played-card-w: 28px; --played-card-h: 40px; --played-min-step: 21px; --played-step: 23px; padding-block: 3px; gap: 5px; }
-  .felt-table .played-cards__meta { flex-wrap: nowrap; padding: 2px 6px; gap: 4px; }
+  .felt-table .played-cards__meta { flex-wrap: nowrap; padding: 2px 5px; gap: 3px; }
   .played-cards__target-label { padding: 2px 4px; font-size: 10px; }
 }
 
 @media (max-width: 600px) and (max-height: 600px) and (orientation: portrait) {
-  .felt-table .played-cards { --played-card-h: 32px; padding-block: 0; gap: 5px; }
+  .felt-table .played-cards { --played-card-h: 32px; padding-block: 0; gap: 4px; }
   .felt-table .played-cards__meta { min-height: 18px; padding-block: 1px; }
   .played-cards__target-label { padding-block: 1px; }
+  .table-arena--has-opp-action .felt-table--seats.felt-table--has-me.felt-table--only-left > .played-seat--right,
+  .table-arena--has-opp-action .felt-table--seats.felt-table--has-me.felt-table--only-right > .played-seat--left {
+    display: grid;
+  }
+  .table-arena--has-opp-action .felt-table--seats.felt-table--has-me.felt-table--only-left > .played-seat--left {
+    grid-column: 1;
+  }
+  .table-arena--has-opp-action .felt-table--seats.felt-table--has-me.felt-table--only-right > .played-seat--right {
+    grid-column: 2;
+  }
 }
 
 @media (orientation: landscape) and (max-height: 520px) {
@@ -206,11 +239,36 @@
   .felt-table .played-cards__meta { flex-wrap: nowrap; min-height: 16px; padding: 1px 6px; gap: 4px; font-size: 10px; }
   .played-cards__target-label { padding: 0 4px; font-size: 10px; }
   .felt-table .card--played .card__index--top { display: flex; align-items: center; gap: 2px; }
+  .felt-table .card--played .card__joker-word {
+    left: 3px;
+    top: 2px;
+    bottom: auto;
+    writing-mode: horizontal-tb;
+    letter-spacing: 0;
+    font-size: 8px;
+  }
+  .felt-table .card--played .card__joker-star {
+    right: 2px;
+    bottom: 1px;
+    font-size: 10px;
+  }
 }
 
 /* On very short portrait displays, reserve the center for the current target. */
 @media (orientation: portrait) and (max-height: 540px) {
-  .felt-table:has(.played-seat--target) .played-seat:not(.played-seat--target) { display: none; }
-  .felt-table .played-seat--target { grid-column: 1 / -1; grid-row: 1; }
-  .table-arena:has(.opponent-row .player-action) .felt-table .played-seat--target { align-self: end; }
+  .felt-table--seats.felt-table--has-focus {
+    grid-template-rows: minmax(0, 1fr);
+    row-gap: 0;
+  }
+  .felt-table--has-focus > .played-seat:not(.played-seat--focus) {
+    display: none;
+  }
+  .felt-table--has-focus > .played-seat--focus {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .table-arena--has-opp-action .felt-table--has-focus > .played-seat--focus {
+    align-self: end;
+  }
 }

@@ -79,6 +79,15 @@
   background: #183b32;
 }
 
+@media (max-height: 540px) and (orientation: portrait),
+       (max-height: 360px) and (orientation: landscape) {
+  .collection-notice {
+    padding: 2px 8px;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+}
+
 .maintenance-banner {
   flex: none;
   display: inline-flex;

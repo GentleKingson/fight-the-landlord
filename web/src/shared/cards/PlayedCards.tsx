@@ -36,11 +36,11 @@ export function PlayedCards({ cards, handType, playerName, compact = false, isTa
     <div className={`played-cards ${compact ? 'played-cards--compact' : ''}`}>
       <div className="played-cards__meta">
         {isTarget ? <b className="played-cards__target-label">待压过</b> : null}
-        {playerName ? <span>{playerName}</span> : null}
-        {handType ? <strong>{handType}</strong> : null}
+        {playerName ? <span title={playerName}>{playerName}</span> : null}
+        {handType ? <strong title={handType}>{handType}</strong> : null}
         {overflow ? <small className="played-cards__scroll-hint">{cards.length}张 ↔</small> : null}
       </div>
-      <div ref={rowRef} className="played-cards__row" tabIndex={overflow ? 0 : undefined} role="region" aria-label={overflow ? `已出 ${cards.length} 张牌，左右滑动查看` : "已出牌"} style={{ '--played-count': cards.length } as CSSProperties}>
+      <div ref={rowRef} className={`played-cards__row${cards.length === 1 ? ' played-cards__row--single' : ''}`} tabIndex={overflow ? 0 : undefined} role="region" aria-label={overflow ? `已出 ${cards.length} 张牌，左右滑动查看` : "已出牌"} style={{ '--played-count': cards.length } as CSSProperties}>
         {sortPlayedCards(cards).map((card, index) => (
           <Card key={`${card.suit}_${card.rank}_${index}`} card={card} size="played" />
         ))}

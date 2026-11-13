@@ -608,8 +608,6 @@
 }
 
 @media (max-width: 360px) and (orientation: portrait) {
-  .table-brand__logo { font-size: 16px; letter-spacing: 0; }
-  .table-score-strip { gap: 4px; padding-inline: 6px; }
   .quick-card::after { display: none; }
   .table-arena::after { display: none; }
 }
@@ -662,7 +660,6 @@
 @media (max-width: 360px) and (orientation: portrait) {
   .player-badge .player-avatar { width: 26px; height: 26px; }
   .player-badge { width: 100%; }
-  .table-brand__logo { display: none; }
 }
 
 @media (max-width: 600px) and (orientation: portrait), (orientation: landscape) and (max-height: 520px) {
@@ -671,6 +668,7 @@
   .player-info { min-width: 0; }
   .player-badge { padding-block: 3px; }
   .player-badge .cards-warning { padding: 1px 3px; border-width: 1px; }
+  .played-seat--target .played-cards__row { outline-width: 2px; outline-offset: 1px; }
 }
 @media (max-width: 600px) and (max-height: 600px) and (orientation: portrait) {
   .turn-banner { padding-block: 2px; }

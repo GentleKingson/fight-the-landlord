@@ -19,6 +19,18 @@ export default defineConfig({
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
     { name: 'mobile-portrait', use: { ...devices['Pixel 7'] } },
-    { name: 'mobile-landscape', use: { ...devices['Pixel 7 landscape'] } }
+    { name: 'mobile-landscape', use: { ...devices['Pixel 7 landscape'] } },
+    ...(process.env.PLAYWRIGHT_WEBKIT === '1'
+      ? [
+          {
+            name: 'webkit-portrait',
+            use: { ...devices['iPhone 13'], browserName: 'webkit' as const, launchOptions: {} }
+          },
+          {
+            name: 'webkit-landscape',
+            use: { ...devices['iPhone 13 landscape'], browserName: 'webkit' as const, launchOptions: {} }
+          }
+        ]
+      : [])
   ]
 });
