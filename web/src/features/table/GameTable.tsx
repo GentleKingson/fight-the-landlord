@@ -68,7 +68,7 @@ export function GameTable({ socket }: GameTableProps) {
   const setSelection = useAppStore((state) => state.setSelection);
   const isMyTurn = (phase === 'bidding' || phase === 'playing') && currentTurn === playerId;
   const landscapeView = useSyncExternalStore(subscribeOrientation, isLandscape);
-  const placeTurnAtSeat = landscapeView && (phase === 'bidding' || phase === 'playing');
+  const useTurnColumn = landscapeView && (phase === 'dealing' || phase === 'bidding' || phase === 'playing');
   const seats = useMemo(() => arrangeSeats(players, playerId), [players, playerId]);
   const botAvatars = useMemo(() => assignBotAvatars(players), [players]);
   const showSeatPlays = phase === 'playing' || phase === 'game_over';
@@ -128,9 +128,9 @@ export function GameTable({ socket }: GameTableProps) {
 
       <section className={`table-arena${hasOpponentAction ? ' table-arena--has-opp-action' : ''}`} aria-label="斗地主牌桌">
         <div className="opponent-row">
-          <SeatPanel player={seats.left} avatarSrc={seats.left ? botAvatars.get(seats.left.id) : undefined} side="left" showTurn={placeTurnAtSeat} active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
+          <SeatPanel player={seats.left} avatarSrc={seats.left ? botAvatars.get(seats.left.id) : undefined} side="left" showTurn={useTurnColumn && phase !== 'dealing'} active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
           <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
-          <SeatPanel player={seats.right} avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined} side="right" showTurn={placeTurnAtSeat} active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
+          <SeatPanel player={seats.right} avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined} side="right" showTurn={useTurnColumn && phase !== 'dealing'} active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
         </div>
 
         <div className={feltTableClassName}>
@@ -148,11 +148,11 @@ export function GameTable({ socket }: GameTableProps) {
             </>
           )}
         </div>
-        {!placeTurnAtSeat && <TurnBanner />}
+        {!useTurnColumn && <TurnBanner />}
       </section>
 
-      <div className={placeTurnAtSeat ? 'table-controls table-controls--with-turn' : 'table-controls'}>
-        {placeTurnAtSeat && isMyTurn && <TurnBanner />}
+      <div className={useTurnColumn ? 'table-controls table-controls--with-turn' : 'table-controls'}>
+        {useTurnColumn && (phase === 'dealing' || isMyTurn) && <TurnBanner />}
         <ActionBar socket={socket} isMyTurn={isMyTurn} phase={phase} />
       </div>
 
@@ -386,7 +386,7 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
     });
   }
 
-  if (phase === 'dealing') return <section className="action-bar action-bar--dealing" aria-label="发牌中">等待发牌完成</section>;
+  if (phase === 'dealing') return <section className="action-bar action-bar--dealing" aria-label="发牌中"><small>等待发牌完成</small></section>;
   if (phase === 'game_over') return null;
 
   if (phase === 'bidding') {

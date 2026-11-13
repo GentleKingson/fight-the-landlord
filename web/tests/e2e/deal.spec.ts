@@ -74,10 +74,21 @@ test('deal cards travel to three seats, then wait for server authorization', asy
   await expect(page.getByRole('option')).toHaveCount(17);
   await expect(page.getByText('手牌 17 张')).toBeVisible();
   await expect(page.getByRole('button', { name: '叫地主', exact: true })).toHaveCount(0);
+  const bounds = () => page.locator('.table-arena, .hand-heading').evaluateAll(elements => elements.map(el => {
+    const { top, bottom } = el.getBoundingClientRect();
+    return { top, bottom };
+  }));
+  const afterDeal = await bounds();
   await bid(page);
   await expect(page.locator('.deal-animation')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '叫地主', exact: true })).toBeVisible();
   await expect(page.locator('.turn-banner time')).toHaveText('15');
+  expect(await bounds()).toEqual(afterDeal);
+  await page.evaluate(() => (window as any).dealReceive('bid_turn', {
+    player_id: 'p2', is_grab: true, timeout: 15, multiplier: 1
+  }));
+  await expect(page.getByText('等待其他玩家抢地主...')).toBeVisible();
+  expect(await bounds()).toEqual(afterDeal);
   await deal(page, 'redeal');
   await expect(page.locator('.deal-card')).toHaveCount(52);
   await expect(page.getByRole('button', { name: '叫地主', exact: true })).toHaveCount(0);
