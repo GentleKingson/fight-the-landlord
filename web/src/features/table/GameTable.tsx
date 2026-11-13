@@ -7,7 +7,7 @@ import { PlayerAvatar } from './PlayerAvatar';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type AppState, type SeatAction, type TableAction } from '../../stores/appStore';
-import { cardKey, generateSimpleSuggestions, summarizeHand } from '../../shared/cards/cardModel';
+import { cardKey, generateSimpleSuggestions, sortPlayedCards, summarizeHand } from '../../shared/cards/cardModel';
 import { canBeat, handSignature, parseHand } from '../../shared/cards/rules';
 import { Card } from '../../shared/cards/Card';
 import { Hand } from '../../shared/cards/Hand';
@@ -26,6 +26,16 @@ function selectTargetPlayerId(state: AppState): string {
     ? state.lastPlayedBy : '';
 }
 
+function hasSeatPlay(player: PlayerInfo | undefined, seatActions: Record<string, SeatAction>): boolean {
+  if (!player) return false;
+  const action = seatActions[player.id];
+  return Boolean(action?.type === 'play' && action.cards?.length);
+}
+
+function seatActionLabel(action?: SeatAction): string {
+  return action?.type === 'bid' ? action.label || '' : action?.type === 'pass' ? '不出' : '';
+}
+
 export function GameTable({ socket }: GameTableProps) {
   const playerId = useAppStore((state) => state.playerId);
   const players = useAppStore((state) => state.players);
@@ -38,6 +48,8 @@ export function GameTable({ socket }: GameTableProps) {
   const bottomCards = useAppStore((state) => state.bottomCards);
   const bottomCardsRevealed = useAppStore((state) => state.bottomCardsRevealed);
   const seatActions = useAppStore((state) => state.seatActions);
+  const targetPlayerId = useAppStore(selectTargetPlayerId);
+  const lastPlayedBy = useAppStore((state) => state.lastPlayedBy);
   const multiplier = useAppStore((state) => state.multiplier);
   const roomCode = useAppStore((state) => state.roomCode);
   const connected = useAppStore((state) => state.connected);
@@ -49,6 +61,36 @@ export function GameTable({ socket }: GameTableProps) {
   const isMyTurn = (phase === 'bidding' || phase === 'playing') && currentTurn === playerId;
   const seats = useMemo(() => arrangeSeats(players, playerId), [players, playerId]);
   const botAvatars = useMemo(() => assignBotAvatars(players), [players]);
+  const showSeatPlays = phase === 'playing' || phase === 'game_over';
+  const leftHasPlay = showSeatPlays && hasSeatPlay(seats.left, seatActions);
+  const rightHasPlay = showSeatPlays && hasSeatPlay(seats.right, seatActions);
+  const meHasPlay = showSeatPlays && hasSeatPlay(seats.me, seatActions);
+  const hasOpponentAction = Boolean(
+    (seats.left && seatActionLabel(seatActions[seats.left.id])) ||
+    (seats.right && seatActionLabel(seatActions[seats.right.id]))
+  );
+  const focusPlayerId = useMemo(() => {
+    if (!showSeatPlays) return '';
+    if (targetPlayerId && seatActions[targetPlayerId]?.type === 'play' && seatActions[targetPlayerId]?.cards?.length) {
+      return targetPlayerId;
+    }
+    if (lastPlayedBy && seatActions[lastPlayedBy]?.type === 'play' && seatActions[lastPlayedBy]?.cards?.length) {
+      return lastPlayedBy;
+    }
+    for (const candidate of [seats.left, seats.right, seats.me]) {
+      if (hasSeatPlay(candidate, seatActions)) return candidate!.id;
+    }
+    return '';
+  }, [showSeatPlays, targetPlayerId, lastPlayedBy, seatActions, seats.left, seats.right, seats.me]);
+
+  const feltTableClassName = [
+    'felt-table',
+    showSeatPlays ? 'felt-table--seats' : '',
+    leftHasPlay && !rightHasPlay ? 'felt-table--only-left' : '',
+    rightHasPlay && !leftHasPlay ? 'felt-table--only-right' : '',
+    meHasPlay ? 'felt-table--has-me' : '',
+    focusPlayerId ? 'felt-table--has-focus' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <main className="table-screen">
@@ -74,14 +116,14 @@ export function GameTable({ socket }: GameTableProps) {
         </div>
       </header>
 
-      <section className="table-arena" aria-label="斗地主牌桌">
+      <section className={`table-arena${hasOpponentAction ? ' table-arena--has-opp-action' : ''}`} aria-label="斗地主牌桌">
         <div className="opponent-row">
           <SeatPanel player={seats.left} avatarSrc={seats.left ? botAvatars.get(seats.left.id) : undefined} side="left" active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
           <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
           <SeatPanel player={seats.right} avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined} side="right" active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
         </div>
 
-        <div className={`felt-table ${phase === 'playing' || phase === 'game_over' ? 'felt-table--seats' : ''}`}>
+        <div className={feltTableClassName}>
           {phase === 'dealing' ? (
             <div className="deal-origin">
               <span className="deal-animation__label">{presentation.finished ? '等待叫地主通知…' : '正在发牌…'}</span>
@@ -90,9 +132,9 @@ export function GameTable({ socket }: GameTableProps) {
             <div className="table-center-hint">等待叫抢地主</div>
           ) : (
             <>
-              <SeatPlayedCards player={seats.left} action={seats.left ? seatActions[seats.left.id] : undefined} side="left" />
-              <SeatPlayedCards player={seats.me} action={seats.me ? seatActions[seats.me.id] : undefined} side="me" />
-              <SeatPlayedCards player={seats.right} action={seats.right ? seatActions[seats.right.id] : undefined} side="right" />
+              <SeatPlayedCards player={seats.left} action={seats.left ? seatActions[seats.left.id] : undefined} side="left" focusPlayerId={focusPlayerId} />
+              <SeatPlayedCards player={seats.me} action={seats.me ? seatActions[seats.me.id] : undefined} side="me" focusPlayerId={focusPlayerId} />
+              <SeatPlayedCards player={seats.right} action={seats.right ? seatActions[seats.right.id] : undefined} side="right" focusPlayerId={focusPlayerId} />
             </>
           )}
         </div>
@@ -122,12 +164,26 @@ export function GameTable({ socket }: GameTableProps) {
   );
 }
 
-function SeatPlayedCards({ player, action, side }: { player?: PlayerInfo; action?: SeatAction; side: 'left' | 'me' | 'right' }) {
+function SeatPlayedCards({
+  player,
+  action,
+  side,
+  focusPlayerId,
+}: {
+  player?: PlayerInfo;
+  action?: SeatAction;
+  side: 'left' | 'me' | 'right';
+  focusPlayerId: string;
+}) {
   const targetPlayerId = useAppStore(selectTargetPlayerId);
   const cards = action?.type === 'play' ? action.cards : undefined;
-  const isTarget = !!cards?.length && !!targetPlayerId && player?.id === targetPlayerId;
+  const isTarget = Boolean(cards?.length && targetPlayerId && player?.id === targetPlayerId);
+  const isFocus = Boolean(cards?.length && focusPlayerId && player?.id === focusPlayerId);
   return (
-    <section className={`played-seat played-seat--${side}${isTarget ? ' played-seat--target' : ''}`} aria-label={player && cards?.length ? `${player.name}的出牌` : undefined}>
+    <section
+      className={`played-seat played-seat--${side}${isTarget ? ' played-seat--target' : ''}${isFocus ? ' played-seat--focus' : ''}`}
+      aria-label={player && cards?.length ? `${player.name}的出牌` : undefined}
+    >
       {cards?.length ? <PlayedCards cards={cards} handType={action?.hand_type} playerName={player?.name} isTarget={isTarget} /> : null}
     </section>
   );
@@ -187,7 +243,7 @@ function PlayerBadge({ player, avatarSrc, active, action }: { player: PlayerInfo
   const phase = useAppStore(state => state.phase);
   const pendingRole = phase === 'dealing' || phase === 'bidding';
   const low = phase === 'playing' && player.cards_count > 0 && player.cards_count <= 2;
-  const actionLabel = action?.type === 'bid' ? action.label : action?.type === 'pass' ? '不出' : '';
+  const actionLabel = seatActionLabel(action);
   return (
     <div className={`player-badge ${active ? 'is-active' : ''} ${player.is_landlord ? 'is-landlord' : ''}`}>
       <PlayerAvatar name={player.name} src={avatarSrc} />
@@ -523,7 +579,7 @@ function HistoryPanel({ actions }: { actions: TableAction[] }) {
         <div key={index}>
           <span>{action.player_name || '系统'}</span>
           <strong>{action.label || (action.type === 'pass' ? '不出' : action.hand_type || '出牌')}</strong>
-          {action.cards?.length ? <div className="history-cards">{action.cards.map((card, i) => <Card key={i} card={card} size="mini" />)}</div> : null}
+          {action.cards?.length ? <div className="history-cards">{sortPlayedCards(action.cards).map((card, i) => <Card key={`${card.suit}_${card.rank}_${i}`} card={card} size="mini" />)}</div> : null}
         </div>
       )) : <p className="empty-text">暂无动作</p>}
     </div>

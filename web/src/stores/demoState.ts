@@ -54,7 +54,7 @@ export function seedDemoState(mode: string): void {
       p2: { type: 'bid', player_id: 'p2', player_name: '山月', label: '不叫' }
     } : {
       p2: { type: 'pass', player_id: 'p2', player_name: '山月', label: '不出' },
-      p3: { type: 'play', player_id: 'p3', player_name: '鏉鹃', cards: [c(2, 8), c(3, 8)], hand_type: '对子' }
+      p3: { type: 'play', player_id: 'p3', player_name: '松风', cards: [c(2, 8), c(3, 8)], hand_type: '对子' }
     },
     isGrabTurn: false,
     recentActions: isBidding ? [

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('card artwork fits every card size and responsive context without artwork collisions', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name === 'mobile-landscape', 'The sweep already covers both orientations on desktop and mobile');
+  test.skip(testInfo.project.name.endsWith('-landscape'), 'The sweep already covers both orientations on desktop and mobile');
   await page.route('**/api/config', route => route.fulfill({ json: {} }));
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/?demo=table');
@@ -99,8 +99,5 @@ test('card artwork fits every card size and responsive context without artwork c
       return errors;
     }));
     expect(issues, `${viewport.width}x${viewport.height}`).toEqual([]);
-    if (viewport.width === 390) {
-      await page.locator('#card-scaling-probe').screenshot({ path: `/tmp/ddz-card-scaling-${testInfo.project.name}.png` });
-    }
   }
 });
