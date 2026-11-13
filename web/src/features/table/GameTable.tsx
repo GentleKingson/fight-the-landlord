@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RulesPanel } from '../../shared/ui/RulesPanel';
+import { ChatFeed } from '../../shared/ui/ChatFeed';
 import { DealAnimation } from './DealAnimation';
 import { useDealPresentation } from './useDealPresentation';
 import { assignBotAvatars } from './botAvatars';
 import { PlayerAvatar } from './PlayerAvatar';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
-import { useAppStore, useChatStore, type AppState, type SeatAction, type TableAction } from '../../stores/appStore';
+import { useAppStore, type AppState, type SeatAction, type TableAction } from '../../stores/appStore';
 import { cardKey, generateSimpleSuggestions, sortPlayedCards, summarizeHand } from '../../shared/cards/cardModel';
 import { canBeat, handSignature, parseHand } from '../../shared/cards/rules';
 import { Card } from '../../shared/cards/Card';
@@ -394,26 +395,26 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       <button className="secondary-action secondary-action--green" disabled={!isMyTurn} onClick={hint}>提示</button>
       <button className="secondary-action secondary-action--muted" disabled={!selectedCards.size} onClick={clearSelection}>重选</button>
       <button className="primary-action" disabled={!canPlay} aria-describedby="play-action-summary" onClick={play}>出牌</button>
-      <ActionSummary selectedCount={selected.length} summary={summary} reason={reason} />
+      <ActionSummary selectedCount={selected.length} summary={summary} reason={reason} blocked={blocked} />
     </section>
   );
 }
 
-function ActionSummary({ selectedCount, summary, reason }: { selectedCount: number; summary: string; reason?: string }) {
+function ActionSummary({ selectedCount, summary, reason, blocked }: { selectedCount: number; summary: string; reason?: string; blocked?: boolean }) {
   const tableMessage = useAppStore((state) => state.tableMessage);
   const submissionMessage = useAppStore(state => state.submissionMessage);
   const phase = useAppStore(state => state.phase);
+  const message = submissionMessage || tableMessage;
+  const feedback = blocked ? submissionMessage || reason
+    : message && reason && selectedCount > 0 && message !== reason ? `${message} · ${reason}` : message || reason;
   return (
     <small id="play-action-summary" role="status" aria-live="polite" aria-atomic="true" className={reason || tableMessage ? 'is-warning' : ''}>
-      {reason ? <span>{reason}</span> : null}
-      {reason && (tableMessage || submissionMessage) ? ' · ' : null}
-      {tableMessage ? <span>{tableMessage}</span> : submissionMessage ? <span>{submissionMessage}</span> : !reason ? (phase === 'bidding' ? '请选择叫抢操作' : selectedCount ? `已选 ${selectedCount} 张 · ${summary}` : '选择手牌后出牌') : null}
+      {feedback || (phase === 'bidding' ? '请选择叫抢操作' : selectedCount ? `已选 ${selectedCount} 张 · ${summary}` : '选择手牌后出牌')}
     </small>
   );
 }
 
 function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: UtilityDrawer; onClose: () => void }) {
-  const messages = useChatStore((state) => state.messages);
   const chatInput = useAppStore((state) => state.chatInput);
   const setChatInput = useAppStore((state) => state.setChatInput);
   const counter = useAppStore((state) => state.cardCounter);
@@ -528,11 +529,7 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
       </header>
       {activeDrawer === 'chat' ? (
         <>
-          <div className="chat-feed">
-            {messages.filter((message) => message.scope === 'room').slice(-24).map((message, index) => (
-              <p key={index}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
-            ))}
-          </div>
+          <ChatFeed scope="room" />
           <form className="chat-input-row" onSubmit={(event) => { event.preventDefault(); sendChat(); }}>
             <label className="visually-hidden" htmlFor="room-chat-input">房间聊天消息</label>
             <input

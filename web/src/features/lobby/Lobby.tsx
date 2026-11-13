@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
-import { useAppStore, useChatStore } from '../../stores/appStore';
+import { useAppStore } from '../../stores/appStore';
+import { ChatFeed } from '../../shared/ui/ChatFeed';
 import { SoundToggle } from '../../audio/SoundToggle';
 import { Card } from '../../shared/cards/Card';
 import { Icon } from '../../shared/ui/Icon';
@@ -14,6 +15,9 @@ interface LobbyProps {
   socket: GameSocket;
 }
 
+const navItems = [['home', '大厅'], ['leaderboard', '战绩榜'], ['stats', '我的战绩'], ['chat', '聊天'], ['rules', '规则']] as const;
+const roomRequestLabels = { create_room: '创建房间', join_room: '加入房间', ready: '准备', cancel_ready: '取消准备' } as const;
+
 export function Lobby({ socket }: LobbyProps) {
   const phase = useAppStore((state) => state.phase);
   const panel = useAppStore((state) => state.lobbyPanel);
@@ -22,6 +26,8 @@ export function Lobby({ socket }: LobbyProps) {
   const onlineCount = useAppStore((state) => state.onlineCount);
   const playerName = useAppStore((state) => state.playerName);
   const setLobbyPanel = useAppStore((state) => state.setLobbyPanel);
+  const roomRequest = useAppStore(state => state.roomRequest);
+  const activeSession = phase === 'matching' || phase === 'waiting';
 
   return (
     <main className="lobby-screen">
@@ -44,23 +50,33 @@ export function Lobby({ socket }: LobbyProps) {
 
       {phase === 'matching' ? <MatchingPanel socket={socket} /> : null}
       {phase === 'waiting' ? <RoomWaiting socket={socket} roomCode={roomCode} players={players} /> : null}
-      {phase !== 'matching' && phase !== 'waiting' ? (
+      {!activeSession ? (
         panel === 'home' ? <LobbyHome socket={socket} /> : <LobbySubPanel socket={socket} panel={panel} />
       ) : null}
 
       <nav className="bottom-nav" aria-label="大厅导航">
-        <button aria-current={panel === 'home' ? 'page' : undefined} className={panel === 'home' ? 'is-active' : ''} onClick={() => setLobbyPanel('home')}>大厅</button>
-        <button aria-current={panel === 'leaderboard' ? 'page' : undefined} className={panel === 'leaderboard' ? 'is-active' : ''} onClick={() => { setLobbyPanel('leaderboard'); }}>
-          战绩榜
-        </button>
-        <button aria-current={panel === 'stats' ? 'page' : undefined} className={panel === 'stats' ? 'is-active' : ''} onClick={() => { setLobbyPanel('stats'); }}>
-          我的战绩
-        </button>
-        <button aria-current={panel === 'chat' ? 'page' : undefined} className={panel === 'chat' ? 'is-active' : ''} onClick={() => setLobbyPanel('chat')}>聊天</button>
-      <button aria-current={panel === 'rules' ? 'page' : undefined} className={panel === 'rules' ? 'is-active' : ''} onClick={() => setLobbyPanel('rules')}>规则</button>
+        {activeSession && <span className="nav-session" id="lobby-nav-reason">{phase === 'waiting'
+          ? '房间等待中 · 离开房间后可使用大厅导航'
+          : '匹配中 · 匹配结束后可使用大厅导航'}</span>}
+        {navItems.map(([key, label]) => (
+          <button key={key} disabled={activeSession || !!roomRequest} aria-current={!activeSession && panel === key ? 'page' : undefined}
+            aria-describedby={activeSession ? 'lobby-nav-reason' : undefined}
+            className={!activeSession && panel === key ? 'is-active' : ''} onClick={() => setLobbyPanel(key)}>{label}</button>
+        ))}
       </nav>
     </main>
   );
+}
+
+function submitRoomRequest(socket: GameSocket, type: keyof typeof roomRequestLabels, roomCode?: string) {
+  const state = useAppStore.getState();
+  if (state.roomRequest) return;
+  const label = roomRequestLabels[type];
+  if (socket.send(type, roomCode ? { room_code: roomCode } : undefined)) {
+    useAppStore.setState({ roomRequest: label, error: '', matchMode: type === MsgType.CreateRoom || type === MsgType.JoinRoom ? 'online' : state.matchMode });
+  } else {
+    state.setError(`${label}请求未发送，请连接恢复后重试`);
+  }
 }
 
 function LobbyHome({ socket }: LobbyProps) {
@@ -70,6 +86,7 @@ function LobbyHome({ socket }: LobbyProps) {
   const setRoomCodeInput = useAppStore((state) => state.setRoomCodeInput);
   const setError = useAppStore((state) => state.setError);
   const imeEnter = useImeSafeEnter();
+  const pending = useAppStore(state => state.roomRequest);
 
   function joinRoom() {
     const roomCode = roomCodeInput.trim();
@@ -77,8 +94,7 @@ function LobbyHome({ socket }: LobbyProps) {
       setError('请输入房间号');
       return;
     }
-    useAppStore.setState({ matchMode: 'online' });
-    socket.send(MsgType.JoinRoom, { room_code: roomCode });
+    submitRoomRequest(socket, MsgType.JoinRoom, roomCode);
   }
 
   function startMatch(mode: 'online' | 'practice') {
@@ -96,8 +112,7 @@ function LobbyHome({ socket }: LobbyProps) {
 
   function joinListedRoom(roomCode: string) {
     setRoomCodeInput(roomCode);
-    useAppStore.setState({ matchMode: 'online' });
-    socket.send(MsgType.JoinRoom, { room_code: roomCode });
+    submitRoomRequest(socket, MsgType.JoinRoom, roomCode);
   }
 
   return (
@@ -112,18 +127,18 @@ function LobbyHome({ socket }: LobbyProps) {
           <h2>快速开局</h2>
           <p>匹配在线玩家，进入标准三人牌桌。</p>
         </div>
-        <button className="primary-action" onClick={() => startMatch('online')}>
+        <button className="primary-action" disabled={!!pending} onClick={() => startMatch('online')}>
           <Icon name="play" /> 快速开局
         </button>
       </div>
 
       <div className="entry-grid">
-        <button className="entry-tile" onClick={() => { useAppStore.setState({ matchMode: 'online' }); socket.send(MsgType.CreateRoom); }}>
+        <button className="entry-tile" disabled={!!pending} onClick={() => submitRoomRequest(socket, MsgType.CreateRoom)}>
           <Icon name="room" />
-          <strong>创建房间</strong>
+          <strong>{pending === '创建房间' ? '正在创建…' : '创建房间'}</strong>
           <span>好友同玩</span>
         </button>
-        <button className="entry-tile" onClick={() => startMatch('practice')}>
+        <button className="entry-tile" disabled={!!pending} onClick={() => startMatch('practice')}>
           <Icon name="bot" />
           <strong>人机练习</strong>
           <span>随时练手</span>
@@ -147,17 +162,17 @@ function LobbyHome({ socket }: LobbyProps) {
           autoCapitalize="none"
           spellCheck={false}
         />
-        <button type="submit">加入</button>
+        <button type="submit" disabled={!!pending}>{pending === '加入房间' ? '正在加入…' : '加入'}</button>
       </form>
 
       <section className="room-browser" aria-label="可加入房间">
         <div className="room-browser__head">
           <strong>可加入房间</strong>
-          <button className="secondary-action" onClick={refreshRooms}>刷新</button>
+          <button className="secondary-action" disabled={!!pending} onClick={refreshRooms}>刷新</button>
         </div>
         <div className="room-browser__list">
           {status ? <p role="status">{status}</p> : roomList.length ? roomList.map((room) => (
-            <button className="room-browser__row" key={room.room_code} onClick={() => joinListedRoom(room.room_code)}>
+            <button className="room-browser__row" disabled={!!pending} key={room.room_code} onClick={() => joinListedRoom(room.room_code)}>
               <span>{room.room_code}</span>
               <em>{room.player_count}/{room.max_players || 3}</em>
             </button>
@@ -224,6 +239,7 @@ async function writeTextToClipboard(text: string): Promise<void> {
 function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: string; players: ReturnType<typeof useAppStore.getState>['players'] }) {
   const playerId = useAppStore((state) => state.playerId);
   const me = players.find((player) => player.id === playerId);
+  const pending = useAppStore(state => state.roomRequest);
   const codeRef = useRef<HTMLElement | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -351,10 +367,13 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
         })}
       </div>
       <div className="room-actions">
-        <button className="primary-action" onClick={() => socket.send(me?.ready ? MsgType.CancelReady : MsgType.Ready)}>
-          {me?.ready ? '取消准备' : '准备开始'}
+        <button className="primary-action" disabled={!!pending} onClick={() => submitRoomRequest(socket, me?.ready ? MsgType.CancelReady : MsgType.Ready)}>
+          {pending ? `正在${pending}…` : me?.ready ? '取消准备' : '准备开始'}
         </button>
-        <button className="secondary-action" onClick={() => { socket.send(MsgType.LeaveRoom); useAppStore.getState().leaveLocalRoom(); }}>
+        <button className="secondary-action" disabled={!!pending} onClick={() => {
+          if (socket.send(MsgType.LeaveRoom)) useAppStore.getState().leaveLocalRoom();
+          else useAppStore.getState().setError('离房请求未发送，请连接恢复后重试');
+        }}>
           离开房间
         </button>
       </div>
@@ -409,7 +428,6 @@ function StatsPanel({ socket }: LobbyProps) {
 }
 
 function LobbyChat({ socket }: LobbyProps) {
-  const messages = useChatStore((state) => state.messages);
   const chatInput = useAppStore((state) => state.chatInput);
   const setChatInput = useAppStore((state) => state.setChatInput);
   const imeEnter = useImeSafeEnter();
@@ -424,11 +442,7 @@ function LobbyChat({ socket }: LobbyProps) {
   return (
     <section className="sub-panel chat-panel">
       <h2>大厅聊天</h2>
-      <div className="chat-feed">
-        {messages.filter((message) => message.scope !== 'room').slice(-20).map((message, index) => (
-          <p key={index}><strong>{message.sender_name || '玩家'}:</strong> {message.content}</p>
-        ))}
-      </div>
+      <ChatFeed scope="lobby" />
       <form className="chat-input-row" onSubmit={(event) => { event.preventDefault(); send(); }}>
         <label className="visually-hidden" htmlFor="lobby-chat-input">大厅聊天消息</label>
         <input

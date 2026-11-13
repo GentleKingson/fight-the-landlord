@@ -520,8 +520,6 @@
   grid-column: 1 / -1;
   flex-basis: 100%;
   min-height: 16px;
-  max-height: 36px;
-  overflow: auto;
   overflow-wrap: anywhere;
   color: rgba(255, 255, 255, .74);
   text-align: center;

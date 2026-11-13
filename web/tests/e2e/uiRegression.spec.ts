@@ -33,9 +33,9 @@ test('background music plays after a gesture and follows mute and settlement', a
   await page.getByRole('button', {name:'聊天', exact:true}).click();
   await page.waitForFunction(() => (window as any).musicElements.some((el: HTMLAudioElement) => !el.paused && el.currentTime > 0));
   await page.getByRole('button', {name:'关闭', exact:true}).click();
-  await page.getByRole('button', {name:'关闭音效'}).click();
+  await page.getByRole('button', {name:'关闭声音'}).click();
   await expect.poll(() => page.evaluate(() => (window as any).musicElements.every((el: HTMLAudioElement) => el.paused))).toBe(true);
-  await page.getByRole('button', {name:'开启音效'}).click();
+  await page.getByRole('button', {name:'开启声音'}).click();
   await page.waitForFunction(() => (window as any).musicElements.some((el: HTMLAudioElement) => !el.paused));
   await page.evaluate(`import('/src/stores/appStore.ts').then(({useAppStore}) => useAppStore.setState({phase:'game_over'}))`);
   await expect.poll(() => page.evaluate(() => (window as any).musicElements.every((el: HTMLAudioElement) => el.paused))).toBe(true);

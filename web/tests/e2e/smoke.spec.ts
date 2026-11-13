@@ -25,16 +25,16 @@ test('mobile demo table keeps controls and drawers visible', async ({ page }) =>
 test('sound defaults on and both preferences survive reload and reopening the site', async ({ page, context }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto('/?demo=table');
-  const toggle = page.getByRole('button', { name: '关闭音效' });
+  const toggle = page.getByRole('button', { name: '关闭声音' });
   await expect(toggle).toBeInViewport({ ratio: 1 });
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await toggle.click();
   await page.reload();
-  await expect(page.getByRole('button', { name: '开启音效' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: '开启声音' })).toHaveAttribute('aria-pressed', 'false');
   const reopened = await context.newPage();
   await reopened.goto('/?demo=table');
-  await expect(reopened.getByRole('button', { name: '开启音效' })).toHaveAttribute('aria-pressed', 'false');
-  await reopened.getByRole('button', { name: '开启音效' }).click();
+  await expect(reopened.getByRole('button', { name: '开启声音' })).toHaveAttribute('aria-pressed', 'false');
+  await reopened.getByRole('button', { name: '开启声音' }).click();
   await reopened.close();
   await page.reload();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
