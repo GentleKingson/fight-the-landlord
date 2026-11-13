@@ -20,9 +20,13 @@ export function PlayedCards({ cards, handType, playerName, compact = false, isTa
     const measure = () => setOverflow(row.scrollWidth > row.clientWidth + 1);
     const observer = new ResizeObserver(measure);
     observer.observe(row);
+    window.addEventListener('resize', measure);
     row.scrollLeft = 0;
     measure();
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, [cards]);
   if (!cards.length) {
     return <div className="played-cards played-cards--empty">等待出牌</div>;

@@ -235,7 +235,7 @@
 
 .seat-row,
 .ranking-row,
-.history-list div,
+.history-list > div,
 .chat-feed p,
 .stat-tile,
 .counter-grid div {
@@ -680,9 +680,9 @@
   .table-screen, .table-arena { gap: 2px; }
   .action-bar small { height: 14px; min-height: 14px; line-height: 14px; }
 }
-@media (max-width: 360px) and (orientation: portrait) {
+@media (max-width: 430px) and (orientation: portrait) {
   /* Keep five 44px tool targets without widening the hand's grid track. */
-  .table-score-strip { padding-inline: 4px; gap: 0; }
+  .table-score-strip { padding-inline: 5px; gap: 0; min-height: 28px; }
   .table-score-strip span { display: none; }
   .table-score-strip strong { font-size: 10px; }
 }

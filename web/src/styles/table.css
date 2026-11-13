@@ -569,14 +569,12 @@
   .table-topbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px; }
   .table-brand__logo { font-size: 16px; }
   .table-score-strip { justify-self: center; gap: 4px; padding-inline: 4px; }
-  .table-tools .tool-button { min-width: 30px; width: 30px; padding: 4px; }
   .tool-button span { display: none; }
   .table-score-strip span, .table-score-strip strong { font-size: 11px; }
   .opponent-row { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px; }
   .player-badge .player-avatar { width: 28px; height: 28px; font-size: 14px; border-width: 1px; }
   .player-badge .player-action { padding: 2px 4px; font-size: 10px; }
-  .player-badge .player-offline { position: absolute; top: calc(100% + 3px); right: 6px; z-index: 2; }
-  .seat-panel--right .player-offline { right: auto; left: 6px; }
+  .player-badge .player-offline { position: absolute; top: auto; bottom: 2px; left: 3px; right: auto; padding: 1px 3px; font-size: 9px; line-height: 1.1; z-index: 2; }
   .bottom-cards.is-hidden { padding: 4px; grid-template-columns: auto; }
   .bottom-cards.is-hidden > span { display: none; }
 }
@@ -638,6 +636,10 @@
   .table-tools .tool-button { min-width: 44px; width: 44px; min-height: 44px; padding: 4px; }
   .table-tools .tool-button span { display: none; }
   .action-bar .primary-action, .action-bar .secondary-action { min-height: 44px; }
+}
+@media (max-width: 430px) and (orientation: portrait) {
+  .table-topbar { padding-inline: 4px; gap: 3px; }
+  .table-brand__logo { font-size: 13px; }
 }
 @media (max-width: 360px) and (orientation: portrait) {
   .table-brand { display: none; }

@@ -7,7 +7,7 @@ import { PlayerAvatar } from './PlayerAvatar';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore, useChatStore, type AppState, type SeatAction, type TableAction } from '../../stores/appStore';
-import { cardKey, generateSimpleSuggestions, summarizeHand } from '../../shared/cards/cardModel';
+import { cardKey, generateSimpleSuggestions, sortPlayedCards, summarizeHand } from '../../shared/cards/cardModel';
 import { canBeat, handSignature, parseHand } from '../../shared/cards/rules';
 import { Card } from '../../shared/cards/Card';
 import { Hand } from '../../shared/cards/Hand';
@@ -523,7 +523,7 @@ function HistoryPanel({ actions }: { actions: TableAction[] }) {
         <div key={index}>
           <span>{action.player_name || '系统'}</span>
           <strong>{action.label || (action.type === 'pass' ? '不出' : action.hand_type || '出牌')}</strong>
-          {action.cards?.length ? <div className="history-cards">{action.cards.map((card, i) => <Card key={i} card={card} size="mini" />)}</div> : null}
+          {action.cards?.length ? <div className="history-cards">{sortPlayedCards(action.cards).map((card, i) => <Card key={`${card.suit}_${card.rank}_${i}`} card={card} size="mini" />)}</div> : null}
         </div>
       )) : <p className="empty-text">暂无动作</p>}
     </div>

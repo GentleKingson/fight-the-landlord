@@ -121,4 +121,7 @@
     left: calc(50% + var(--compact-x, 0px) - 29px);
     bottom: 8px;
   }
+  .hand--short .hand__slot.is-selected {
+    transform: translateY(-14px);
+  }
 }
