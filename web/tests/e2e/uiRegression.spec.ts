@@ -89,6 +89,7 @@ test('portrait topbar stays non-overlapping across 361px-430px widths', async ({
     { width: 375, height: 667 },
     { width: 390, height: 844 },
     { width: 412, height: 915 },
+    { width: 430, height: 932 },
   ]) {
     await page.setViewportSize(viewport);
     await page.goto('/?demo=table');
@@ -100,6 +101,10 @@ test('portrait topbar stays non-overlapping across 361px-430px widths', async ({
     const zones = page.locator('.table-brand:visible, .table-score-strip:visible, .table-tools:visible');
     const boxes = await zones.evaluateAll(elements => elements.map(el => el.getBoundingClientRect().toJSON()));
     expect(boxes).toHaveLength(3);
+    for (const box of boxes) {
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(viewport.width);
+    }
     for (let i = 1; i < boxes.length; i++) {
       expect(boxes[i - 1].right).toBeLessThanOrEqual(boxes[i].left);
     }

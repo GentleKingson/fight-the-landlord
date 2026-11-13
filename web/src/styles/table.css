@@ -638,7 +638,7 @@
   .action-bar .primary-action, .action-bar .secondary-action { min-height: 44px; }
 }
 @media (max-width: 430px) and (orientation: portrait) {
-  .table-topbar { padding-inline: 4px; gap: 3px; }
+  .table-topbar { grid-template-columns: auto minmax(max-content, 1fr) auto; padding-inline: 4px; gap: 3px; }
   .table-brand__logo { font-size: 13px; }
 }
 @media (max-width: 360px) and (orientation: portrait) {
