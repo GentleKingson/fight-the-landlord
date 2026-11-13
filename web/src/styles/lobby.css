@@ -511,7 +511,8 @@
   margin: 0 0 14px;
 }
 
-.sub-panel.rules-panel {
+.sub-panel > .rules-panel {
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
