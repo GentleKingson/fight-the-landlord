@@ -117,7 +117,7 @@ test('compact portrait avoids badge-vs-played collisions and lifts selected shor
     await page.goto('/?demo=table');
     await page.evaluate(async () => {
       const path = '/src/stores/appStore.ts';
-      const { useAppStore } = await import(/* @vite-ignore */ path);
+      const { useAppStore } = await import(/* @vite-ignore */ path) as typeof import('../../src/stores/appStore');
       const card = (suit: number, rank: number) => ({ suit, rank, color: suit === 1 || suit === 3 ? 1 : 0 });
       const cards = Array.from({ length: 12 }, (_, i) => card(i % 4, 3 + Math.floor(i / 3)));
       const state = useAppStore.getState();
