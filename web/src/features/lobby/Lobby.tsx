@@ -53,7 +53,7 @@ export function Lobby({ socket }: LobbyProps) {
         panel === 'home' ? <LobbyHome socket={socket} /> : <LobbySubPanel socket={socket} panel={panel} />
       ) : null}
 
-      <nav className="bottom-nav" aria-label="大厅导航">
+      <nav className={`bottom-nav${activeSession ? ' is-locked' : ''}`} aria-label="大厅导航">
         {activeSession && <span className="nav-session" id="lobby-nav-reason">{phase === 'waiting'
           ? '房间等待中 · 离开房间后可使用大厅导航'
           : '匹配中 · 匹配结束后可使用大厅导航'}</span>}
@@ -344,20 +344,24 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
             </button>
           ) : null}
         </div>
-        <div
-          className={`room-copy-status ${copyState !== 'idle' ? 'is-visible' : ''} ${copyState === 'failed' ? 'is-error' : ''}`}
-          role="status"
-          aria-live="polite"
-        >
-          {statusMessage}
+        <div className="room-code-footer">
+          <p className={copyState !== 'idle' ? 'is-muted-out' : ''}>
+            {players.length}/3 人已入座 · {players.length < 3 ? `还缺 ${3 - players.length} 人` : '等待所有玩家准备'}
+          </p>
+          <div
+            className={`room-copy-status ${copyState !== 'idle' ? 'is-visible' : ''} ${copyState === 'failed' ? 'is-error' : ''}`}
+            role="status"
+            aria-live="polite"
+          >
+            {statusMessage}
+          </div>
         </div>
-        <p>{players.length}/3 人已入座 · {players.length < 3 ? `还缺 ${3 - players.length} 人` : '等待所有玩家准备'}</p>
       </div>
       <div className="seat-list">
         {Array.from({ length: 3 }, (_, index) => {
           const player = players.find((item) => item.seat === index);
           return (
-            <div className={`seat-row ${player?.id === playerId ? 'is-me' : ''}`} key={index}>
+            <div className={`seat-row${player?.id === playerId ? ' is-me' : ''}${!player ? ' is-empty' : ''}`} key={index}>
               <span>{index + 1}</span>
               <strong>{player?.name || '等待加入'}</strong>
               {player ? <em>{!player.online ? '离线' : player.ready ? '已准备' : '未准备'}</em> : null}

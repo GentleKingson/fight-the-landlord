@@ -78,7 +78,7 @@ function lobbyPreloadDemoFilter(): Plugin {
       if (!ctx?.originalUrl) return html;
       const url = new URL(ctx.originalUrl, 'http://localhost');
       const demo = url.searchParams.get('demo');
-      if (!demo || demo === 'lobby') return html;
+      if (!demo || demo === 'lobby' || demo === 'waiting') return html;
       return html.replace(/\s*<link\b[^>]*rel="preload"[^>]*scene-lobby-[^>]*>/g, '');
     }
   };
