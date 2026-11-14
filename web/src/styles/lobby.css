@@ -743,6 +743,7 @@
 }
 
 .ranking-list {
+  position: relative;
   display: grid;
   gap: 8px;
   min-height: 0;

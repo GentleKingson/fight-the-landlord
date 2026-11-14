@@ -191,3 +191,47 @@ test('leaderboard and stats panels keep reload button compact with clean spacing
     }
   }
 });
+
+test('opening leaderboard locates the current player row inside the visible list across viewports', async ({ page }) => {
+  const viewports = [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 667, height: 375 }
+  ];
+
+  await page.goto('/?demo=lobby');
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => {
+      const entries = Array.from({ length: 30 }, (_, idx) => ({
+        rank: idx + 1,
+        player_id: 'p' + (idx + 1),
+        player_name: '牌友' + (idx + 1),
+        score: 360 - idx * 6,
+        wins: 40 - idx,
+        win_rate: 56.2
+      }));
+      useAppStore.setState({ lobbyPanel: 'home', playerId: 'p22', playerName: '牌友22', leaderboard: entries });
+    })`);
+
+    await page.getByRole('button', { name: '战绩榜' }).click();
+
+    const position = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('.ranking-list');
+      const meRow = document.querySelector<HTMLElement>('.ranking-row.is-me');
+      if (!list || !meRow) return null;
+      const listRect = list.getBoundingClientRect();
+      const meRect = meRow.getBoundingClientRect();
+      return {
+        scrolledDown: list.scrollTop > 0,
+        visibleInsideList: meRect.top >= listRect.top - 1 && meRect.bottom <= listRect.bottom + 1
+      };
+    });
+
+    expect(position, `leaderboard locate @ ${viewport.width}x${viewport.height}`).toEqual({
+      scrolledDown: true,
+      visibleInsideList: true
+    });
+  }
+});

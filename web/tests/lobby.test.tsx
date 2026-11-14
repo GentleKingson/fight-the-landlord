@@ -181,6 +181,85 @@ it('renders leaderboard header, top-rank badges, win stats, and current-player m
   expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
 });
 
+it('automatically scrolls the leaderboard to center the current player rank on open and reload', () => {
+  let listener: ((msg: { type: string }) => void) | undefined;
+  const socket = {
+    send: vi.fn().mockReturnValue(true),
+    subscribe: (fn: typeof listener) => {
+      listener = fn;
+      return () => {};
+    }
+  } as unknown as GameSocket;
+
+  const entries = Array.from({ length: 30 }, (_, idx) => ({
+    rank: idx + 1,
+    player_id: `p${idx + 1}`,
+    player_name: `牌友${idx + 1}`,
+    score: 300 - idx * 5,
+    wins: 30 - idx,
+    win_rate: 55
+  }));
+
+  const rowHeight = 52;
+  const rowGap = 8;
+  const rowStep = rowHeight + rowGap;
+  const listViewportHeight = 300;
+
+  const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('ranking-list') ? entries.length * rowStep - rowGap : 0;
+  });
+  const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('ranking-list') ? listViewportHeight : 0;
+  });
+  const offsetHeightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('ranking-row') ? rowHeight : 0;
+  });
+  const offsetTopSpy = vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
+    if (!this.classList.contains('ranking-row') || !this.parentElement) return 0;
+    const index = Array.from(this.parentElement.children).indexOf(this);
+    return index >= 0 ? index * rowStep : 0;
+  });
+
+  try {
+    useAppStore.setState({
+      phase: 'lobby',
+      lobbyPanel: 'leaderboard',
+      connected: true,
+      playerId: 'p18',
+      playerName: '牌友18',
+      leaderboard: entries
+    });
+
+    const { container } = render(<Lobby socket={socket} />);
+    act(() => listener?.({ type: MsgType.LeaderboardResult }));
+
+    const listEl = container.querySelector<HTMLElement>('.ranking-list')!;
+    expect(listEl).toBeTruthy();
+    expect(listEl.scrollTop).toBe(896);
+
+    act(() => useAppStore.setState({ playerId: 'p2' }));
+    expect(listEl.scrollTop).toBe(0);
+
+    act(() => useAppStore.setState({ playerId: 'p30' }));
+    expect(listEl.scrollTop).toBe(1492);
+
+    act(() => useAppStore.setState({ playerId: 'unranked' }));
+    expect(listEl.scrollTop).toBe(0);
+
+    act(() => useAppStore.setState({ playerId: 'p18' }));
+    expect(listEl.scrollTop).toBe(896);
+    listEl.scrollTop = 0;
+    fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
+    act(() => listener?.({ type: MsgType.LeaderboardResult }));
+    expect(container.querySelector<HTMLElement>('.ranking-list')!.scrollTop).toBe(896);
+  } finally {
+    scrollHeightSpy.mockRestore();
+    clientHeightSpy.mockRestore();
+    offsetHeightSpy.mockRestore();
+    offsetTopSpy.mockRestore();
+  }
+});
+
 it('renders full personal stats dashboard and empty-record CTA cleanly with zero axe violations', async () => {
   let listener: ((msg: { type: string }) => void) | undefined;
   const send = vi.fn().mockReturnValue(true);

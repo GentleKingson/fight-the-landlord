@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore } from '../../stores/appStore';
@@ -405,6 +405,32 @@ function LeaderboardPanel({ socket }: LobbyProps) {
   const entries = useAppStore((state) => state.leaderboard);
   const playerId = useAppStore((state) => state.playerId);
   const isLoading = status === '正在加载…';
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [locateSeq, setLocateSeq] = useState(0);
+
+  const handleReload = useCallback(() => {
+    retry();
+    setLocateSeq((seq) => seq + 1);
+  }, [retry]);
+
+  useLayoutEffect(() => {
+    if (status) return;
+    const listEl = listRef.current;
+    if (!listEl) return;
+    const meRow = listEl.querySelector<HTMLElement>('.ranking-row.is-me');
+    if (!meRow) {
+      listEl.scrollTop = 0;
+      return;
+    }
+    const maxScrollTop = Math.max(0, listEl.scrollHeight - listEl.clientHeight);
+    if (maxScrollTop <= 0) {
+      listEl.scrollTop = 0;
+      return;
+    }
+    const rowTop = meRow.offsetParent === listEl ? meRow.offsetTop : meRow.offsetTop - listEl.offsetTop;
+    const centerOffset = Math.max(0, (listEl.clientHeight - meRow.offsetHeight) / 2);
+    listEl.scrollTop = Math.min(maxScrollTop, Math.max(0, Math.round(rowTop - centerOffset)));
+  }, [status, entries, playerId, locateSeq]);
 
   return (
     <section className="sub-panel sub-panel--leaderboard">
@@ -416,7 +442,7 @@ function LeaderboardPanel({ socket }: LobbyProps) {
         <button
           type="button"
           className={`secondary-action sub-panel__reload${isLoading ? ' is-loading' : ''}`}
-          onClick={retry}
+          onClick={handleReload}
         >
           <Icon name="refresh" />
           <span>重新加载</span>
@@ -436,7 +462,7 @@ function LeaderboardPanel({ socket }: LobbyProps) {
             <span>胜场 / 胜率</span>
             <span>总积分</span>
           </div>
-          <div className="ranking-list">
+          <div className="ranking-list" ref={listRef}>
             {entries.map((entry, index) => {
               const rank = entry.rank || index + 1;
               const isMe = Boolean(playerId && entry.player_id === playerId);
