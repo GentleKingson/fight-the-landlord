@@ -5,6 +5,7 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
+	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
 // --- Room 方法 ---
@@ -50,6 +51,7 @@ func (r *Room) GetPlayerInfo(playerID string) protocol.PlayerInfo {
 		Ready:      player.Ready,
 		IsLandlord: player.IsLandlord,
 		CardsCount: cardsCount,
+		Online:     !player.Offline,
 		IsBot:      player.Client.IsBot(),
 	}
 }
@@ -61,6 +63,49 @@ func (r *Room) GetAllPlayersInfo() []protocol.PlayerInfo {
 		infos = append(infos, r.GetPlayerInfo(id))
 	}
 	return infos
+}
+
+// GetOwnerID 线程安全获取房主 ID
+func (r *Room) GetOwnerID() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.OwnerID
+}
+
+// GetClients 线程安全获取房间内所有客户端列表
+func (r *Room) GetClients() []types.ClientInterface {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	clients := make([]types.ClientInterface, 0, len(r.Players))
+	for _, p := range r.Players {
+		if p.Client != nil {
+			clients = append(clients, p.Client)
+		}
+	}
+	return clients
+}
+
+// BuildRoomCreatedPayload 线程安全构建房间创建响应
+func (r *Room) BuildRoomCreatedPayload(playerID string) protocol.RoomCreatedPayload {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return protocol.RoomCreatedPayload{
+		RoomCode: r.Code,
+		Player:   r.GetPlayerInfo(playerID),
+		OwnerID:  r.OwnerID,
+	}
+}
+
+// BuildRoomJoinedPayload 线程安全构建加入房间响应
+func (r *Room) BuildRoomJoinedPayload(playerID string) protocol.RoomJoinedPayload {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return protocol.RoomJoinedPayload{
+		RoomCode: r.Code,
+		Player:   r.GetPlayerInfo(playerID),
+		Players:  r.GetAllPlayersInfo(),
+		OwnerID:  r.OwnerID,
+	}
 }
 
 // StartGame 准备开始游戏（不创建GameSession，由外部管理）

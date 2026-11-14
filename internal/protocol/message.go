@@ -27,6 +27,7 @@ const (
 	MsgPracticeMatch MessageType = "practice_match" // 人机练习
 	MsgReady         MessageType = "ready"          // 准备就绪
 	MsgCancelReady   MessageType = "cancel_ready"   // 取消准备
+	MsgStartGame     MessageType = "start_game"     // 房主开始游戏
 
 	// 游戏操作
 	MsgBid       MessageType = "bid"        // 叫地主

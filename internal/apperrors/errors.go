@@ -33,6 +33,9 @@ var (
 	ErrGameNotStart  = newGameError(protocol.ErrCodeGameNotStart)
 	ErrNotYourTurn   = newGameError(protocol.ErrCodeNotYourTurn)
 	ErrInvalidCards  = newGameError(protocol.ErrCodeInvalidCards)
-	ErrCannotBeat    = newGameError(protocol.ErrCodeCannotBeat)
-	ErrMustPlay      = newGameError(protocol.ErrCodeMustPlay)
+	ErrCannotBeat      = newGameError(protocol.ErrCodeCannotBeat)
+	ErrMustPlay        = newGameError(protocol.ErrCodeMustPlay)
+	ErrNotRoomOwner    = &GameError{Code: protocol.ErrCodeUnknown, Message: "只有房主可以开始游戏"}
+	ErrPlayersNotReady = &GameError{Code: protocol.ErrCodeUnknown, Message: "请等待其他玩家准备后再开始游戏"}
+	ErrPlayerOffline   = &GameError{Code: protocol.ErrCodeUnknown, Message: "房间内有玩家离线，请等待其重连后再开始游戏"}
 )

@@ -117,8 +117,9 @@ it('preserves the waiting room on failed leave and accepts a retry after reconne
 });
 
 it('waits for our own ready update and unlocks a pending cancel on disconnect', () => {
-  useAppStore.setState({ phase: 'waiting', playerId: 'me', roomRequest: null, players: [
-    { id: 'me', name: '我', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 },
+  useAppStore.setState({ phase: 'waiting', playerId: 'me', ownerId: 'host', roomRequest: null, players: [
+    { id: 'host', name: '房主', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 },
+    { id: 'me', name: '我', seat: 1, ready: false, online: true, is_landlord: false, cards_count: 0 },
   ] });
   const send = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
   render(<Lobby socket={{ send } as unknown as GameSocket} />);
@@ -136,6 +137,118 @@ it('waits for our own ready update and unlocks a pending cancel on disconnect', 
   expect(cancel).toBeDisabled();
   act(() => useAppStore.getState().setConnected(false));
   expect(cancel).toBeEnabled();
+});
+
+it('prompts secondary confirmation for bot-filled start when solo or partial room and sends start_game on confirm', async () => {
+  useAppStore.setState({
+    phase: 'waiting',
+    roomCode: '836219',
+    playerId: 'host',
+    ownerId: 'host',
+    roomRequest: null,
+    error: '',
+    players: [
+      { id: 'host', name: '青竹', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 }
+    ]
+  });
+  const send = vi.fn().mockReturnValue(true);
+  const { container } = render(<Lobby socket={{ send } as unknown as GameSocket} />);
+
+  expect(screen.getByText('房主')).toBeInTheDocument();
+  expect(screen.getByText(/开局自动补人机/)).toBeInTheDocument();
+
+  const startBtn = screen.getByRole('button', { name: '开始游戏' });
+  expect(startBtn).toBeEnabled();
+  fireEvent.click(startBtn);
+
+  const dialog = screen.getByRole('dialog', { name: '确认开始游戏？' });
+  expect(dialog).toBeInTheDocument();
+  expect(dialog).toHaveTextContent('人机补位局');
+  expect(dialog).toHaveTextContent('当前已有 1 名真人玩家入座，确认后将自动补齐 2 名人机玩家并立即开始游戏。');
+
+  const axeResults = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
+  expect(axeResults.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+
+  // Cancel via Escape restores focus and does not send start_game
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(startBtn);
+  expect(send).not.toHaveBeenCalled();
+
+  // Reopen, verify guest joining unready auto-closes modal and disables Start Game until guest readies
+  fireEvent.click(startBtn);
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  act(() => useAppStore.getState().handleMessage({
+    type: MsgType.PlayerJoined,
+    payload: { player: { id: 'p2', name: '山月', seat: 1, ready: false, online: true, is_landlord: false, cards_count: 0 } }
+  }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(startBtn).toBeDisabled();
+
+  // Guest readies -> 2/3 room shows 1-bot fill confirmation and sends start_game on confirm
+  act(() => useAppStore.getState().handleMessage({
+    type: MsgType.PlayerReady,
+    payload: { player_id: 'p2', ready: true }
+  }));
+  expect(startBtn).toBeEnabled();
+  fireEvent.click(startBtn);
+  expect(screen.getByRole('dialog')).toHaveTextContent('当前已有 2 名真人玩家入座，确认后将自动补齐 1 名人机玩家并立即开始游戏。');
+
+  fireEvent.click(screen.getByRole('button', { name: '确认开始' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledWith(MsgType.StartGame, undefined);
+  expect(screen.getByRole('button', { name: '正在开始游戏…' })).toBeDisabled();
+
+  // Error unlocks Start Game button
+  act(() => useAppStore.getState().handleMessage({
+    type: MsgType.Error,
+    payload: { message: '还有玩家未准备', request_type: MsgType.StartGame }
+  }));
+  expect(screen.getByRole('button', { name: '开始游戏' })).toBeEnabled();
+});
+
+it('prompts secondary confirmation for full 3-human game as well and transfers host UI when owner leaves', () => {
+  useAppStore.setState({
+    phase: 'waiting',
+    roomCode: '836219',
+    playerId: 'host',
+    ownerId: 'host',
+    roomRequest: null,
+    players: [
+      { id: 'host', name: '青竹', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 },
+      { id: 'p2', name: '山月', seat: 1, ready: true, online: true, is_landlord: false, cards_count: 0 },
+      { id: 'p3', name: '松风', seat: 2, ready: true, online: true, is_landlord: false, cards_count: 0 }
+    ]
+  });
+  const send = vi.fn().mockReturnValue(true);
+  render(<Lobby socket={{ send } as unknown as GameSocket} />);
+
+  const startBtn = screen.getByRole('button', { name: '开始游戏' });
+  expect(startBtn).toBeEnabled();
+  fireEvent.click(startBtn);
+
+  const dialog = screen.getByRole('dialog', { name: '确认开始游戏？' });
+  expect(dialog).toHaveTextContent('三人真人局');
+  expect(dialog).toHaveTextContent('当前 3 名真人玩家均已准备就绪，确认后将立即发牌开始游戏。');
+
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(send).not.toHaveBeenCalled();
+
+  fireEvent.click(startBtn);
+  fireEvent.click(screen.getByRole('button', { name: '确认开始' }));
+  expect(send).toHaveBeenCalledWith(MsgType.StartGame, undefined);
+
+  // Simulate viewing as p2 when host leaves: p2 becomes new host and sees 开始游戏
+  act(() => {
+    useAppStore.setState({ playerId: 'p2', roomRequest: null });
+    useAppStore.getState().handleMessage({
+      type: MsgType.PlayerLeft,
+      payload: { player_id: 'host', player_name: '青竹', owner_id: 'p2' }
+    });
+  });
+  expect(screen.getByRole('button', { name: '开始游戏' })).toBeEnabled();
 });
 
 it('renders leaderboard header, top-rank badges, win stats, and current-player marker with zero axe violations', async () => {

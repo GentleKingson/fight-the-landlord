@@ -26,6 +26,7 @@ type RoomPlayer struct {
 // Room 游戏房间
 type Room struct {
 	Code         string                 // 房间号
+	OwnerID      string                 // 房主玩家 ID
 	State        RoomState              // 房间状态
 	Players      map[string]*RoomPlayer // 玩家列表
 	PlayerOrder  []string               // 玩家顺序（按座位）
@@ -43,6 +44,7 @@ type RoomManager struct {
 	redisStore    *storage.RedisStore
 	roomTimeout   time.Duration
 	gameConfig    config.GameConfig
+	botFactory    func() types.ClientInterface
 	onGameStart   func(*Room)
 	onRoomRemoved func(*Room)
 	rooms         map[string]*Room

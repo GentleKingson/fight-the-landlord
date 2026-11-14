@@ -118,6 +118,7 @@ type OnlineCountPayload struct {
 type RoomCreatedPayload struct {
 	RoomCode string     `json:"room_code"`
 	Player   PlayerInfo `json:"player"`
+	OwnerID  string     `json:"owner_id,omitempty"`
 }
 
 // RoomJoinedPayload 加入房间成功响应
@@ -125,6 +126,7 @@ type RoomJoinedPayload struct {
 	RoomCode string       `json:"room_code"`
 	Player   PlayerInfo   `json:"player"`
 	Players  []PlayerInfo `json:"players"` // 房间内所有玩家
+	OwnerID  string       `json:"owner_id,omitempty"`
 }
 
 // PlayerJoinedPayload 其他玩家加入通知
@@ -136,6 +138,7 @@ type PlayerJoinedPayload struct {
 type PlayerLeftPayload struct {
 	PlayerID   string `json:"player_id"`
 	PlayerName string `json:"player_name"`
+	OwnerID    string `json:"owner_id,omitempty"`
 }
 
 // PlayerReadyPayload 玩家准备通知

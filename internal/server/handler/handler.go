@@ -129,6 +129,7 @@ func (h *Handler) initHandlers() {
 		protocol.MsgPracticeMatch: func(c types.ClientInterface, _ *protocol.Message) { h.handlePracticeMatch(c) },
 		protocol.MsgReady:         h.handleReady,
 		protocol.MsgCancelReady:   h.handleReady,
+		protocol.MsgStartGame:     func(c types.ClientInterface, _ *protocol.Message) { h.handleStartGame(c) },
 
 		// 游戏操作
 		protocol.MsgBid:       h.handleBid,

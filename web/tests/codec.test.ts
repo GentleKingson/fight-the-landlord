@@ -18,6 +18,39 @@ describe('protocol codec', () => {
     expect(decoded.payload).toEqual({ room_code: '123456' });
   });
 
+  it('round trips start_game and owner_id room payloads', () => {
+    const startDecoded = decodeMessage(encodeMessage(MsgType.StartGame));
+    expect(startDecoded).toEqual({ type: MsgType.StartGame, payload: {} });
+
+    const created = decodeMessage(encodeMessage(MsgType.RoomCreated, {
+      room_code: '836219',
+      owner_id: 'p1',
+      player: { id: 'p1', name: '青竹', seat: 0, online: true }
+    }));
+    expect(created.type).toBe(MsgType.RoomCreated);
+    expect(created.payload).toMatchObject({ room_code: '836219', owner_id: 'p1' });
+
+    const joined = decodeMessage(encodeMessage(MsgType.RoomJoined, {
+      room_code: '836219',
+      owner_id: 'p1',
+      player: { id: 'p2', name: '山月', seat: 1, online: true },
+      players: [
+        { id: 'p1', name: '青竹', seat: 0, online: true },
+        { id: 'p2', name: '山月', seat: 1, online: true }
+      ]
+    }));
+    expect(joined.type).toBe(MsgType.RoomJoined);
+    expect(joined.payload).toMatchObject({ room_code: '836219', owner_id: 'p1' });
+
+    const left = decodeMessage(encodeMessage(MsgType.PlayerLeft, {
+      player_id: 'p1',
+      player_name: '青竹',
+      owner_id: 'p2'
+    }));
+    expect(left.type).toBe(MsgType.PlayerLeft);
+    expect(left.payload).toEqual({ player_id: 'p1', player_name: '青竹', owner_id: 'p2' });
+  });
+
   it('round trips play cards payloads', () => {
     const decoded = decodeMessage(encodeMessage(MsgType.PlayCards, {
       turn_token: 'round-turn',

@@ -10,6 +10,7 @@ export const MsgType = {
   PracticeMatch: 'practice_match',
   Ready: 'ready',
   CancelReady: 'cancel_ready',
+  StartGame: 'start_game',
   Bid: 'bid',
   PlayCards: 'play_cards',
   Pass: 'pass',
@@ -165,10 +166,10 @@ export interface IncomingPayloadMap {
   reconnected: ReconnectedPayload;
   pong: { client_timestamp: number; server_timestamp: number };
   online_count: { count: number };
-  room_created: { room_code: string; player: PlayerInfo };
-  room_joined: { room_code: string; player: PlayerInfo; players: PlayerInfo[] };
+  room_created: { room_code: string; player: PlayerInfo; owner_id?: string };
+  room_joined: { room_code: string; player: PlayerInfo; players: PlayerInfo[]; owner_id?: string };
   player_joined: { player: PlayerInfo };
-  player_left: { player_id: string; player_name: string };
+  player_left: { player_id: string; player_name: string; owner_id?: string };
   player_ready: { player_id: string; ready: boolean };
   match_found: Record<string, never>;
   game_start: { players: PlayerInfo[] };

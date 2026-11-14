@@ -12,6 +12,7 @@ import "internal/protocol/proto/common.proto";
 message RoomCreatedPayload {
   string room_code = 1;
   PlayerInfo player = 2;
+  string owner_id = 3;
 }
 
 // RoomJoinedPayload 加入房间成功响应
@@ -19,6 +20,7 @@ message RoomJoinedPayload {
   string room_code = 1;
   PlayerInfo player = 2;
   repeated PlayerInfo players = 3;
+  string owner_id = 4;
 }
 
 // PlayerJoinedPayload 其他玩家加入通知
@@ -30,6 +32,7 @@ message PlayerJoinedPayload {
 message PlayerLeftPayload {
   string player_id = 1;
   string player_name = 2;
+  string owner_id = 3;
 }
 
 // PlayerReadyPayload 玩家准备通知

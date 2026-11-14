@@ -19,6 +19,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/server/handler"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
 // Version 是服务端版本号，可由 cmd/server 在启动时通过编译注入的值覆盖。
@@ -157,15 +158,23 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		Authenticate:   s.authenticateTerminal,
 	})
 
-	// 设置房间游戏开始回调
-	s.roomManager.SetOnGameStart(func(r *room.Room) {
-		gs := session.NewGameSession(r, s.leaderboard, s.config.Game)
-		s.handler.SetGameSession(r.Code, gs)
-		gs.Start()
-	})
+	// 设置房间补位机器人工厂与游戏开始回调
 	if botEngine == nil {
 		botEngine = bot.NewHeuristicEngine()
 	}
+	s.roomManager.SetBotFactory(func() types.ClientInterface {
+		return bot.NewBotClient(botEngine)
+	})
+	s.roomManager.SetOnGameStart(func(r *room.Room) {
+		gs := session.NewGameSession(r, s.leaderboard, s.config.Game)
+		for _, client := range r.GetClients() {
+			if b, ok := client.(*bot.BotClient); ok {
+				b.SetSession(gs)
+			}
+		}
+		s.handler.SetGameSession(r.Code, gs)
+		gs.Start()
+	})
 	if err := s.restoreGames(ctx, botEngine); err != nil {
 		s.SuspendRecovery()
 		_ = rdb.Close()

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
@@ -29,6 +30,7 @@ func TestRoomOperationsCannotRemoveActivePlayer(t *testing.T) {
 	for _, msg := range []*protocol.Message{
 		{Type: protocol.MsgLeaveRoom}, {Type: protocol.MsgCreateRoom},
 		codec.MustNewMessage(protocol.MsgJoinRoom, protocol.JoinRoomPayload{RoomCode: "123456"}),
+		{Type: protocol.MsgStartGame},
 		{Type: protocol.MsgQuickMatch}, {Type: protocol.MsgPracticeMatch},
 	} {
 		h.handlers[msg.Type](clients[0], msg)
@@ -36,7 +38,7 @@ func TestRoomOperationsCannotRemoveActivePlayer(t *testing.T) {
 		require.Len(t, r.Players, 3)
 		messages := clients[0].(*testutil.SimpleClient).SentMessages()
 		require.Equal(t, protocol.MsgError, messages[len(messages)-1].Type)
-		if msg.Type == protocol.MsgCreateRoom || msg.Type == protocol.MsgJoinRoom {
+		if msg.Type == protocol.MsgCreateRoom || msg.Type == protocol.MsgJoinRoom || msg.Type == protocol.MsgStartGame {
 			rejection, err := codec.ParsePayload[protocol.ErrorPayload](messages[len(messages)-1])
 			require.NoError(t, err)
 			require.Equal(t, msg.Type, rejection.RequestType)
@@ -104,4 +106,76 @@ func TestCancelMatchAcknowledgesOnlyQueueRemoval(t *testing.T) {
 	h.Handle(client, codec.MustNewMessage(protocol.MsgCancelMatch, nil))
 	messages = client.SentMessages()
 	require.Equal(t, protocol.MsgError, messages[len(messages)-1].Type)
+}
+
+func TestHandleStartGameFillsBotsAndBindsBotSession(t *testing.T) {
+	cfg := config.GameConfig{BidTimeout: 600, TurnTimeout: 600}
+	rm := room.NewRoomManager(nil, cfg)
+	engine := bot.NewHeuristicEngine()
+	rm.SetBotFactory(func() types.ClientInterface {
+		return bot.NewBotClient(engine)
+	})
+
+	server := new(testutil.MockServer)
+	h := NewHandler(HandlerDeps{Server: server, RoomManager: rm})
+	rm.SetOnGameStart(func(r *room.Room) {
+		gs := session.NewGameSession(r, nil, cfg)
+		for _, c := range r.GetClients() {
+			if b, ok := c.(*bot.BotClient); ok {
+				b.SetSession(gs)
+			}
+		}
+		h.SetGameSession(r.Code, gs)
+		gs.Start()
+		t.Cleanup(gs.StopAllTimers)
+	})
+
+	host := testutil.NewSimpleClient("host", "Host")
+	server.On("IsMaintenanceMode").Return(false).Once()
+	h.Handle(host, codec.MustNewMessage(protocol.MsgCreateRoom, nil))
+
+	msgs := host.SentMessages()
+	require.Len(t, msgs, 1)
+	require.Equal(t, protocol.MsgRoomCreated, msgs[0].Type)
+	created, err := codec.ParsePayload[protocol.RoomCreatedPayload](msgs[0])
+	require.NoError(t, err)
+	require.Equal(t, "host", created.OwnerID)
+
+	// Maintenance mode rejects start_game cleanly with request_type = start_game.
+	server.On("IsMaintenanceMode").Return(true).Once()
+	h.Handle(host, codec.MustNewMessage(protocol.MsgStartGame, nil))
+	msgs = host.SentMessages()
+	rejection, err := codec.ParsePayload[protocol.ErrorPayload](msgs[len(msgs)-1])
+	require.NoError(t, err)
+	require.Equal(t, protocol.MsgStartGame, rejection.RequestType)
+	require.Equal(t, protocol.ErrCodeServerMaintenance, rejection.Code)
+
+	// Normal start_game fills 2 bots, starts session, and deals cards.
+	server.On("IsMaintenanceMode").Return(false).Once()
+	h.Handle(host, codec.MustNewMessage(protocol.MsgStartGame, nil))
+	gs := h.GetGameSession(created.RoomCode)
+	require.NotNil(t, gs)
+
+	require.Eventually(t, func() bool {
+		var sawStart, sawDeal bool
+		for _, m := range host.SentMessages() {
+			if m.Type == protocol.MsgGameStart {
+				gp, err := codec.ParsePayload[protocol.GameStartPayload](m)
+				require.NoError(t, err)
+				require.Len(t, gp.Players, 3)
+				bots := 0
+				for _, p := range gp.Players {
+					if p.IsBot {
+						bots++
+					}
+				}
+				require.Equal(t, 2, bots)
+				sawStart = true
+			}
+			if m.Type == protocol.MsgDealCards {
+				sawDeal = true
+			}
+		}
+		return sawStart && sawDeal
+	}, 2*time.Second, 10*time.Millisecond)
 }

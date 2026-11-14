@@ -35,10 +35,7 @@ func (h *Handler) handleCreateRoom(client types.ClientInterface) {
 		return
 	}
 
-	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomCreated, protocol.RoomCreatedPayload{
-		RoomCode: room.Code,
-		Player:   room.GetPlayerInfo(client.GetID()),
-	}))
+	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomCreated, room.BuildRoomCreatedPayload(client.GetID())))
 }
 
 // handleJoinRoom 处理加入房间
@@ -72,11 +69,7 @@ func (h *Handler) handleJoinRoom(client types.ClientInterface, msg *protocol.Mes
 		return
 	}
 
-	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
-		RoomCode: room.Code,
-		Player:   room.GetPlayerInfo(client.GetID()),
-		Players:  room.GetAllPlayersInfo(),
-	}))
+	client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, room.BuildRoomJoinedPayload(client.GetID())))
 }
 
 // handleLeaveRoom 处理离开房间
@@ -129,6 +122,18 @@ func (h *Handler) handlePracticeMatch(client types.ClientInterface) {
 func (h *Handler) handleReady(client types.ClientInterface, msg *protocol.Message) {
 	if err := h.roomManager.SetPlayerReady(client, msg.Type == protocol.MsgReady); err != nil {
 		rejectRoomAction(client, msg.Type, err)
+	}
+}
+
+// handleStartGame 处理房主开始游戏（不满 3 人自动补齐人机）
+func (h *Handler) handleStartGame(client types.ClientInterface) {
+	if h.server != nil && h.server.IsMaintenanceMode() {
+		client.SendMessage(codec.NewRequestError(protocol.MsgStartGame,
+			protocol.ErrCodeServerMaintenance, "服务器维护中，暂停开始游戏"))
+		return
+	}
+	if err := h.roomManager.StartRoom(client); err != nil {
+		rejectRoomAction(client, protocol.MsgStartGame, err)
 	}
 }
 
