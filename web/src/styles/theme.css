@@ -197,10 +197,18 @@
 }
 
 .join-strip,
-.room-browser,
-.room-code-panel {
+.room-browser {
   background: rgba(255, 240, 200, .06);
   box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .16);
+}
+
+.room-code-panel {
+  background:
+    radial-gradient(ellipse at 50% 24%, rgba(255, 216, 118, .12), transparent 68%),
+    linear-gradient(160deg, rgba(28, 66, 51, .72), rgba(11, 30, 23, .82));
+  box-shadow:
+    inset 0 0 0 1px rgba(243, 207, 122, .26),
+    inset 0 1px 0 rgba(255, 244, 210, .1);
 }
 
 .join-strip label { color: #f3dfae; font-weight: 800; }
@@ -235,10 +243,16 @@
 .stat-tile,
 .counter-grid div {
   background: rgba(255, 240, 200, .06);
-  box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .1);
+  box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .12);
+}
+
+.seat-row.is-empty {
+  background: rgba(255, 240, 200, .03);
+  box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .08);
 }
 
 .seat-row.is-me { box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .55), inset 0 0 18px rgba(243, 207, 122, .08); }
+.seat-row.is-me > span { background: rgba(243, 207, 122, .24); color: #ffe9b0; box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .45); }
 
 /* ---------- Table chrome ---------- */
 .table-topbar {

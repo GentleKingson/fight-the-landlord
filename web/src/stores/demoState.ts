@@ -17,14 +17,20 @@ export function seedDemoState(mode: string): void {
   useAppStore.getState().leaveLocalRoom();
   const sortedHand = sortCards(hand);
   const isBidding = mode === 'bidding';
-  const demoPlayers = players.map(player => ({
-    ...player,
-    is_landlord: !isBidding && player.is_landlord,
-    is_bot: mode === 'practice' && player.id !== 'p1'
-  }));
+  const isWaiting = mode === 'waiting';
+  const demoPlayers = isWaiting
+    ? [
+      { id: 'p1', name: '青竹', seat: 0, ready: false, is_landlord: false, cards_count: 0, online: true },
+      { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: false, cards_count: 0, online: true }
+    ]
+    : players.map(player => ({
+      ...player,
+      is_landlord: !isBidding && player.is_landlord,
+      is_bot: mode === 'practice' && player.id !== 'p1'
+    }));
   useAppStore.setState({
     connected: true,
-    phase: mode === 'lobby' ? 'lobby' : isBidding ? 'bidding' : 'playing',
+    phase: mode === 'lobby' ? 'lobby' : isWaiting ? 'waiting' : isBidding ? 'bidding' : 'playing',
     playerId: 'p1',
     playerName: '青竹',
     roomCode: '836219',
