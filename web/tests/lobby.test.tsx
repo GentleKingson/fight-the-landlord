@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import axe from 'axe-core';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Lobby } from '../src/features/lobby/Lobby';
 import { useAppStore } from '../src/stores/appStore';
@@ -135,4 +136,130 @@ it('waits for our own ready update and unlocks a pending cancel on disconnect', 
   expect(cancel).toBeDisabled();
   act(() => useAppStore.getState().setConnected(false));
   expect(cancel).toBeEnabled();
+});
+
+it('renders leaderboard header, top-rank badges, win stats, and current-player marker with zero axe violations', async () => {
+  let listener: ((msg: { type: string }) => void) | undefined;
+  const send = vi.fn().mockReturnValue(true);
+  const socket = {
+    send,
+    subscribe: (fn: typeof listener) => {
+      listener = fn;
+      return () => {};
+    }
+  } as unknown as GameSocket;
+
+  useAppStore.setState({
+    phase: 'lobby',
+    lobbyPanel: 'leaderboard',
+    connected: true,
+    playerId: 'me',
+    playerName: '青竹',
+    leaderboard: [
+      { rank: 1, player_id: 'p1', player_name: '云鹤', score: 268, wins: 42, win_rate: 67.74 },
+      { rank: 2, player_id: 'me', player_name: '青竹', score: 186, wins: 29, win_rate: 60.41 },
+      { rank: 4, player_id: 'p4', player_name: '山月', score: 152, wins: 24, win_rate: 55.8 }
+    ]
+  });
+
+  const { container } = render(<Lobby socket={socket} />);
+  act(() => listener?.({ type: MsgType.LeaderboardResult }));
+
+  const head = container.querySelector('.sub-panel__head');
+  const reload = screen.getByRole('button', { name: '重新加载' });
+  expect(head).toContainElement(reload);
+  expect(screen.getByText('42 胜 · 胜率 67.7%')).toBeInTheDocument();
+  expect(screen.getByText('268 分')).toBeInTheDocument();
+
+  const meRow = container.querySelector('.ranking-row.is-me.is-top-2');
+  expect(meRow).toBeTruthy();
+  expect(meRow?.textContent).toContain('青竹');
+  expect(meRow?.textContent).toContain('我');
+  expect(container.querySelector('.ranking-row:last-child .ranking-rank')?.textContent).toBe('#4');
+
+  const results = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
+  expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+});
+
+it('renders full personal stats dashboard and empty-record CTA cleanly with zero axe violations', async () => {
+  let listener: ((msg: { type: string }) => void) | undefined;
+  const send = vi.fn().mockReturnValue(true);
+  const socket = {
+    send,
+    subscribe: (fn: typeof listener) => {
+      listener = fn;
+      return () => {};
+    }
+  } as unknown as GameSocket;
+
+  useAppStore.setState({
+    phase: 'lobby',
+    lobbyPanel: 'stats',
+    connected: true,
+    playerId: 'me',
+    playerName: '青竹',
+    stats: {
+      player_id: 'me',
+      player_name: '青竹',
+      total_games: 48,
+      wins: 29,
+      losses: 19,
+      win_rate: 60.416,
+      landlord_games: 18,
+      landlord_wins: 11,
+      farmer_games: 30,
+      farmer_wins: 18,
+      score: 186,
+      rank: 3,
+      current_streak: 4,
+      max_win_streak: 7
+    }
+  });
+
+  const { container } = render(<Lobby socket={socket} />);
+  act(() => listener?.({ type: MsgType.StatsResult }));
+
+  expect(container.querySelector('.sub-panel__head')).toContainElement(screen.getByRole('button', { name: '重新加载' }));
+  expect(screen.getByRole('heading', { name: '青竹', level: 3 })).toBeInTheDocument();
+  expect(screen.getByText('4 连胜中')).toBeInTheDocument();
+  expect(screen.getByText('+186')).toBeInTheDocument();
+  expect(screen.getByText('#3')).toBeInTheDocument();
+  expect(screen.getByText('60.4%')).toBeInTheDocument();
+  expect(screen.getByText('29 / 19')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '地主战绩', level: 3 })).toBeInTheDocument();
+  expect(screen.getByText('61.1%')).toBeInTheDocument();
+  expect(screen.getByText('11 胜 7 负')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '农民战绩', level: 3 })).toBeInTheDocument();
+  expect(screen.getByText('60.0%')).toBeInTheDocument();
+  expect(screen.getByText('18 胜 12 负')).toBeInTheDocument();
+
+  const populatedAxe = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
+  expect(populatedAxe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+
+  // Backend returns a non-null zero-game StatsResultPayload for brand-new players
+  act(() => {
+    useAppStore.setState({
+      stats: {
+        player_id: 'me',
+        player_name: '青竹',
+        total_games: 0,
+        wins: 0,
+        losses: 0,
+        win_rate: 0,
+        landlord_games: 0,
+        landlord_wins: 0,
+        farmer_games: 0,
+        farmer_wins: 0,
+        score: 0,
+        rank: 0,
+        current_streak: 0,
+        max_win_streak: 0
+      }
+    });
+  });
+
+  expect(screen.getByText(/你还没有对局记录/)).toBeInTheDocument();
+  const goLobbyBtn = screen.getByRole('button', { name: /前往大厅开局/ });
+  fireEvent.click(goLobbyBtn);
+  expect(useAppStore.getState().lobbyPanel).toBe('home');
 });

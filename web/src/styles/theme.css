@@ -237,13 +237,38 @@
   color: transparent;
 }
 
+.sub-panel h2 { color: #f6e4b6; }
+
 .seat-row,
 .ranking-row,
 .history-list > div,
 .stat-tile,
+.role-stat,
+.sub-panel__state,
 .counter-grid div {
   background: rgba(255, 240, 200, .06);
-  box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .12);
+  box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .14);
+}
+
+.stats-overview {
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(255, 216, 118, .1), transparent 62%),
+    linear-gradient(160deg, rgba(26, 62, 48, .72), rgba(10, 28, 22, .82));
+  box-shadow:
+    inset 0 0 0 1px rgba(243, 207, 122, .24),
+    inset 0 1px 0 rgba(255, 244, 210, .08);
+}
+
+.role-stat--landlord {
+  background:
+    radial-gradient(ellipse at 100% 0%, rgba(212, 72, 62, .1), transparent 60%),
+    rgba(255, 240, 200, .06);
+}
+
+.role-stat--farmer {
+  background:
+    radial-gradient(ellipse at 100% 0%, rgba(79, 174, 124, .1), transparent 60%),
+    rgba(255, 240, 200, .06);
 }
 
 .seat-row.is-empty {
@@ -251,8 +276,13 @@
   box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .08);
 }
 
-.seat-row.is-me { box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .55), inset 0 0 18px rgba(243, 207, 122, .08); }
+.seat-row.is-me,
+.ranking-row.is-me {
+  background: rgba(243, 207, 122, .1);
+  box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .52), inset 0 0 18px rgba(243, 207, 122, .08);
+}
 .seat-row.is-me > span { background: rgba(243, 207, 122, .24); color: #ffe9b0; box-shadow: inset 0 0 0 1px rgba(243, 207, 122, .45); }
+
 
 /* ---------- Table chrome ---------- */
 .table-topbar {
@@ -576,6 +606,8 @@
 
 .room-browser__list,
 .ranking-list,
+.stats-dashboard,
+.sub-panel > .rules-panel,
 .history-list,
 .utility-drawer > .counter-grid,
 .utility-drawer > .rules-panel,

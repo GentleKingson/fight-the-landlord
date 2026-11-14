@@ -4,10 +4,11 @@ import { MsgType, type MessageType } from '../../protocol/types';
 
 // These three lobby reads have distinct response types and no request IDs.
 export function useLobbyRequest(socket: GameSocket, request: MessageType, response: MessageType, immediate = true) {
-  const [status, setStatus] = useState(immediate ? '正在加载…' : '');
+  const isDemo = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demo');
+  const [status, setStatus] = useState(immediate && !isDemo ? '正在加载…' : '');
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (!immediate && attempt === 0) return;
+    if (isDemo || (!immediate && attempt === 0)) return;
     let done = false;
     const finish = (message: string) => { done = true; setStatus(message); };
     setStatus('正在加载…');
@@ -20,7 +21,7 @@ export function useLobbyRequest(socket: GameSocket, request: MessageType, respon
     if (sent === false) finish('连接不可用，请连接恢复后重试');
     const timer = window.setTimeout(() => { if (!done) finish('请求超时，请重试'); }, 10000);
     return () => { unsubscribe(); window.clearTimeout(timer); };
-  }, [socket, request, response, attempt, immediate]);
+  }, [socket, request, response, attempt, immediate, isDemo]);
   const retry = useCallback(() => setAttempt(value => value + 1), []);
-  return { status, retry, requested: immediate || attempt > 0 };
+  return { status, retry, requested: isDemo || immediate || attempt > 0 };
 }
