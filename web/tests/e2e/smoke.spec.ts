@@ -82,3 +82,50 @@ test('waiting room fits room code, seats, and both action buttons without scroll
     });
   }
 });
+
+test('leaderboard and stats panels keep reload button compact with clean spacing across desktop and mobile viewports', async ({ page }) => {
+  const viewports = [
+    { width: 1440, height: 900, fitsWithoutScroll: true },
+    { width: 390, height: 844, fitsWithoutScroll: true },
+    { width: 667, height: 375, fitsWithoutScroll: true },
+    { width: 320, height: 568, fitsWithoutScroll: false }
+  ];
+
+  for (const demo of ['leaderboard', 'stats', 'stats-empty'] as const) {
+    await page.goto(`/?demo=${demo}`);
+    for (const viewport of viewports) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      const reload = page.getByRole('button', { name: '重新加载' });
+      await expect(reload).toBeVisible();
+
+      const layout = await page.evaluate(() => {
+        const doc = document.documentElement;
+        const panel = document.querySelector<HTMLElement>('.sub-panel');
+        const head = document.querySelector<HTMLElement>('.sub-panel__head');
+        const reloadBtn = document.querySelector<HTMLElement>('.sub-panel__reload');
+        const body = head?.nextElementSibling as HTMLElement | null;
+        if (!panel || !head || !reloadBtn || !body) return null;
+
+        const pRect = panel.getBoundingClientRect();
+        const hRect = head.getBoundingClientRect();
+        const rRect = reloadBtn.getBoundingClientRect();
+        const bRect = body.getBoundingClientRect();
+
+        return {
+          noHorizontalOverflow: doc.scrollWidth <= window.innerWidth && panel.scrollWidth <= panel.clientWidth,
+          reloadCompact: rRect.width <= pRect.width * 0.48,
+          reloadSeparatedFromBody: bRect.top - rRect.bottom >= 10 && bRect.top - hRect.bottom >= 6,
+          bodyFitsWithoutScroll: body.scrollHeight <= body.clientHeight + 1
+        };
+      });
+
+      expect(layout, `${demo} @ ${viewport.width}x${viewport.height}`).not.toBeNull();
+      expect(layout?.noHorizontalOverflow, `${demo} overflow @ ${viewport.width}x${viewport.height}`).toBe(true);
+      expect(layout?.reloadCompact, `${demo} reload width @ ${viewport.width}x${viewport.height}`).toBe(true);
+      expect(layout?.reloadSeparatedFromBody, `${demo} reload gap @ ${viewport.width}x${viewport.height}`).toBe(true);
+      if (demo === 'stats' && viewport.fitsWithoutScroll) {
+        expect(layout?.bodyFitsWithoutScroll, `stats fit @ ${viewport.width}x${viewport.height}`).toBe(true);
+      }
+    }
+  }
+});

@@ -387,24 +387,87 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
 function LobbySubPanel({ socket, panel }: LobbyProps & { panel: string }) {
   if (panel === 'leaderboard') return <LeaderboardPanel socket={socket} />;
   if (panel === 'stats') return <StatsPanel socket={socket} />;
-  return <section className="sub-panel"><h2>玩法说明</h2><RulesPanel /></section>;
+  return (
+    <section className="sub-panel">
+      <header className="sub-panel__head">
+        <div className="sub-panel__title">
+          <h2>玩法说明</h2>
+          <p>标准三人斗地主规则与操作指引</p>
+        </div>
+      </header>
+      <RulesPanel />
+    </section>
+  );
 }
 
 function LeaderboardPanel({ socket }: LobbyProps) {
   const { status, retry } = useLobbyRequest(socket, MsgType.GetLeaderboard, MsgType.LeaderboardResult);
   const entries = useAppStore((state) => state.leaderboard);
+  const playerId = useAppStore((state) => state.playerId);
+  const isLoading = status === '正在加载…';
+
   return (
-    <section className="sub-panel">
-      <h2>战绩榜</h2><button className="secondary-action" onClick={retry}>重新加载</button>
-      <div className="ranking-list">
-        {status ? <p role="status">{status}</p> : entries.length ? entries.map((entry, index) => (
-          <div className="ranking-row" key={`${entry.player_id}_${index}`}>
-            <span>#{entry.rank || index + 1}</span>
-            <strong>{entry.player_name}</strong>
-            <em>{entry.score} 分</em>
+    <section className="sub-panel sub-panel--leaderboard">
+      <header className="sub-panel__head">
+        <div className="sub-panel__title">
+          <h2>战绩榜</h2>
+          <p>按累计积分展示前 30 名牌友</p>
+        </div>
+        <button
+          type="button"
+          className={`secondary-action sub-panel__reload${isLoading ? ' is-loading' : ''}`}
+          onClick={retry}
+        >
+          <Icon name="refresh" />
+          <span>重新加载</span>
+        </button>
+      </header>
+
+      {status ? (
+        <div className={`sub-panel__state${isLoading ? '' : ' is-error'}`} role="status">
+          {isLoading ? <span className="spinner spinner--large" aria-hidden="true" /> : null}
+          <p>{status}</p>
+        </div>
+      ) : entries.length ? (
+        <div className="ranking-board">
+          <div className="ranking-head" aria-hidden="true">
+            <span>排名</span>
+            <span>玩家</span>
+            <span>胜场 / 胜率</span>
+            <span>总积分</span>
           </div>
-        )) : <p className="empty-text">尚无玩家积分记录，完成对局后再来查看</p>}
-      </div>
+          <div className="ranking-list">
+            {entries.map((entry, index) => {
+              const rank = entry.rank || index + 1;
+              const isMe = Boolean(playerId && entry.player_id === playerId);
+              const wins = entry.wins ?? 0;
+              const winRate = Number.isFinite(entry.win_rate) ? entry.win_rate : 0;
+              return (
+                <div
+                  className={`ranking-row${isMe ? ' is-me' : ''}${rank <= 3 ? ` is-top-${rank}` : ''}`}
+                  key={`${entry.player_id}_${index}`}
+                >
+                  <span className="ranking-rank">{rank <= 3 ? rank : `#${rank}`}</span>
+                  <div className="ranking-player">
+                    <strong>{entry.player_name}</strong>
+                    {isMe ? <small className="me-tag">我</small> : null}
+                  </div>
+                  <span className="ranking-meta">{wins} 胜 · 胜率 {winRate.toFixed(1)}%</span>
+                  <em>{entry.score} 分</em>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="sub-panel__state">
+          <span className="state-emblem" aria-hidden="true">
+            <Icon name="rank" />
+          </span>
+          <strong>榜单虚位以待</strong>
+          <p className="empty-text">尚无玩家积分记录，完成对局后再来查看</p>
+        </div>
+      )}
     </section>
   );
 }
@@ -412,28 +475,239 @@ function LeaderboardPanel({ socket }: LobbyProps) {
 function StatsPanel({ socket }: LobbyProps) {
   const { status, retry } = useLobbyRequest(socket, MsgType.GetStats, MsgType.StatsResult);
   const stats = useAppStore((state) => state.stats);
+  const playerName = useAppStore((state) => state.playerName);
+  const setLobbyPanel = useAppStore((state) => state.setLobbyPanel);
+  const isLoading = status === '正在加载…';
+
+  const hasPlayedGames = Boolean(
+    stats && (
+      stats.total_games > 0 ||
+      stats.wins > 0 ||
+      (stats.losses ?? 0) > 0 ||
+      stats.score !== 0 ||
+      stats.rank > 0
+    )
+  );
+  const displayName = stats?.player_name || playerName;
+
+  const totalGames = stats?.total_games ?? 0;
+  const wins = stats?.wins ?? 0;
+  const losses = stats?.losses ?? Math.max(0, totalGames - wins);
+  const rawWinRate = stats && Number.isFinite(stats.win_rate)
+    ? stats.win_rate
+    : totalGames > 0 ? (wins / totalGames) * 100 : 0;
+  const winRate = Math.min(100, Math.max(0, rawWinRate));
+  const score = stats?.score ?? 0;
+  const rankLabel = stats && stats.rank > 0 ? `#${stats.rank}` : '未上榜';
+  const currentStreak = stats?.current_streak ?? 0;
+  const maxWinStreak = stats?.max_win_streak ?? 0;
+  const streakBadge = currentStreak > 0
+    ? `${currentStreak} 连胜中`
+    : currentStreak < 0
+      ? `${Math.abs(currentStreak)} 连败`
+      : '状态平稳';
+  const streakTileValue = currentStreak > 0
+    ? `${currentStreak} 连胜`
+    : currentStreak < 0
+      ? `${Math.abs(currentStreak)} 连败`
+      : '暂无连胜';
+
+  const landlordGames = stats?.landlord_games ?? 0;
+  const landlordWins = stats?.landlord_wins ?? 0;
+  const landlordLosses = Math.max(0, landlordGames - landlordWins);
+  const landlordRate = landlordGames > 0 ? Math.min(100, Math.max(0, (landlordWins / landlordGames) * 100)) : 0;
+
+  const farmerGames = stats?.farmer_games ?? 0;
+  const farmerWins = stats?.farmer_wins ?? 0;
+  const farmerLosses = Math.max(0, farmerGames - farmerWins);
+  const farmerRate = farmerGames > 0 ? Math.min(100, Math.max(0, (farmerWins / farmerGames) * 100)) : 0;
+
   return (
-    <section className="sub-panel">
-      <h2>我的战绩</h2><button className="secondary-action" onClick={retry}>重新加载</button>
-      {status ? <p role="status">{status}</p> : stats ? (
-        <div className="stats-grid">
-          <Stat label="总局数" value={stats.total_games} />
-          <Stat label="胜局" value={stats.wins} />
-          <Stat label="胜率" value={`${stats.win_rate.toFixed(1)}%`} />
-          <Stat label="积分" value={stats.score} />
-          <Stat label="排名" value={`#${stats.rank || '-'}`} />
-          <Stat label="最高连胜" value={stats.max_win_streak} />
+    <section className="sub-panel sub-panel--stats">
+      <header className="sub-panel__head">
+        <div className="sub-panel__title">
+          <h2>我的战绩</h2>
+          <p>个人对局总览、连胜走势与阵营胜率</p>
         </div>
-      ) : <p className="empty-text">你还没有对局记录，完成一局后再来查看</p>}
+        <button
+          type="button"
+          className={`secondary-action sub-panel__reload${isLoading ? ' is-loading' : ''}`}
+          onClick={retry}
+        >
+          <Icon name="refresh" />
+          <span>重新加载</span>
+        </button>
+      </header>
+
+      {status ? (
+        <div className={`sub-panel__state${isLoading ? '' : ' is-error'}`} role="status">
+          {isLoading ? <span className="spinner spinner--large" aria-hidden="true" /> : null}
+          <p>{status}</p>
+        </div>
+      ) : hasPlayedGames && stats ? (
+        <div className="stats-dashboard">
+          <div className="stats-overview">
+            <div className="stats-identity">
+              <span className="player-avatar stats-avatar" aria-hidden="true">
+                {Array.from(displayName || '牌')[0]}
+              </span>
+              <div className="stats-identity__copy">
+                <div className="stats-identity__row">
+                  <h3>{displayName || '当前玩家'}</h3>
+                  <span className={`streak-pill${currentStreak > 0 ? ' is-hot' : currentStreak < 0 ? ' is-cold' : ''}`}>
+                    {streakBadge}
+                  </span>
+                </div>
+                <p>累计对局 {totalGames} 场 · {wins} 胜 {losses} 负</p>
+              </div>
+            </div>
+
+            <div className="stats-kpis">
+              <div className="stats-kpi">
+                <span>当前积分</span>
+                <strong className={score < 0 ? 'is-negative' : ''}>{score > 0 ? `+${score}` : score}</strong>
+              </div>
+              <div className="stats-kpi">
+                <span>总榜排名</span>
+                <strong>{rankLabel}</strong>
+              </div>
+            </div>
+
+            <div className="stats-winbar">
+              <div className="stats-winbar__head">
+                <span>综合胜率</span>
+                <strong>{winRate.toFixed(1)}%</strong>
+              </div>
+              <div className="stats-meter" aria-hidden="true">
+                <span style={{ width: `${winRate}%` }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="stats-grid">
+            <Stat label="总局数" value={totalGames} meta="已完成场次" />
+            <Stat label="胜局 / 负局" value={`${wins} / ${losses}`} meta={`胜场差 ${wins - losses >= 0 ? `+${wins - losses}` : wins - losses}`} />
+            <Stat label="当前走势" value={streakTileValue} meta="近期连续战况" />
+            <Stat label="最高连胜" value={maxWinStreak} meta="历史最佳纪录" />
+          </div>
+
+          <div className="stats-roles">
+            <RoleStat
+              role="landlord"
+              title="地主战绩"
+              tag="独战两家"
+              games={landlordGames}
+              wins={landlordWins}
+              losses={landlordLosses}
+              rate={landlordRate}
+              totalGames={totalGames}
+            />
+            <RoleStat
+              role="farmer"
+              title="农民战绩"
+              tag="联手抗衡"
+              games={farmerGames}
+              wins={farmerWins}
+              losses={farmerLosses}
+              rate={farmerRate}
+              totalGames={totalGames}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="stats-empty-wrap">
+          <div className="sub-panel__state">
+            <span className="state-emblem" aria-hidden="true">
+              <Icon name="stats" />
+            </span>
+            <strong>{displayName ? `${displayName}，尚未开启战绩档案` : '尚未开启战绩档案'}</strong>
+            <p className="empty-text">你还没有对局记录，完成一局后再来查看</p>
+            <button type="button" className="primary-action" onClick={() => setLobbyPanel('home')}>
+              <Icon name="play" /> 前往大厅开局
+            </button>
+          </div>
+          <div className="stats-preview-strip" aria-hidden="true">
+            <div>
+              <span>当前积分</span>
+              <strong>0</strong>
+            </div>
+            <div>
+              <span>总榜排名</span>
+              <strong>未上榜</strong>
+            </div>
+            <div>
+              <span>阵营胜率</span>
+              <strong>待解锁</strong>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string | number }) {
+function Stat({ label, value, meta }: { label: string; value: string | number; meta: string }) {
   return (
     <div className="stat-tile">
       <span>{label}</span>
       <strong>{value}</strong>
+      <small>{meta}</small>
+    </div>
+  );
+}
+
+function RoleStat({
+  role,
+  title,
+  tag,
+  games,
+  wins,
+  losses,
+  rate,
+  totalGames
+}: {
+  role: 'landlord' | 'farmer';
+  title: string;
+  tag: string;
+  games: number;
+  wins: number;
+  losses: number;
+  rate: number;
+  totalGames: number;
+}) {
+  const share = totalGames > 0 ? Math.round((games / totalGames) * 100) : 0;
+  return (
+    <div className={`role-stat role-stat--${role}`}>
+      <div className="role-stat__head">
+        <div className="role-stat__title">
+          <span className="role-badge">{role === 'landlord' ? '地主' : '农民'}</span>
+          <div className="role-stat__heading">
+            <h3>{title}</h3>
+            <small>{tag}</small>
+          </div>
+        </div>
+        <div className="role-stat__rate-box">
+          <span>阵营胜率</span>
+          <strong className="role-stat__rate">{games > 0 ? `${rate.toFixed(1)}%` : '—'}</strong>
+        </div>
+      </div>
+      <div className="stats-meter" aria-hidden="true">
+        <span style={{ width: `${games > 0 ? rate : 0}%` }} />
+      </div>
+      <dl className="role-stat__figures">
+        <div>
+          <dt>出场</dt>
+          <dd>{games} 局</dd>
+        </div>
+        <div>
+          <dt>战况</dt>
+          <dd>{games > 0 ? `${wins} 胜 ${losses} 负` : '暂无记录'}</dd>
+        </div>
+        <div>
+          <dt>占比</dt>
+          <dd>{share}%</dd>
+        </div>
+      </dl>
     </div>
   );
 }

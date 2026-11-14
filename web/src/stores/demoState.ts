@@ -18,6 +18,7 @@ export function seedDemoState(mode: string): void {
   const sortedHand = sortCards(hand);
   const isBidding = mode === 'bidding';
   const isWaiting = mode === 'waiting';
+  const isLobbyScene = ['lobby', 'leaderboard', 'stats', 'stats-empty'].includes(mode);
   const demoPlayers = isWaiting
     ? [
       { id: 'p1', name: '青竹', seat: 0, ready: false, is_landlord: false, cards_count: 0, online: true },
@@ -30,12 +31,37 @@ export function seedDemoState(mode: string): void {
     }));
   useAppStore.setState({
     connected: true,
-    phase: mode === 'lobby' ? 'lobby' : isWaiting ? 'waiting' : isBidding ? 'bidding' : 'playing',
+    phase: isLobbyScene ? 'lobby' : isWaiting ? 'waiting' : isBidding ? 'bidding' : 'playing',
+    lobbyPanel: mode === 'leaderboard' ? 'leaderboard' : mode === 'stats' || mode === 'stats-empty' ? 'stats' : 'home',
     playerId: 'p1',
     playerName: '青竹',
     roomCode: '836219',
     players: demoPlayers,
     onlineCount: 128,
+    leaderboard: isLobbyScene && mode !== 'stats-empty' ? [
+      { rank: 1, player_id: 'p9', player_name: '云鹤', score: 268, wins: 42, win_rate: 67.7 },
+      { rank: 2, player_id: 'p8', player_name: '墨竹轩', score: 214, wins: 35, win_rate: 62.5 },
+      { rank: 3, player_id: 'p1', player_name: '青竹', score: 186, wins: 29, win_rate: 60.4 },
+      { rank: 4, player_id: 'p2', player_name: '山月', score: 152, wins: 24, win_rate: 55.8 },
+      { rank: 5, player_id: 'p3', player_name: '松风', score: 129, wins: 21, win_rate: 52.5 },
+      { rank: 6, player_id: 'p4', player_name: '听雨眠', score: 96, wins: 17, win_rate: 48.6 }
+    ] : [],
+    stats: isLobbyScene && mode !== 'stats-empty' ? {
+      player_id: 'p1',
+      player_name: '青竹',
+      total_games: 48,
+      wins: 29,
+      losses: 19,
+      win_rate: 60.4,
+      landlord_games: 18,
+      landlord_wins: 11,
+      farmer_games: 30,
+      farmer_wins: 18,
+      score: 186,
+      rank: 3,
+      current_streak: 4,
+      max_win_streak: 7
+    } : null,
     hand: sortedHand,
     bottomCards: [c(1, 5), c(2, 11), c(3, 15)],
     bottomCardsRevealed: !isBidding,

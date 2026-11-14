@@ -1,5 +1,5 @@
 interface IconProps {
-  name: 'play' | 'room' | 'bot' | 'rank' | 'stats' | 'counter' | 'history' | 'rules' | 'close' | 'sound' | 'muted' | 'copy' | 'check' | 'share';
+  name: 'play' | 'room' | 'bot' | 'rank' | 'stats' | 'counter' | 'history' | 'rules' | 'close' | 'sound' | 'muted' | 'copy' | 'check' | 'share' | 'refresh';
 }
 
 export function Icon({ name }: IconProps) {
@@ -25,5 +25,6 @@ const icons: Record<IconProps['name'], string> = {
   close: 'm6 7.4 1.4-1.4 4.6 4.6L16.6 6 18 7.4 13.4 12l4.6 4.6-1.4 1.4-4.6-4.6L7.4 18 6 16.6l4.6-4.6L6 7.4Z',
   copy: 'M8 4h10a2 2 0 0 1 2 2v10h-2V6H8V4Zm-2 4h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Zm0 2v10h10V10H6Z',
   check: 'm9.5 16.6-4.6-4.6 1.4-1.4 3.2 3.2 8.2-8.2 1.4 1.4-9.6 9.6Z',
-  share: 'M18 16a3 3 0 0 0-2.4 1.2L8.9 13.7a3.2 3.2 0 0 0 0-3.4l6.7-3.5A3 3 0 1 0 15 5a3 3 0 0 0 .1.7L8.4 9.2a3 3 0 1 0 0 5.6l6.7 3.5a3 3 0 1 0 2.9-2.3Z'
+  share: 'M18 16a3 3 0 0 0-2.4 1.2L8.9 13.7a3.2 3.2 0 0 0 0-3.4l6.7-3.5A3 3 0 1 0 15 5a3 3 0 0 0 .1.7L8.4 9.2a3 3 0 1 0 0 5.6l6.7 3.5a3 3 0 1 0 2.9-2.3Z',
+  refresh: 'M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z'
 };
