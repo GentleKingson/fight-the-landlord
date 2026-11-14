@@ -158,12 +158,6 @@
   --h: var(--played-card-h);
 }
 
-.felt-table .card--played .card__index { font-size: 14px; }
-.felt-table .card--played .card__index--top { left: 3px; top: 3px; }
-.felt-table .card--played .card__index i { font-size: 11px; }
-.felt-table .card--played .card__pip,
-.felt-table .card__index--bottom { display: none; }
-
 /* ---------- Responsive Played Cards ---------- */
 @media (max-width: 880px) {
   .felt-table .played-cards { --played-card-w: 38px; --played-card-h: 54px; --played-min-step: 21px; --played-step: 24px; }
@@ -221,6 +215,8 @@
 /* Short screens must keep target, name and hand type on one metadata row. */
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
   .felt-table .played-cards { --played-card-w: 28px; --played-card-h: 40px; --played-min-step: 21px; --played-step: 23px; padding-block: 3px; gap: 5px; }
+  .felt-table .card--played { --index-inset: 2px; --index-size: 9px; --index-suit-size: 7px; }
+  .felt-table .card--played .card__pip { display: none; }
   .felt-table .played-cards__meta { flex-wrap: nowrap; padding: 2px 5px; gap: 3px; }
   .played-cards__target-label { padding: 2px 4px; font-size: 10px; }
 }
@@ -255,27 +251,34 @@
     --played-card-h: 48px;
     --played-min-step: 28px;
   }
-  .felt-table .card--played .card__index--top { display: flex; align-items: center; gap: 2px; }
-  .felt-table .played-seat--target .card__index--top {
-    display: grid;
-    gap: 0;
-    font-size: 18px;
-  }
-  .felt-table .played-cards__meta { flex-wrap: nowrap; min-height: 16px; padding: 1px 6px; gap: 4px; font-size: 10px; }
-  .played-cards__target-label { padding: 0 4px; font-size: 10px; }
-  .felt-table .card--played .card__joker-word {
+  /* Non-target seats collapse into a 24px single-row strip; target seats keep dual-corner cards. */
+  .felt-table .played-seat:not(.played-seat--target) .card--played .card__index--top { display: flex; align-items: center; gap: 2px; }
+  .felt-table .played-seat:not(.played-seat--target) .card--played .card__index--bottom,
+  .felt-table .played-seat:not(.played-seat--target) .card--played .card__pip,
+  .felt-table .played-seat:not(.played-seat--target) .card--played .card__joker-word--bottom { display: none; }
+  .felt-table .played-seat:not(.played-seat--target) .card--played .card__joker-word--top {
     left: 3px;
     top: 2px;
-    bottom: auto;
     writing-mode: horizontal-tb;
     letter-spacing: 0;
     font-size: 8px;
   }
-  .felt-table .card--played .card__joker-star {
+  .felt-table .played-seat:not(.played-seat--target) .card--played .card__joker-star {
+    left: auto;
+    top: auto;
     right: 2px;
     bottom: 1px;
+    transform: none;
     font-size: 10px;
   }
+  .felt-table .played-seat--target .card--played {
+    --index-inset: 3px;
+    --index-size: 11px;
+    --index-suit-size: 9px;
+    --pip-size: 11px;
+  }
+  .felt-table .played-cards__meta { flex-wrap: nowrap; min-height: 16px; padding: 1px 6px; gap: 4px; font-size: 10px; }
+  .played-cards__target-label { padding: 0 4px; font-size: 10px; }
 }
 
 /* On very short portrait displays, reserve the center for the current target. */

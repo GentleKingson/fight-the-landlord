@@ -582,9 +582,8 @@
   .player-badge em { padding: 2px 3px; font-size: 10px; }
   .bottom-cards { gap: 3px; padding: 4px; border-radius: 8px; }
   .bottom-cards > span { font-size: 10px; }
-  .bottom-cards .card--mini { --w: 22px; --h: 32px; }
-  .bottom-cards .card__index--top { top: 3px; left: 2px; }
-  .bottom-cards .card__pip { display: none; }
+  .bottom-cards .card--mini { --w: 22px; --h: 32px; --index-inset: 2px; }
+  .bottom-cards .card__index--bottom, .bottom-cards .card__joker-word--bottom, .bottom-cards .card__pip { display: none; }
   .bottom-cards > div { gap: 2px; }
   .bottom-cards.is-hidden .mini-card-placeholder { width: 22px; height: 31px; }
   .table-center-hint { min-width: 0; min-height: 28px; padding: 0 10px; font-size: 12px; }
@@ -620,9 +619,8 @@
        (max-width: 360px) and (orientation: portrait) {
   .bottom-cards { padding: 3px; }
   .bottom-cards > span { display: none; }
-  .bottom-cards .card--mini, .bottom-cards.is-hidden .mini-card-placeholder { --w: 16px; --h: 24px; width: 16px; height: 24px; }
-  .bottom-cards .card__index--top { left: 2px; top: 3px; font-size: 9px; }
-  .bottom-cards .card__index--bottom, .bottom-cards .card__pip { display: none; }
+  .bottom-cards .card--mini, .bottom-cards.is-hidden .mini-card-placeholder { --w: 16px; --h: 24px; --index-inset: 2px; --index-size: 9px; width: 16px; height: 24px; }
+  .bottom-cards .card__index--bottom, .bottom-cards .card__joker-word--bottom, .bottom-cards .card__pip { display: none; }
 }
 
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
@@ -653,9 +651,8 @@
   .player-badge { padding: 3px 6px; }
   .player-badge strong, .player-badge span { line-height: 1.2; }
   .player-avatar { width: 26px; height: 26px; }
-  .bottom-cards .card--mini { --w: 18px; --h: 26px; }
-  .bottom-cards .card__index--bottom, .bottom-cards .card__pip { display: none; }
-  .bottom-cards .card__index--top { top: 3px; left: 2px; }
+  .bottom-cards .card--mini { --w: 18px; --h: 26px; --index-inset: 2px; }
+  .bottom-cards .card__index--bottom, .bottom-cards .card__joker-word--bottom, .bottom-cards .card__pip { display: none; }
   .bottom-cards.is-hidden .mini-card-placeholder { width: 18px; height: 26px; }
   .turn-banner { width: min(260px, 54%); padding: 0 10px; }
   /* Keep the visible play hint within the timer's height budget on short screens. */
