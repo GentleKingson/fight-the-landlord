@@ -27,6 +27,7 @@ func (rm *RoomManager) CreateRoom(client types.ClientInterface) (*Room, error) {
 
 	room := &Room{
 		Code:        code,
+		OwnerID:     client.GetID(),
 		State:       RoomStateWaiting,
 		Players:     make(map[string]*RoomPlayer),
 		PlayerOrder: make([]string, 0, 3),
@@ -144,15 +145,24 @@ func (rm *RoomManager) leaveRoomLocked(client types.ClientInterface) (*Room, err
 	if player == nil || player.Client != client {
 		return nil, apperrors.ErrNotInRoom
 	}
-	r.BroadcastExcept(client.GetID(), codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
-		PlayerID: client.GetID(), PlayerName: client.GetName(),
-	}))
 	delete(r.Players, client.GetID())
 	r.PlayerOrder = slices.DeleteFunc(r.PlayerOrder, func(id string) bool { return id == client.GetID() })
 	client.SetRoom("")
 	if len(r.Players) == 0 {
 		delete(rm.rooms, code)
 		return r, nil
+	}
+	resetReadyPlayerID := r.transferOwnerLocked(client.GetID())
+	r.Broadcast(codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
+		PlayerID:   client.GetID(),
+		PlayerName: client.GetName(),
+		OwnerID:    r.OwnerID,
+	}))
+	if resetReadyPlayerID != "" {
+		r.Broadcast(codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
+			PlayerID: resetReadyPlayerID,
+			Ready:    false,
+		}))
 	}
 	allOffline := true
 	for _, p := range r.Players {
@@ -170,6 +180,33 @@ func (rm *RoomManager) leaveRoomLocked(client types.ClientInterface) (*Room, err
 	return nil, nil
 }
 
+// transferOwnerLocked prefers an online human, then any remaining human.
+func (r *Room) transferOwnerLocked(leavingID string) string {
+	if r.OwnerID != leavingID {
+		return ""
+	}
+	r.OwnerID = ""
+	for _, id := range r.PlayerOrder {
+		if p := r.Players[id]; p != nil && !p.Client.IsBot() && !p.Offline {
+			r.OwnerID = id
+			break
+		}
+	}
+	if r.OwnerID == "" {
+		for _, id := range r.PlayerOrder {
+			if p := r.Players[id]; p != nil && !p.Client.IsBot() {
+				r.OwnerID = id
+				break
+			}
+		}
+	}
+	if newOwner := r.Players[r.OwnerID]; newOwner != nil && newOwner.Ready {
+		newOwner.Ready = false
+		return r.OwnerID
+	}
+	return ""
+}
+
 // SetPlayerReady 设置玩家准备状态
 func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) error {
 	roomCode := client.GetRoom()
@@ -179,6 +216,7 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 
 	rm.mu.RLock()
 	room, exists := rm.rooms[roomCode]
+	onGameStart := rm.onGameStart
 	rm.mu.RUnlock()
 	if !exists {
 		return apperrors.ErrRoomNotFound
@@ -214,8 +252,8 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 
 		room.mu.Unlock()
 		// 创建游戏会话并开始
-		if rm.onGameStart != nil {
-			rm.onGameStart(room)
+		if onGameStart != nil {
+			onGameStart(room)
 		}
 
 		// 保存房间状态
@@ -227,6 +265,111 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	}
 
 	return nil
+}
+
+// StartRoom 由房主开始游戏；当真人玩家未满 3 人时自动补齐机器人
+func (rm *RoomManager) StartRoom(client types.ClientInterface) error {
+	roomCode := client.GetRoom()
+	if roomCode == "" {
+		return apperrors.ErrNotInRoom
+	}
+
+	rm.mu.RLock()
+	room, exists := rm.rooms[roomCode]
+	botFactory := rm.botFactory
+	onGameStart := rm.onGameStart
+	rm.mu.RUnlock()
+	if !exists {
+		return apperrors.ErrRoomNotFound
+	}
+
+	room.mu.Lock()
+	if err := room.validateStartLocked(client); err != nil {
+		room.mu.Unlock()
+		return err
+	}
+
+	if len(room.Players) < 3 && botFactory == nil {
+		room.mu.Unlock()
+		return &apperrors.GameError{Code: protocol.ErrCodeUnknown, Message: "人机服务暂未就绪"}
+	}
+
+	room.Players[client.GetID()].Ready = true
+	for len(room.Players) < 3 {
+		used := [3]bool{}
+		for _, p := range room.Players {
+			used[p.Seat] = true
+		}
+		seat := slices.Index(used[:], false)
+		botClient := botFactory()
+		botClient.SetRoom(room.Code)
+		room.Players[botClient.GetID()] = &RoomPlayer{
+			Client: botClient,
+			Seat:   seat,
+			Ready:  true,
+		}
+		room.PlayerOrder = append(room.PlayerOrder, botClient.GetID())
+		log.Printf("🤖 Bot %s 补位加入房间 %s (座位 %d)", botClient.GetName(), room.Code, seat)
+	}
+	slices.SortFunc(room.PlayerOrder, func(a, b string) int {
+		return cmp.Compare(room.Players[a].Seat, room.Players[b].Seat)
+	})
+
+	if err := room.startGameLocked(); err != nil {
+		log.Printf("开始游戏失败: %v", err)
+		room.mu.Unlock()
+		return err
+	}
+	room.mu.Unlock()
+
+	if onGameStart != nil {
+		onGameStart(room)
+	}
+
+	if rm.redisStore != nil && rm.redisStore.IsReady() {
+		go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
+	}
+
+	return nil
+}
+
+func (room *Room) validateStartLocked(client types.ClientInterface) error {
+	if room.State != RoomStateWaiting {
+		return apperrors.ErrGameStarted
+	}
+
+	player := room.Players[client.GetID()]
+	if player == nil || player.Client != client {
+		return apperrors.ErrNotInRoom
+	}
+
+	ownerID := room.OwnerID
+	if ownerID == "" && len(room.PlayerOrder) > 0 {
+		ownerID = room.PlayerOrder[0]
+	}
+	if client.GetID() != ownerID {
+		return apperrors.ErrNotRoomOwner
+	}
+
+	for id, p := range room.Players {
+		if id == client.GetID() || p.Client.IsBot() {
+			continue
+		}
+		if p.Offline {
+			return apperrors.ErrPlayerOffline
+		}
+		if !p.Ready {
+			return apperrors.ErrPlayersNotReady
+		}
+	}
+
+	return nil
+}
+
+func (rm *RoomManager) SetBotFactory(factory func() types.ClientInterface) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	rm.botFactory = factory
 }
 
 func (rm *RoomManager) SetOnGameStart(callback func(*Room)) {

@@ -172,14 +172,23 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 		assert.Equal(t, original.Count, result.Count)
 	})
 
+	t.Run("StartGame empty payload", func(t *testing.T) {
+		t.Parallel()
+		data, err := EncodePayload(protocol.MsgStartGame, nil)
+		require.NoError(t, err)
+		assert.Nil(t, data)
+	})
+
 	t.Run("RoomCreated", func(t *testing.T) {
 		t.Parallel()
 		original := protocol.RoomCreatedPayload{
 			RoomCode: "123456",
+			OwnerID:  "p1",
 			Player: protocol.PlayerInfo{
-				ID:   "p1",
-				Name: "Player1",
-				Seat: 0,
+				ID:     "p1",
+				Name:   "Player1",
+				Seat:   0,
+				Online: true,
 			},
 		}
 
@@ -191,7 +200,59 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, original.RoomCode, result.RoomCode)
+		assert.Equal(t, original.OwnerID, result.OwnerID)
 		assert.Equal(t, original.Player.ID, result.Player.ID)
+		assert.True(t, result.Player.Online)
+	})
+
+	t.Run("RoomJoined", func(t *testing.T) {
+		t.Parallel()
+		original := protocol.RoomJoinedPayload{
+			RoomCode: "123456",
+			OwnerID:  "p1",
+			Player: protocol.PlayerInfo{
+				ID:     "p2",
+				Name:   "Player2",
+				Seat:   1,
+				Online: true,
+			},
+			Players: []protocol.PlayerInfo{
+				{ID: "p1", Name: "Player1", Seat: 0, Online: true},
+				{ID: "p2", Name: "Player2", Seat: 1, Online: true},
+			},
+		}
+
+		data, err := EncodePayload(protocol.MsgRoomJoined, original)
+		require.NoError(t, err)
+
+		var result protocol.RoomJoinedPayload
+		err = DecodePayload(protocol.MsgRoomJoined, data, &result)
+		require.NoError(t, err)
+
+		assert.Equal(t, original.RoomCode, result.RoomCode)
+		assert.Equal(t, original.OwnerID, result.OwnerID)
+		assert.Equal(t, original.Player, result.Player)
+		assert.Equal(t, original.Players, result.Players)
+	})
+
+	t.Run("PlayerLeft", func(t *testing.T) {
+		t.Parallel()
+		original := protocol.PlayerLeftPayload{
+			PlayerID:   "p1",
+			PlayerName: "Player1",
+			OwnerID:    "p2",
+		}
+
+		data, err := EncodePayload(protocol.MsgPlayerLeft, original)
+		require.NoError(t, err)
+
+		var result protocol.PlayerLeftPayload
+		err = DecodePayload(protocol.MsgPlayerLeft, data, &result)
+		require.NoError(t, err)
+
+		assert.Equal(t, original.PlayerID, result.PlayerID)
+		assert.Equal(t, original.PlayerName, result.PlayerName)
+		assert.Equal(t, original.OwnerID, result.OwnerID)
 	})
 
 	t.Run("Error", func(t *testing.T) {

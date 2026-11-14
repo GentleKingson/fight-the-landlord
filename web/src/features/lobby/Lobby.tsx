@@ -15,7 +15,7 @@ interface LobbyProps {
 }
 
 const navItems = [['home', '大厅'], ['leaderboard', '战绩榜'], ['stats', '我的战绩'], ['rules', '规则']] as const;
-const roomRequestLabels = { create_room: '创建房间', join_room: '加入房间', ready: '准备', cancel_ready: '取消准备' } as const;
+const roomRequestLabels = { create_room: '创建房间', join_room: '加入房间', ready: '准备', cancel_ready: '取消准备', start_game: '开始游戏' } as const;
 
 export function Lobby({ socket }: LobbyProps) {
   const phase = useAppStore((state) => state.phase);
@@ -237,12 +237,24 @@ async function writeTextToClipboard(text: string): Promise<void> {
 
 function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: string; players: ReturnType<typeof useAppStore.getState>['players'] }) {
   const playerId = useAppStore((state) => state.playerId);
+  const ownerId = useAppStore((state) => state.ownerId);
   const me = players.find((player) => player.id === playerId);
-  const pending = useAppStore(state => state.roomRequest);
+  const pending = useAppStore((state) => state.roomRequest);
   const codeRef = useRef<HTMLElement | null>(null);
+  const startButtonRef = useRef<HTMLButtonElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const isOwner = Boolean(playerId && ownerId && ownerId === playerId);
+  const guests = ownerId ? players.filter((player) => player.id !== ownerId) : players;
+  const hasOffline = players.some((player) => !player.online);
+  const allGuestsReady = guests.every((player) => player.ready && player.online);
+  const canStart = isOwner && !hasOffline && allGuestsReady;
+  const botFillCount = Math.max(0, 3 - players.length);
 
   const supportsInvokerCommands = typeof window !== 'undefined' && 'CommandEvent' in window;
   const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
@@ -267,6 +279,51 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (confirmOpen && (!canStart || !!pending)) {
+      setConfirmOpen(false);
+    }
+  }, [canStart, confirmOpen, pending]);
+
+  const closeConfirm = useCallback(() => {
+    setConfirmOpen(false);
+    startButtonRef.current?.focus();
+  }, []);
+
+  const confirmStartGame = useCallback(() => {
+    setConfirmOpen(false);
+    submitRoomRequest(socket, MsgType.StartGame);
+  }, [socket]);
+
+  useEffect(() => {
+    if (!confirmOpen) return;
+    confirmButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeConfirm();
+        return;
+      }
+      if (event.key === 'Tab') {
+        const focusable = [cancelButtonRef.current, confirmButtonRef.current].filter(
+          (el): el is HTMLButtonElement => Boolean(el && !el.disabled)
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closeConfirm, confirmOpen]);
 
   const handleCopyRoomCode = useCallback(async () => {
     if (!roomCode) return;
@@ -313,74 +370,139 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
     };
   }, [handleCopyRoomCode, supportsInvokerCommands]);
 
+  const waitingHint = !ownerId
+    ? `${players.length}/3 人已入座 · ${players.length < 3 ? `还缺 ${3 - players.length} 人` : '等待所有玩家准备'}`
+    : hasOffline
+      ? `${players.length}/3 人在房 · 等待离线重连`
+      : !allGuestsReady
+        ? `${players.length}/3 人已入座 · 等待玩家准备`
+        : botFillCount > 0
+          ? `${players.length}/3 人已就绪 · ${isOwner ? '开局自动补人机' : '等待房主开局'}`
+          : `3/3 人已就绪 · ${isOwner ? '可立即开局' : '等待房主开局'}`;
+
   return (
-    <section className="room-waiting">
-      <div className="room-code-panel">
-        <span>房间号</span>
-        <strong id="waiting-room-code" ref={codeRef}>{roomCode || '...'}</strong>
-        <div className="room-code-tools">
-          <button
-            type="button"
-            className="room-copy-button"
-            command="--copy"
-            commandfor="waiting-room-code"
-            disabled={!roomCode}
-            data-copied={copyState === 'copied' ? '' : undefined}
-            data-failed={copyState === 'failed' ? '' : undefined}
-            onClick={supportsInvokerCommands ? undefined : () => void handleCopyRoomCode()}
-          >
-            <Icon name={copyState === 'copied' ? 'check' : 'copy'} />
-            <span>{copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制房间号'}</span>
-          </button>
-          {canShare ? (
+    <>
+      <section className="room-waiting">
+        <div className="room-code-panel">
+          <span>房间号</span>
+          <strong id="waiting-room-code" ref={codeRef}>{roomCode || '...'}</strong>
+          <div className="room-code-tools">
             <button
               type="button"
-              className="room-share-button"
+              className="room-copy-button"
+              command="--copy"
+              commandfor="waiting-room-code"
               disabled={!roomCode}
-              onClick={() => void handleShareRoomCode()}
+              data-copied={copyState === 'copied' ? '' : undefined}
+              data-failed={copyState === 'failed' ? '' : undefined}
+              onClick={supportsInvokerCommands ? undefined : () => void handleCopyRoomCode()}
             >
-              <Icon name="share" />
-              <span>分享房间号</span>
+              <Icon name={copyState === 'copied' ? 'check' : 'copy'} />
+              <span>{copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制房间号'}</span>
             </button>
-          ) : null}
-        </div>
-        <div className="room-code-footer">
-          <p className={copyState !== 'idle' ? 'is-muted-out' : ''}>
-            {players.length}/3 人已入座 · {players.length < 3 ? `还缺 ${3 - players.length} 人` : '等待所有玩家准备'}
-          </p>
-          <div
-            className={`room-copy-status ${copyState !== 'idle' ? 'is-visible' : ''} ${copyState === 'failed' ? 'is-error' : ''}`}
-            role="status"
-            aria-live="polite"
-          >
-            {statusMessage}
+            {canShare ? (
+              <button
+                type="button"
+                className="room-share-button"
+                disabled={!roomCode}
+                onClick={() => void handleShareRoomCode()}
+              >
+                <Icon name="share" />
+                <span>分享房间号</span>
+              </button>
+            ) : null}
+          </div>
+          <div className="room-code-footer">
+            <p className={copyState !== 'idle' ? 'is-muted-out' : ''}>
+              {waitingHint}
+            </p>
+            <div
+              className={`room-copy-status ${copyState !== 'idle' ? 'is-visible' : ''} ${copyState === 'failed' ? 'is-error' : ''}`}
+              role="status"
+              aria-live="polite"
+            >
+              {statusMessage}
+            </div>
           </div>
         </div>
-      </div>
-      <div className="seat-list">
-        {Array.from({ length: 3 }, (_, index) => {
-          const player = players.find((item) => item.seat === index);
-          return (
-            <div className={`seat-row${player?.id === playerId ? ' is-me' : ''}${!player ? ' is-empty' : ''}`} key={index}>
-              <span>{index + 1}</span>
-              <strong>{player?.name || '等待加入'}</strong>
-              {player ? <em>{!player.online ? '离线' : player.ready ? '已准备' : '未准备'}</em> : null}
+        <div className="seat-list">
+          {Array.from({ length: 3 }, (_, index) => {
+            const player = players.find((item) => item.seat === index);
+            return (
+              <div className={`seat-row${player?.id === playerId ? ' is-me' : ''}${!player ? ' is-empty' : ''}`} key={index}>
+                <span>{index + 1}</span>
+                <strong>{player?.name || '等待加入'}</strong>
+                {player ? <em>{!player.online ? '离线' : ownerId && player.id === ownerId ? '房主' : player.ready ? '已准备' : '未准备'}</em> : null}
+              </div>
+            );
+          })}
+        </div>
+        <div className="room-actions">
+          {isOwner ? (
+            <button
+              ref={startButtonRef}
+              type="button"
+              className="primary-action"
+              disabled={!canStart || !!pending}
+              aria-haspopup="dialog"
+              aria-expanded={confirmOpen}
+              onClick={() => setConfirmOpen(true)}
+            >
+              {pending ? `正在${roomRequestLabels[pending]}…` : '开始游戏'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="primary-action"
+              disabled={!!pending}
+              onClick={() => submitRoomRequest(socket, me?.ready ? MsgType.CancelReady : MsgType.Ready)}
+            >
+              {pending ? `正在${roomRequestLabels[pending]}…` : me?.ready ? '取消准备' : '准备开始'}
+            </button>
+          )}
+          <button type="button" className="secondary-action" disabled={!!pending} onClick={() => {
+            if (socket.send(MsgType.LeaveRoom)) useAppStore.getState().leaveLocalRoom();
+            else useAppStore.getState().setError('离房请求未发送，请连接恢复后重试');
+          }}>
+            离开房间
+          </button>
+        </div>
+      </section>
+      {confirmOpen ? (
+        <div
+          className="room-confirm-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeConfirm();
+          }}
+        >
+          <div
+            className="room-confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="start-confirm-title"
+            aria-describedby="start-confirm-desc"
+          >
+            <span className="room-confirm-badge">
+              {botFillCount > 0 ? '人机补位局' : '三人真人局'}
+            </span>
+            <h2 id="start-confirm-title">确认开始游戏？</h2>
+            <p id="start-confirm-desc">
+              {botFillCount > 0
+                ? `当前已有 ${players.length} 名真人玩家入座，确认后将自动补齐 ${botFillCount} 名人机玩家并立即开始游戏。`
+                : '当前 3 名真人玩家均已准备就绪，确认后将立即发牌开始游戏。'}
+            </p>
+            <div className="room-confirm-actions">
+              <button ref={cancelButtonRef} type="button" className="secondary-action" onClick={closeConfirm}>
+                取消
+              </button>
+              <button ref={confirmButtonRef} type="button" className="primary-action" onClick={confirmStartGame}>
+                确认开始
+              </button>
             </div>
-          );
-        })}
-      </div>
-      <div className="room-actions">
-        <button className="primary-action" disabled={!!pending} onClick={() => submitRoomRequest(socket, me?.ready ? MsgType.CancelReady : MsgType.Ready)}>
-          {pending ? `正在${roomRequestLabels[pending]}…` : me?.ready ? '取消准备' : '准备开始'}
-        </button>
-        <button className="secondary-action" disabled={!!pending} onClick={() => {
-          if (socket.send(MsgType.LeaveRoom)) useAppStore.getState().leaveLocalRoom();
-          else useAppStore.getState().setError('离房请求未发送，请连接恢复后重试');
-        }}>
-          离开房间
-        </button>
-      </div>
-    </section>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 

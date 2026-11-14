@@ -420,3 +420,49 @@ it('ignores incoming server chat messages without throwing or setting an error',
   expect(useAppStore.getState().error).toBe('');
   expect(useAppStore.getState().phase).toBe('lobby');
 });
+
+it('tracks room owner on create/join, transfers ownership on host leave, and clears on leave or game start', () => {
+  const receive = useAppStore.getState().handleMessage;
+  useAppStore.setState({ playerId: 'p2', roomRequest: MsgType.Ready });
+
+  receive({
+    type: MsgType.RoomJoined,
+    payload: {
+      room_code: '836219',
+      owner_id: 'p1',
+      player: { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: false, cards_count: 0, online: true },
+      players: [
+        { id: 'p1', name: '青竹', seat: 0, ready: false, is_landlord: false, cards_count: 0, online: true },
+        { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: false, cards_count: 0, online: true }
+      ]
+    }
+  });
+  expect(useAppStore.getState().ownerId).toBe('p1');
+
+  useAppStore.setState({ roomRequest: MsgType.CancelReady });
+  receive({
+    type: MsgType.PlayerLeft,
+    payload: { player_id: 'p1', player_name: '青竹', owner_id: 'p2' }
+  });
+  expect(useAppStore.getState().ownerId).toBe('p2');
+  expect(useAppStore.getState().roomRequest).toBeNull();
+  expect(useAppStore.getState().players).toEqual([
+    expect.objectContaining({ id: 'p2', ready: false })
+  ]);
+
+  receive({
+    type: MsgType.GameStart,
+    payload: {
+      players: [
+        { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: false, cards_count: 17, online: true },
+        { id: 'b1', name: '🤖独孤求败', seat: 0, ready: true, is_landlord: false, cards_count: 17, online: true, is_bot: true },
+        { id: 'b2', name: '🤖天下无双', seat: 2, ready: true, is_landlord: false, cards_count: 17, online: true, is_bot: true }
+      ]
+    }
+  });
+  expect(useAppStore.getState().ownerId).toBe('');
+  expect(useAppStore.getState().phase).toBe('dealing');
+
+  useAppStore.getState().leaveLocalRoom();
+  expect(useAppStore.getState().ownerId).toBe('');
+});

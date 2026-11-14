@@ -23,6 +23,7 @@ const (
 // game.RoomData 房间数据（用于 Redis 序列化）
 type RoomData struct {
 	Code        string           `json:"code"`
+	OwnerID     string           `json:"owner_id,omitempty"`
 	State       int              `json:"state"`
 	Players     []PlayerData     `json:"players"`
 	PlayerOrder []string         `json:"player_order"`

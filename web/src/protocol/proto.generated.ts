@@ -79,6 +79,7 @@ export const MessageType = {
   MSG_PRACTICE_MATCH: 201,
   MSG_CANCEL_MATCH: 18,
   MSG_MATCH_CANCELED: 127,
+  MSG_START_GAME: 19,
 } as const;
 
 export function encodeMessage(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
@@ -885,6 +886,7 @@ export function decodeRoomListResultPayload(input: ProtoReader | Uint8Array, len
 export function encodeRoomCreatedPayload(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
   wStr(w, 10, msg.room_code);
   wMsg(w, 18, msg.player, encodePlayerInfo);
+  wStr(w, 26, msg.owner_id);
   return w;
 }
 
@@ -894,12 +896,14 @@ export function decodeRoomCreatedPayload(input: ProtoReader | Uint8Array, length
   const out: MsgRecord = {
     room_code: '',
     player: null as Record<string, unknown> | null,
+    owner_id: '',
   };
   while (r.pos < end) {
     const tag = r.uint32();
     switch (tag) {
       case 10: out.room_code = r.string(); break;
       case 18: out.player = decodePlayerInfo(r, r.uint32()); break;
+      case 26: out.owner_id = r.string(); break;
       default: r.skipType(tag & 7); break;
     }
   }
@@ -910,6 +914,7 @@ export function encodeRoomJoinedPayload(msg: MsgRecord, w: ProtoWriter = Writer.
   wStr(w, 10, msg.room_code);
   wMsg(w, 18, msg.player, encodePlayerInfo);
   wRepMsg(w, 26, msg.players, encodePlayerInfo);
+  wStr(w, 34, msg.owner_id);
   return w;
 }
 
@@ -920,6 +925,7 @@ export function decodeRoomJoinedPayload(input: ProtoReader | Uint8Array, length?
     room_code: '',
     player: null as Record<string, unknown> | null,
     players: [] as unknown[],
+    owner_id: '',
   };
   while (r.pos < end) {
     const tag = r.uint32();
@@ -927,6 +933,7 @@ export function decodeRoomJoinedPayload(input: ProtoReader | Uint8Array, length?
       case 10: out.room_code = r.string(); break;
       case 18: out.player = decodePlayerInfo(r, r.uint32()); break;
       case 26: (out.players as unknown[]).push(decodePlayerInfo(r, r.uint32())); break;
+      case 34: out.owner_id = r.string(); break;
       default: r.skipType(tag & 7); break;
     }
   }
@@ -957,6 +964,7 @@ export function decodePlayerJoinedPayload(input: ProtoReader | Uint8Array, lengt
 export function encodePlayerLeftPayload(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
   wStr(w, 10, msg.player_id);
   wStr(w, 18, msg.player_name);
+  wStr(w, 26, msg.owner_id);
   return w;
 }
 
@@ -966,12 +974,14 @@ export function decodePlayerLeftPayload(input: ProtoReader | Uint8Array, length?
   const out: MsgRecord = {
     player_id: '',
     player_name: '',
+    owner_id: '',
   };
   while (r.pos < end) {
     const tag = r.uint32();
     switch (tag) {
       case 10: out.player_id = r.string(); break;
       case 18: out.player_name = r.string(); break;
+      case 26: out.owner_id = r.string(); break;
       default: r.skipType(tag & 7); break;
     }
   }

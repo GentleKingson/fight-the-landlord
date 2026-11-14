@@ -288,6 +288,7 @@ func decodePlayerStateMessages(msgType protocol.MessageType, data []byte, target
 		*target.(*protocol.PlayerLeftPayload) = protocol.PlayerLeftPayload{
 			PlayerID:   pbMsg.PlayerId,
 			PlayerName: pbMsg.PlayerName,
+			OwnerID:    pbMsg.OwnerId,
 		}
 		return true, nil
 	case protocol.MsgPlayerReady:
@@ -315,6 +316,7 @@ func decodeRoomStateMessages(msgType protocol.MessageType, data []byte, target a
 		*target.(*protocol.RoomCreatedPayload) = protocol.RoomCreatedPayload{
 			RoomCode: pbMsg.RoomCode,
 			Player:   convert.ProtoToPlayerInfo(pbMsg.Player),
+			OwnerID:  pbMsg.OwnerId,
 		}
 		return true, nil
 	case protocol.MsgRoomJoined:
@@ -326,6 +328,7 @@ func decodeRoomStateMessages(msgType protocol.MessageType, data []byte, target a
 			RoomCode: pbMsg.RoomCode,
 			Player:   convert.ProtoToPlayerInfo(pbMsg.Player),
 			Players:  convert.ProtoToPlayerInfos(pbMsg.Players),
+			OwnerID:  pbMsg.OwnerId,
 		}
 		return true, nil
 	case protocol.MsgRoomListResult:

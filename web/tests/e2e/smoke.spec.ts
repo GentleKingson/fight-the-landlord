@@ -107,11 +107,11 @@ test('waiting room fits room code, seats, and both action buttons without scroll
 
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
-    const readyButton = page.getByRole('button', { name: '准备开始' });
+    const startButton = page.getByRole('button', { name: '开始游戏' });
     const leaveButton = page.getByRole('button', { name: '离开房间' });
     await expect(page.locator('#waiting-room-code')).toBeVisible();
     await expect(page.locator('.room-waiting .seat-row')).toHaveCount(3);
-    await expect(readyButton).toBeVisible();
+    await expect(startButton).toBeVisible();
     await expect(leaveButton).toBeVisible();
 
     const fit = await page.evaluate(() => {
@@ -142,6 +142,19 @@ test('waiting room fits room code, seats, and both action buttons without scroll
       panelFits: true,
       buttonsVisibleWithoutScroll: true
     });
+
+    await startButton.click();
+    const dialog = page.getByRole('dialog', { name: '确认开始游戏？' });
+    await expect(dialog).toBeVisible();
+    const dialogFits = await page.evaluate(() => {
+      const el = document.querySelector<HTMLElement>('.room-confirm-dialog');
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.top >= 0 && rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+    });
+    expect(dialogFits, `confirm dialog @ ${viewport.width}x${viewport.height}`).toBe(true);
+    await page.getByRole('button', { name: '取消' }).click();
+    await expect(dialog).toHaveCount(0);
   }
 });
 

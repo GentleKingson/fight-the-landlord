@@ -594,6 +594,71 @@
   }
 }
 
+.room-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: rgba(5, 14, 11, .66);
+  backdrop-filter: blur(4px);
+}
+
+.room-confirm-dialog {
+  width: min(100%, 400px);
+  max-height: 100%;
+  overflow-y: auto;
+  display: grid;
+  gap: 10px;
+  padding: clamp(16px, 2.8dvh, 22px);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(23, 49, 39, .96), rgba(11, 25, 20, .98));
+  color: var(--text-light);
+  border: 1px solid rgba(255, 224, 138, .32);
+  box-shadow: inset 0 1px 0 rgba(255, 241, 198, .14), var(--shadow);
+  text-align: center;
+}
+
+.room-confirm-badge {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 224, 146, .16);
+  border: 1px solid rgba(255, 224, 146, .38);
+  color: #ffe092;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.room-confirm-dialog h2 {
+  margin: 0;
+  font-size: clamp(19px, 3dvh, 22px);
+  line-height: 1.25;
+  color: #fff;
+}
+
+.room-confirm-dialog p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgba(255, 249, 233, .84);
+}
+
+.room-confirm-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.room-confirm-actions button {
+  width: 100%;
+  min-height: clamp(38px, 5.4dvh, 44px);
+}
+
 /* ---------- Sub Panels & Navigation ---------- */
 .sub-panel {
   width: min(100%, 940px);

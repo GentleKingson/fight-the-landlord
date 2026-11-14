@@ -11,6 +11,7 @@ func (r *Room) ToRoomData() *storage.RoomData {
 
 	data := &storage.RoomData{
 		Code:        r.Code,
+		OwnerID:     r.OwnerID,
 		State:       int(r.State),
 		Players:     make([]storage.PlayerData, 0, len(r.Players)),
 		PlayerOrder: r.PlayerOrder,

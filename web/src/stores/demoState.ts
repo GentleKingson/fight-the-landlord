@@ -36,6 +36,7 @@ export function seedDemoState(mode: string): void {
     playerId: 'p1',
     playerName: '青竹',
     roomCode: '836219',
+    ownerId: isWaiting ? 'p1' : '',
     players: demoPlayers,
     onlineCount: 128,
     leaderboard: isLobbyScene && mode !== 'stats-empty' ? [

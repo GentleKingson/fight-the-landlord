@@ -62,6 +62,7 @@ enum MessageType {
   MSG_PRACTICE_MATCH = 201;
   MSG_CANCEL_MATCH = 18;
   MSG_MATCH_CANCELED = 127;
+  MSG_START_GAME = 19;
 }
 
 // ========== 基础消息包装器 ==========

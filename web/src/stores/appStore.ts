@@ -18,11 +18,12 @@ interface ConnectionSlice {
 }
 
 interface LobbySlice {
-  roomRequest: 'create_room' | 'join_room' | 'ready' | 'cancel_ready' | null;
+  roomRequest: 'create_room' | 'join_room' | 'ready' | 'cancel_ready' | 'start_game' | null;
   cancellingMatch: boolean;
   matchMode: 'practice' | 'online';
   phase: Phase;
   roomCode: string;
+  ownerId: string;
   players: PlayerInfo[];
   onlineCount: number;
   lobbyPanel: LobbyPanel;
@@ -159,6 +160,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   matchMode: loadMatchMode(),
   cancellingMatch: false,
   roomCode: '',
+  ownerId: '',
   players: [],
   onlineCount: 0,
   lobbyPanel: 'home',
@@ -186,7 +188,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelection: (keys) => set({ selectedCards: new Set(keys), tableMessage: '' }),
   clearSelection: () => set({ selectedCards: new Set(), tableMessage: '' }),
   leaveLocalRoom: () => {
-    set({ roomCode: '', roomRequest: null, players: [], phase: 'lobby', ...initialTable, selectedCards: new Set(), tableMessage: '', ...(!['pending', 'unknown'].includes(get().submission) ? { submission: 'idle', submissionMessage: '' } as const : {}) });
+    set({ roomCode: '', ownerId: '', roomRequest: null, players: [], phase: 'lobby', ...initialTable, selectedCards: new Set(), tableMessage: '', ...(!['pending', 'unknown'].includes(get().submission) ? { submission: 'idle', submissionMessage: '' } as const : {}) });
   },
   showSettlement: () => {
     if (get().phase === 'game_over' && get().endSnapshot) set({ endView: 'result', revealDeadline: null });
@@ -201,7 +203,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
         const keepResult = state.phase === 'game_over' && state.endSnapshot && state.playerId === payload.player_id;
         set({
-          ...(!keepResult ? { ...initialTable, players: [], roomCode: '', selectedCards: new Set<string>() } : {}),
+          ...(!keepResult ? { ...initialTable, players: [], roomCode: '', ownerId: '', selectedCards: new Set<string>() } : {}),
           connected: true,
           ...(!['pending', 'unknown'].includes(state.submission) ? { submission: 'idle', submissionMessage: '' } as const : {}),
           cancellingMatch: false,
@@ -226,9 +228,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           break;
         }
         if (payload.game_state) {
-          set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
+          set({ ownerId: '', playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
         } else {
-          set({ ...initialTable, players: [], playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
+          set({ ...initialTable, players: [], ownerId: payload.room_code ? state.ownerId : '', playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
         }
         break;
       }
@@ -250,13 +252,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ onlineCount: (message.payload as { count: number }).count });
         break;
       case MsgType.RoomCreated: {
-        const payload = message.payload as { room_code: string; player: PlayerInfo };
-        set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
+        const payload = message.payload as { room_code: string; player: PlayerInfo; owner_id?: string };
+        set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, ownerId: payload.owner_id || payload.player.id, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.RoomJoined: {
-        const payload = message.payload as { room_code: string; players: PlayerInfo[] };
-        set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
+        const payload = message.payload as { room_code: string; players: PlayerInfo[]; owner_id?: string };
+        set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, ownerId: payload.owner_id ?? '', players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.PlayerJoined: {
@@ -265,10 +267,28 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.PlayerLeft: {
-        const payload = message.payload as { player_id: string };
+        const payload = message.payload as { player_id: string; owner_id?: string };
         if (state.phase === 'game_over' && state.endSnapshot) break;
-        if (payload.player_id === state.playerId) get().leaveLocalRoom();
-        else set({ players: state.players.filter((player) => player.id !== payload.player_id) });
+        if (payload.player_id === state.playerId) {
+          get().leaveLocalRoom();
+        } else {
+          const remaining = state.players.filter((player) => player.id !== payload.player_id);
+          const nextOwnerId = payload.owner_id
+            ? payload.owner_id
+            : state.ownerId === payload.player_id
+              ? (remaining.find((player) => !player.is_bot)?.id ?? '')
+              : state.ownerId;
+          const ownerChanged = Boolean(nextOwnerId && nextOwnerId !== state.ownerId);
+          const resetPendingReady = nextOwnerId === state.playerId
+            && (state.roomRequest === MsgType.Ready || state.roomRequest === MsgType.CancelReady);
+          set({
+            ownerId: nextOwnerId,
+            ...(resetPendingReady ? { roomRequest: null } : {}),
+            players: ownerChanged
+              ? remaining.map((player) => player.id === nextOwnerId ? { ...player, ready: false } : player)
+              : remaining
+          });
+        }
         break;
       }
       case MsgType.PlayerReady: {
@@ -285,7 +305,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.GameStart: {
         const payload = message.payload as { players: PlayerInfo[] };
-        set({ ...initialTable, roomRequest: null, players: normalizeGamePlayers(payload.players ?? [], state.playerId), phase: 'dealing', selectedCards: new Set() });
+        set({ ...initialTable, ownerId: '', roomRequest: null, players: normalizeGamePlayers(payload.players ?? [], state.playerId), phase: 'dealing', selectedCards: new Set() });
         break;
       }
       case MsgType.DealCards: {
@@ -441,7 +461,7 @@ function mergePlayer(players: PlayerInfo[], next: PlayerInfo): PlayerInfo[] {
 }
 
 function normalizeLobbyPlayer(player: PlayerInfo): PlayerInfo {
-  return { ...player, online: true };
+  return { ...player, online: player.online ?? true };
 }
 
 function normalizeLobbyPlayers(players: PlayerInfo[]): PlayerInfo[] {

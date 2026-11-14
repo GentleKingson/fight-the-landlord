@@ -96,9 +96,7 @@ func (h *Handler) RestoreConnection(client types.ClientInterface, playerID strin
 
 	if reconnectPayload.RoomCode != "" && reconnectPayload.GameState == nil {
 		if r := h.roomManager.GetRoom(reconnectPayload.RoomCode); r != nil {
-			client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
-				RoomCode: r.Code, Player: r.GetPlayerInfo(client.GetID()), Players: r.GetAllPlayersInfo(),
-			}))
+			client.SendMessage(codec.MustNewMessage(protocol.MsgRoomJoined, r.BuildRoomJoinedPayload(client.GetID())))
 		}
 	}
 

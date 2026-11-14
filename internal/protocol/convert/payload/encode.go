@@ -187,6 +187,7 @@ func encodeServerRoomMessages(msgType protocol.MessageType, payload any) (proto.
 		return &pb.RoomCreatedPayload{
 			RoomCode: p.RoomCode,
 			Player:   convert.PlayerInfoToProto(&p.Player),
+			OwnerId:  p.OwnerID,
 		}, true
 	case protocol.MsgRoomJoined:
 		p := payload.(protocol.RoomJoinedPayload)
@@ -194,6 +195,7 @@ func encodeServerRoomMessages(msgType protocol.MessageType, payload any) (proto.
 			RoomCode: p.RoomCode,
 			Player:   convert.PlayerInfoToProto(&p.Player),
 			Players:  convert.PlayerInfosToProto(p.Players),
+			OwnerId:  p.OwnerID,
 		}, true
 	case protocol.MsgPlayerJoined:
 		p := payload.(protocol.PlayerJoinedPayload)
@@ -205,6 +207,7 @@ func encodeServerRoomMessages(msgType protocol.MessageType, payload any) (proto.
 		return &pb.PlayerLeftPayload{
 			PlayerId:   p.PlayerID,
 			PlayerName: p.PlayerName,
+			OwnerId:    p.OwnerID,
 		}, true
 	case protocol.MsgPlayerReady:
 		p := payload.(protocol.PlayerReadyPayload)
