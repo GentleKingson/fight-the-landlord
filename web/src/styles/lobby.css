@@ -129,6 +129,10 @@
 .quick-card__art .card {
   --w: 48px;
   --h: 68px;
+  --index-inset: 3px;
+  --index-size: 11px;
+  --index-suit-size: 9px;
+  --pip-size: 17px;
   position: absolute;
   bottom: 4px;
   width: 48px;

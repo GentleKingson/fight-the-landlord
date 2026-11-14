@@ -2,6 +2,10 @@
   --w: 72px;
   --h: 104px;
   --card-w: var(--w);
+  --index-inset: 5px;
+  --index-size: 16px;
+  --index-suit-size: 14px;
+  --pip-size: 28px;
   position: relative;
   display: block;
   width: var(--w);
@@ -26,18 +30,30 @@
 .card--played {
   --w: 58px;
   --h: 82px;
+  --index-inset: 4px;
+  --index-size: 13px;
+  --index-suit-size: 11px;
+  --pip-size: 21px;
   border-radius: 9px;
 }
 
 .card--mini {
   --w: 34px;
   --h: 48px;
+  --index-inset: 2.5px;
+  --index-size: 9px;
+  --index-suit-size: 7.5px;
+  --pip-size: 10px;
   border-radius: 6px;
 }
 
 .card--action {
   --w: 46px;
   --h: 64px;
+  --index-inset: 3px;
+  --index-size: 11px;
+  --index-suit-size: 9px;
+  --pip-size: 16px;
   border-radius: 8px;
   background:
     linear-gradient(150deg, rgba(255, 255, 255, .99), rgba(247, 244, 237, .98)),
@@ -82,7 +98,7 @@
   justify-items: center;
   gap: 0;
   line-height: .9;
-  font-size: 17px;
+  font-size: var(--index-size);
 }
 
 .card__index b {
@@ -94,87 +110,59 @@
   display: block;
   margin-top: 1px;
   font-style: normal;
-  font-size: 15px;
+  font-size: var(--index-suit-size);
 }
 
 .card__index--top {
-  left: 6px;
-  top: 6px;
+  left: var(--index-inset);
+  top: var(--index-inset);
 }
 
-/* Keep rank/suit in the top-left lane; the emblem owns the bottom-right. */
+/* Traditional two-corner symmetric poker face with centered emblem. */
 .card__index--bottom {
-  display: none;
+  right: var(--index-inset);
+  bottom: var(--index-inset);
+  transform: rotate(180deg);
 }
 
 .card__pip {
   position: absolute;
-  right: 8%;
-  bottom: 6%;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: 1em;
   height: 1em;
-  font-size: min(var(--pip-size, 42px), calc(var(--w) * .40), calc(var(--h) * .38));
+  font-size: min(var(--pip-size), calc(var(--w) * .38), calc(var(--h) * .28));
   line-height: 1;
 }
 
-.card--played .card__index {
-  font-size: 13px;
-}
-
-.card--played .card__index i {
-  font-size: 12px;
-}
-
-.card--played .card__pip {
-  --pip-size: 31px;
-}
-
-.card--mini .card__index {
-  font-size: 9px;
-}
-
-.card--mini .card__index i {
-  font-size: 8px;
-}
-
-.card--mini .card__index--bottom {
-  display: none;
-}
-
-.card--mini .card__pip {
-  --pip-size: 17px;
-}
-
-.card--action .card__index {
-  font-size: 11px;
-}
-
-.card--action .card__index i {
-  font-size: 10px;
-}
-
-.card--action .card__pip {
-  --pip-size: 24px;
-}
-
-/* Use the actual card dimensions in every context (including end-of-round review).
-   Keep the word and emblem in separate horizontal lanes as the card shrinks. */
+/* Symmetric corner JOKER labels flank the centered emblem across card sizes. */
 .card__joker-word {
   position: absolute;
-  left: 10%;
-  bottom: 10%;
   writing-mode: vertical-rl;
   text-orientation: mixed;
   letter-spacing: .04em;
-  font-size: min(calc(var(--w) * .21), calc(var(--h) * .17));
+  font-size: min(calc(var(--w) * .16), calc(var(--h) * .13));
   line-height: 1;
+}
+
+.card__joker-word--top {
+  left: var(--index-inset);
+  top: var(--index-inset);
+}
+
+.card__joker-word--bottom {
+  right: var(--index-inset);
+  bottom: var(--index-inset);
+  transform: rotate(180deg);
 }
 
 .card__joker-star {
   position: absolute;
-  right: 8%;
-  bottom: 10%;
-  font-size: min(calc(var(--w) * .40), calc(var(--h) * .40));
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: min(calc(var(--w) * .36), calc(var(--h) * .28));
   line-height: 1;
 }
 
@@ -248,8 +236,6 @@
 }
 
 @media (max-width: 880px) {
-  .card--hand { --w: 58px; --h: 82px; }
-  .card--played { --w: 38px; --h: 54px; }
-  .card__index { font-size: 15px; }
-  .card__pip { --pip-size: 32px; }
+  .card--hand { --w: 58px; --h: 82px; --index-inset: 4px; --index-size: 13px; --index-suit-size: 11px; --pip-size: 21px; }
+  .card--played { --w: 38px; --h: 54px; --index-inset: 3px; --index-size: 10px; --index-suit-size: 8px; --pip-size: 11px; }
 }

@@ -62,9 +62,7 @@
 .end-table__board p { margin: 6px 0 10px; color: #f0e0b6; font-size: 14px; }
 .end-table__empty { padding: 12px 0; color: #c6f5d5; font-weight: 700; }
 .end-table__cards { display: flex; flex-wrap: wrap; gap: 8px 6px; }
-.end-table__cards .card { --w: 50px; --h: 72px; opacity: 1; cursor: default; }
-.end-table__cards .card__index--bottom { display: none; }
-.end-table__cards .card__pip { --pip-size: 25px; }
+.end-table__cards .card { --w: 50px; --h: 72px; --index-inset: 4px; --index-size: 12px; --index-suit-size: 10px; --pip-size: 18px; opacity: 1; cursor: default; }
 .end-table__winning .end-table__cards,
 .end-table__hand--me .end-table__cards { justify-content: center; }
 .end-table__winning,
@@ -88,7 +86,7 @@
   .end-table__winning { padding: 10px; text-align: left; }
   .end-table__board h2 { font-size: 16px; }
   .end-table__cards { gap: 6px 4px; }
-  .end-table__cards .card { --w: 44px; --h: 64px; }
+  .end-table__cards .card { --w: 44px; --h: 64px; --index-inset: 3px; --index-size: 11px; --index-suit-size: 9px; --pip-size: 15px; }
   .end-table__winning .end-table__cards,
   .end-table__hand--me .end-table__cards { justify-content: flex-start; }
   .end-table__footer { padding: 8px 10px; gap: 8px; }
@@ -107,5 +105,5 @@
   .table-arena.end-table__board { grid-template-areas: "winning winning" "left right" "me me"; padding: 8px; gap: 8px; }
   .end-table__hand,
   .end-table__winning { padding: 10px; }
-  .end-table__cards .card { --w: 44px; --h: 64px; }
+  .end-table__cards .card { --w: 44px; --h: 64px; --index-inset: 3px; --index-size: 11px; --index-suit-size: 9px; --pip-size: 15px; }
 }

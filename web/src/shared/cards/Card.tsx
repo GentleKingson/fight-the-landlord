@@ -59,8 +59,9 @@ export function Card({
 
   const content = face.isJoker ? (
     <>
-      <span className="card__joker-word" aria-hidden="true">JOKER</span>
+      <span className="card__joker-word card__joker-word--top" aria-hidden="true">JOKER</span>
       <span className="card__joker-star" aria-hidden="true">{face.suitSymbol}</span>
+      <span className="card__joker-word card__joker-word--bottom" aria-hidden="true">JOKER</span>
     </>
   ) : (
     <>

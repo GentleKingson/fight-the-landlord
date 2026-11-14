@@ -36,11 +36,24 @@ describe('card face model', () => {
     });
   });
 
-  it('renders jokers without B/R corner markers', () => {
-    render(<Card card={{ suit: 4, rank: 17, color: 1 }} />);
+  it('renders symmetric dual-corner markers for suit cards and jokers without B/R markers', () => {
+    const { container } = render(
+      <>
+        <Card card={{ suit: 1, rank: 10, color: 1 }} size="played" />
+        <Card card={{ suit: 4, rank: 17, color: 1 }} />
+      </>
+    );
+    const suitCard = screen.getByRole('img', { name: '10♥' });
+    expect(suitCard.querySelector('.card__index--top b')).toHaveTextContent('10');
+    expect(suitCard.querySelector('.card__index--bottom b')).toHaveTextContent('10');
+    expect(suitCard.querySelectorAll('.card__suit-icon')).toHaveLength(3);
+    expect(suitCard.querySelector('.card__pip .card__suit-icon')).not.toBeNull();
+
     const joker = screen.getByRole('img', { name: '大王' });
-    expect(joker).toHaveTextContent('JOKER');
-    expect(joker.querySelector('.card__joker-index')).toBeNull();
+    expect(joker.querySelector('.card__joker-word--top')).toHaveTextContent('JOKER');
+    expect(joker.querySelector('.card__joker-word--bottom')).toHaveTextContent('JOKER');
+    expect(joker.querySelector('.card__joker-star')).not.toBeNull();
+    expect(container.querySelector('.card__joker-index')).toBeNull();
   });
 
   it('summarizes common action selections', () => {
