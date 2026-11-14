@@ -200,8 +200,10 @@ describe('UtilityDrawer popover, Escape dismissal, and focus management', () => 
   it('uses popover="manual" non-modally, focuses close button on open, and restores focus to trigger on Escape or close click', () => {
     render(<GameTable socket={{ send: vi.fn() } as unknown as GameSocket} />);
 
+    expect(screen.queryByRole('button', { name: '聊天' })).not.toBeInTheDocument();
+
     const counterTrigger = screen.getByRole('button', { name: '记牌器' });
-    const chatTrigger = screen.getByRole('button', { name: '聊天' });
+    const historyTrigger = screen.getByRole('button', { name: '历史' });
 
     counterTrigger.focus();
     fireEvent.click(counterTrigger);
@@ -223,13 +225,13 @@ describe('UtilityDrawer popover, Escape dismissal, and focus management', () => 
     expect(counterTrigger).toHaveAttribute('aria-expanded', 'false');
     expect(counterTrigger).toHaveFocus();
 
-    // Reopen via counter, switch directly to chat, then click Close -> returns focus to chatTrigger
+    // Reopen via counter, switch directly to history, then click Close -> returns focus to historyTrigger
     fireEvent.click(counterTrigger);
-    fireEvent.click(chatTrigger);
-    const chatDrawer = screen.getByLabelText('房间聊天', { selector: 'aside' });
-    expect(within(chatDrawer).getByRole('button', { name: '关闭' })).toHaveFocus();
-    fireEvent.click(within(chatDrawer).getByRole('button', { name: '关闭' }));
-    expect(screen.queryByLabelText('房间聊天', { selector: 'aside' })).not.toBeInTheDocument();
-    expect(chatTrigger).toHaveFocus();
+    fireEvent.click(historyTrigger);
+    const historyDrawer = screen.getByLabelText('动作历史', { selector: 'aside' });
+    expect(within(historyDrawer).getByRole('button', { name: '关闭' })).toHaveFocus();
+    fireEvent.click(within(historyDrawer).getByRole('button', { name: '关闭' }));
+    expect(screen.queryByLabelText('动作历史', { selector: 'aside' })).not.toBeInTheDocument();
+    expect(historyTrigger).toHaveFocus();
   });
 });

@@ -527,11 +527,6 @@
   overscroll-behavior: contain;
 }
 
-.sub-panel .chat-history {
-  flex: 1;
-  margin-bottom: 10px;
-}
-
 .sub-panel .stats-grid {
   min-height: 0;
   overflow: auto;
@@ -564,7 +559,7 @@
 
 .bottom-nav {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 6px;
   width: min(100%, 560px);
   margin: 0 auto;

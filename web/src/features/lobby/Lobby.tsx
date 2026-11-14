@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MsgType } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore } from '../../stores/appStore';
-import { ChatFeed } from '../../shared/ui/ChatFeed';
 import { SoundToggle } from '../../audio/SoundToggle';
 import { Card } from '../../shared/cards/Card';
 import { Icon } from '../../shared/ui/Icon';
@@ -15,7 +14,7 @@ interface LobbyProps {
   socket: GameSocket;
 }
 
-const navItems = [['home', '大厅'], ['leaderboard', '战绩榜'], ['stats', '我的战绩'], ['chat', '聊天'], ['rules', '规则']] as const;
+const navItems = [['home', '大厅'], ['leaderboard', '战绩榜'], ['stats', '我的战绩'], ['rules', '规则']] as const;
 const roomRequestLabels = { create_room: '创建房间', join_room: '加入房间', ready: '准备', cancel_ready: '取消准备' } as const;
 
 export function Lobby({ socket }: LobbyProps) {
@@ -384,7 +383,6 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
 function LobbySubPanel({ socket, panel }: LobbyProps & { panel: string }) {
   if (panel === 'leaderboard') return <LeaderboardPanel socket={socket} />;
   if (panel === 'stats') return <StatsPanel socket={socket} />;
-  if (panel === 'chat') return <LobbyChat socket={socket} />;
   return <section className="sub-panel"><h2>玩法说明</h2><RulesPanel /></section>;
 }
 
@@ -423,39 +421,6 @@ function StatsPanel({ socket }: LobbyProps) {
           <Stat label="最高连胜" value={stats.max_win_streak} />
         </div>
       ) : <p className="empty-text">你还没有对局记录，完成一局后再来查看</p>}
-    </section>
-  );
-}
-
-function LobbyChat({ socket }: LobbyProps) {
-  const chatInput = useAppStore((state) => state.chatInput);
-  const setChatInput = useAppStore((state) => state.setChatInput);
-  const imeEnter = useImeSafeEnter();
-
-  function send() {
-    const content = chatInput.trim();
-    if (!content) return;
-    if (socket.send(MsgType.Chat, { content, scope: 'lobby' })) setChatInput('');
-    else useAppStore.getState().setError('聊天发送失败，草稿已保留，请等待连接恢复后重试');
-  }
-
-  return (
-    <section className="sub-panel chat-panel">
-      <h2>大厅聊天</h2>
-      <ChatFeed scope="lobby" />
-      <form className="chat-input-row" onSubmit={(event) => { event.preventDefault(); send(); }}>
-        <label className="visually-hidden" htmlFor="lobby-chat-input">大厅聊天消息</label>
-        <input
-          id="lobby-chat-input"
-          name="message"
-          enterKeyHint="send"
-          value={chatInput}
-          onChange={(event) => setChatInput(event.target.value)}
-          {...imeEnter}
-          placeholder="和大厅里的玩家聊聊"
-        />
-        <button type="submit">发送</button>
-      </form>
     </section>
   );
 }

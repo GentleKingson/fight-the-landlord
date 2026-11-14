@@ -97,8 +97,7 @@
 /* ---------- Buttons ---------- */
 .primary-action,
 .secondary-action,
-.join-strip button,
-.chat-input-row button {
+.join-strip button {
   border: 1px solid rgba(255, 236, 180, .4);
   text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
   transition: transform .14s ease, filter .14s ease, box-shadow .14s ease;
@@ -119,8 +118,7 @@
 .secondary-action--muted,
 .action-bar .secondary-action,
 .clear-selection,
-.join-strip button,
-.chat-input-row button {
+.join-strip button {
   color: #fff3d8;
   background: linear-gradient(180deg, #24513f, #163c2e);
   border-color: rgba(243, 207, 122, .35);
@@ -132,7 +130,6 @@
   .primary-action:not(:disabled):hover,
   .secondary-action:not(:disabled):hover,
   .join-strip button:hover,
-  .chat-input-row button:hover,
   .entry-tile:hover { filter: brightness(1.08) saturate(1.05); }
 }
 
@@ -208,14 +205,12 @@
 
 .join-strip label { color: #f3dfae; font-weight: 800; }
 
-.join-strip input,
-.chat-input-row input {
+.join-strip input {
   background: #fffaf0;
   box-shadow: inset 0 0 0 1px rgba(185, 132, 48, .45), inset 0 2px 4px rgba(60, 40, 10, .12);
 }
 
-.join-strip input:focus-visible,
-.chat-input-row input:focus-visible {
+.join-strip input:focus-visible {
   outline: 2px solid #ffd56e;
   outline-offset: 1px;
 }
@@ -237,7 +232,6 @@
 .seat-row,
 .ranking-row,
 .history-list > div,
-.chat-feed p,
 .stat-tile,
 .counter-grid div {
   background: rgba(255, 240, 200, .06);
@@ -568,7 +562,6 @@
 
 .room-browser__list,
 .ranking-list,
-.chat-feed,
 .history-list,
 .utility-drawer > .counter-grid,
 .utility-drawer > .rules-panel,

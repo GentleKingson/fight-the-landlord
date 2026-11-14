@@ -48,15 +48,15 @@ describe('protocol codec', () => {
     expect(decoded.payload).toMatchObject({ turn_token: 'saved-turn' });
   });
 
-  it('round trips chat payloads as JSON for the current Go fallback', () => {
-    const decoded = decodeMessage(encodeMessage(MsgType.Chat, {
+  it('decodes server-broadcast chat envelopes without throwing when TUI players chat', () => {
+    const decoded = decodeMessage(encodeMessage('chat', {
       sender_id: 'p1',
       sender_name: '青竹',
       content: '你好',
       scope: 'lobby',
       time: 1
     }));
-    expect(decoded.type).toBe(MsgType.Chat);
+    expect(decoded.type).toBe('chat');
     expect(decoded.payload).toEqual({
       sender_id: 'p1',
       sender_name: '青竹',

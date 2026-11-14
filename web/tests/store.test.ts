@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MsgType } from '../src/protocol/types';
-import { useAppStore, useChatStore } from '../src/stores/appStore';
+import { useAppStore } from '../src/stores/appStore';
 
 describe('reconnect preserves recoverable table state', () => {
   beforeEach(() => useAppStore.getState().leaveLocalRoom());
@@ -414,25 +414,9 @@ it('cookie handshake keeps the practice replay preference during reload', () => 
   expect(useAppStore.getState().matchMode).toBe('practice');
 });
 
-it('preserves chat through same-room recovery and removes only room messages when changing rooms', () => {
-  useChatStore.getState().clear();
-  const receive = useAppStore.getState().handleMessage;
-  const join = (room_code: string) => receive({ type: MsgType.RoomJoined, payload: { room_code, players: [] } });
-  const chat = (scope: string, content: string) => receive({ type: MsgType.Chat, payload: { scope, content } });
-  const contents = () => useChatStore.getState().messages.map(message => message.content);
-  useAppStore.setState({ playerId: 'me' });
-  join('A');
-  chat('lobby', '大厅');
-  chat('room', 'A 房间');
-  useAppStore.getState().setConnected(false);
-  receive({ type: MsgType.Connected, payload: { player_id: 'me' } });
-  receive({ type: MsgType.Reconnected, payload: { player_id: 'me', room_code: 'A' } });
-  join('A');
-  expect(contents()).toEqual(['大厅', 'A 房间']);
-  join('B');
-  expect(contents()).toEqual(['大厅']);
-  chat('room', 'B 房间');
-  useAppStore.getState().leaveLocalRoom();
-  join('B');
-  expect(contents()).toEqual(['大厅']);
+it('ignores incoming server chat messages without throwing or setting an error', () => {
+  useAppStore.setState({ phase: 'lobby', error: '' });
+  useAppStore.getState().handleMessage({ type: 'chat', payload: { scope: 'lobby', content: '大厅' } });
+  expect(useAppStore.getState().error).toBe('');
+  expect(useAppStore.getState().phase).toBe('lobby');
 });

@@ -18,7 +18,6 @@ export const MsgType = {
   GetRoomList: 'get_room_list',
   GetOnlineCount: 'get_online_count',
   GetMaintenanceStatus: 'get_maintenance_status',
-  Chat: 'chat',
   Connected: 'connected',
   Reconnected: 'reconnected',
   Pong: 'pong',
@@ -53,8 +52,8 @@ export const MsgType = {
 
 export type MessageType = (typeof MsgType)[keyof typeof MsgType];
 export type Phase = 'connecting' | 'lobby' | 'matching' | 'waiting' | 'dealing' | 'bidding' | 'playing' | 'game_over';
-export type LobbyPanel = 'home' | 'leaderboard' | 'stats' | 'rules' | 'chat';
-export type UtilityDrawer = 'none' | 'chat' | 'counter' | 'history' | 'rules';
+export type LobbyPanel = 'home' | 'leaderboard' | 'stats' | 'rules';
+export type UtilityDrawer = 'none' | 'counter' | 'history' | 'rules';
 
 export interface CardInfo {
   suit: number;
@@ -154,15 +153,6 @@ export interface StatsResultPayload {
   max_win_streak: number;
 }
 
-export interface ChatPayload {
-  sender_id?: string;
-  sender_name?: string;
-  content: string;
-  scope: 'lobby' | 'room' | string;
-  time?: number;
-  is_system?: boolean;
-}
-
 export interface ReconnectedPayload {
   player_id: string;
   player_name: string;
@@ -193,7 +183,6 @@ export interface IncomingPayloadMap {
   stats_result: StatsResultPayload;
   leaderboard_result: { type: string; entries: LeaderboardEntry[] };
   room_list_result: { rooms: RoomListItem[] };
-  chat: ChatPayload;
   player_offline: { player_id: string; player_name: string; timeout: number };
   player_online: { player_id: string; player_name: string };
   maintenance: { maintenance: boolean };

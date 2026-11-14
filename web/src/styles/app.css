@@ -219,7 +219,7 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
-/* ---------- Shared Chat & Text Blocks ---------- */
+/* ---------- Shared Text Blocks ---------- */
 .visually-hidden {
   position: absolute;
   clip-path: inset(50%);
@@ -234,73 +234,6 @@ summary:focus-visible {
 
 .empty-text {
   color: rgba(255, 255, 255, .7);
-}
-
-.chat-history {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.chat-latest {
-  flex: none;
-  align-self: center;
-  padding: 6px 12px;
-  color: #fff;
-  background: #254e41;
-  border-radius: var(--radius-sm);
-}
-
-.chat-feed {
-  flex: 1 1 auto;
-  display: grid;
-  gap: 8px;
-  min-height: 0;
-  align-content: start;
-  overflow: auto;
-  overflow-wrap: anywhere;
-  overscroll-behavior: contain;
-}
-
-.chat-feed p {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .1);
-  line-height: 1.4;
-}
-
-.chat-input-row {
-  flex: none;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, .12);
-}
-
-.chat-input-row input {
-  height: 42px;
-  padding: 0 12px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .96);
-  color: var(--text);
-}
-
-.chat-input-row button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 0 14px;
-  border-radius: var(--radius-sm);
-  font-weight: 800;
-  color: var(--text-light);
-  background: var(--blue);
-  transition: transform .14s ease, opacity .14s ease, box-shadow .14s ease;
 }
 
 .rules-panel p {

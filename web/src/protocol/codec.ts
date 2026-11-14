@@ -67,14 +67,12 @@ for (const [type, name] of Object.entries(payloadNames)) {
   }
 }
 
-const jsonPayloadTypes = new Set(['chat']);
-
 export function encodeMessage(type: MessageType | string, payload?: OutgoingPayload): Uint8Array<ArrayBufferLike> {
   const enumValue = typeToEnum.get(type) ?? ProtoMessageType.MSG_UNKNOWN;
   const payloadCodec = payloadTypes.get(type);
   let payloadBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
 
-  if (payload && payloadCodec && !jsonPayloadTypes.has(type)) {
+  if (payload && payloadCodec) {
     payloadBytes = payloadCodec.encode(payload as Record<string, unknown>);
   } else if (payload) {
     payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
@@ -95,23 +93,11 @@ export function decodeMessage(data: ArrayBuffer | Uint8Array): IncomingMessage {
 
 function decodePayload(type: string, bytes?: Uint8Array): unknown {
   const raw = bytes ?? new Uint8Array(0);
-  if (!jsonPayloadTypes.has(type)) {
-    const payloadCodec = payloadTypes.get(type);
-    if (payloadCodec) {
-      return payloadCodec.decode(raw);
-    }
+  const payloadCodec = payloadTypes.get(type);
+  if (payloadCodec) {
+    return payloadCodec.decode(raw);
   }
   if (raw.length === 0) return {};
-  if (jsonPayloadTypes.has(type)) {
-    try {
-      return JSON.parse(new TextDecoder().decode(raw));
-    } catch {
-      const payloadCodec = payloadTypes.get(type);
-      if (payloadCodec) {
-        return payloadCodec.decode(raw);
-      }
-    }
-  }
 
   try {
     return JSON.parse(new TextDecoder().decode(raw));

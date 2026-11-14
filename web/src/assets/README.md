@@ -16,7 +16,7 @@ The runtime asset is 26,300 bytes versus 1,073,837 bytes for the source (97.6% s
 
 The outer `.app-shell` switches `data-scene` automatically across all web screens so every stage of a match has a dedicated Neo-Chinese atmosphere while preserving the opaque playing cards, clean green `.table-arena` felt, and zero-scroll responsive layouts:
 
-- **`lobby` (`scene-lobby-*`) — 暖灯茶馆大厅**: carved rosewood lattice screens, warm silk palace lanterns with crimson tassels, and misty bamboo beyond the windows. Used across lobby home, leaderboard, personal stats, lobby chat, rules, matchmaking, and room waiting (`connecting | lobby | matching | waiting`), with fallback `#162921`.
+- **`lobby` (`scene-lobby-*`) — 暖灯茶馆大厅**: carved rosewood lattice screens, warm silk palace lanterns with crimson tassels, and misty bamboo beyond the windows. Used across lobby home, leaderboard, personal stats, rules, matchmaking, and room waiting (`connecting | lobby | matching | waiting`), with fallback `#162921`.
 - **`table` (`scene-table-*`) — 竹庭夜景牌桌**: moonlit emerald bamboo stalks, carved ebony pavilion eaves with antique gold fretwork, and soft warm lantern bokeh framing the card table during dealing, bidding, and active play (`dealing | bidding | playing`), with fallback `#082820`.
 - **`settlement` (`scene-settlement-*`) — 祥云金辉结算**: sculpted golden ruyi clouds, crimson-and-gold festival palace lanterns, and imperial emerald brocade used for end-of-round hand reveal, unlimited board review, and victory/defeat score settlement (`game_over`), with fallback `#17261f`.
 

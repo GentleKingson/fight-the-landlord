@@ -1,4 +1,4 @@
-import { useAppStore, useChatStore } from './appStore';
+import { useAppStore } from './appStore';
 import type { CardInfo, PlayerInfo } from '../protocol/types';
 import { initialCounter, sortCards } from '../shared/cards/cardModel';
 
@@ -22,13 +22,6 @@ export function seedDemoState(mode: string): void {
     is_landlord: !isBidding && player.is_landlord,
     is_bot: mode === 'practice' && player.id !== 'p1'
   }));
-  useChatStore.setState({
-    roomCode: '836219',
-    messages: [
-      { id: 1, sender_name: '山月', content: '这局节奏很快。', scope: 'room', time: Date.now() / 1000 },
-      { id: 2, sender_name: '青竹', content: '我先看一手。', scope: 'room', time: Date.now() / 1000 }
-    ]
-  });
   useAppStore.setState({
     connected: true,
     phase: mode === 'lobby' ? 'lobby' : isBidding ? 'bidding' : 'playing',

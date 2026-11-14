@@ -6,7 +6,7 @@
   width: min(380px, calc(100vw - 32px));
   max-height: min(620px, calc(100dvh - 32px));
   display: none;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   padding: 12px;
   border-radius: 18px;
@@ -81,10 +81,6 @@
   overscroll-behavior: contain;
 }
 
-.utility-drawer .chat-input-row {
-  padding: 6px;
-}
-
 .counter-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -140,5 +136,4 @@
   }
 }
 
-.utility-drawer .chat-input-row input { font-size: 16px; }
 .utility-drawer { bottom: calc(var(--keyboard-inset, 0px) + max(8px, env(safe-area-inset-bottom))); max-height: min(620px, calc(var(--visible-height, 100dvh) - 16px)); }
