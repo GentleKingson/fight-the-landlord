@@ -8,25 +8,51 @@ import { RESULT_ACTION_GUARD_MS } from '../src/shared/resultPresentation';
 import { MsgType, type IncomingPayloadMap, type PlayerInfo } from '../src/protocol/types';
 
 const { send } = vi.hoisted(() => ({ send: vi.fn().mockReturnValue(true) }));
-vi.mock('../src/transport/wsClient', () => ({ createGameSocket: () => ({ connect() {}, close() {}, send, subscribe: () => () => {} }) }));
+vi.mock('../src/transport/wsClient', () => ({
+  createGameSocket: () => ({ connect() {}, close() {}, send, subscribe: () => () => {} }),
+}));
 vi.mock('../src/audio/connectGameAudio', () => ({ connectGameAudio: () => () => {} }));
 
-const players: PlayerInfo[] = [0, 1, 2].map(seat => ({
-  id: `p${seat + 1}`, name: ['青竹', '山月', '松风'][seat], seat,
-  ready: true, is_landlord: seat === 1, cards_count: seat === 1 ? 20 : 17, online: true
+const players: PlayerInfo[] = [0, 1, 2].map((seat) => ({
+  id: `p${seat + 1}`,
+  name: ['青竹', '山月', '松风'][seat],
+  seat,
+  ready: true,
+  is_landlord: seat === 1,
+  cards_count: seat === 1 ? 20 : 17,
+  online: true,
 }));
 const lastPlayed = [{ suit: 0, rank: 14, color: 0 }];
-const receive = (type: string, payload: unknown) => useAppStore.getState().handleMessage({ type, payload });
+
+function receive(type: string, payload: unknown) {
+  useAppStore.getState().handleMessage({ type, payload });
+}
 
 function result(winnerId = 'p3'): IncomingPayloadMap['game_over'] {
-  const winner = players.find(player => player.id === winnerId)!;
+  const winner = players.find((player) => player.id === winnerId);
+  if (!winner) {
+    throw new Error(`Unknown winner ${winnerId}`);
+  }
   return {
-    winner_id: winnerId, winner_name: winner.name, is_landlord: winner.is_landlord, multiplier: 8,
-    player_hands: players.map(player => ({
-      player_id: player.id, player_name: player.name,
-      cards: Array.from({ length: player.id === winnerId ? 0 : player.cards_count }, (_, i) => ({ suit: i % 4, rank: 3 + Math.floor(i / 4), color: i % 2 }))
+    winner_id: winnerId,
+    winner_name: winner.name,
+    is_landlord: winner.is_landlord,
+    multiplier: 8,
+    player_hands: players.map((player) => ({
+      player_id: player.id,
+      player_name: player.name,
+      cards: Array.from({ length: player.id === winnerId ? 0 : player.cards_count }, (_, i) => ({
+        suit: i % 4,
+        rank: 3 + Math.floor(i / 4),
+        color: i % 2,
+      })),
     })),
-    scores: players.map(player => ({ player_id: player.id, player_name: player.name, is_landlord: player.is_landlord, score: player.is_landlord === winner.is_landlord ? 24 : -12 }))
+    scores: players.map((player) => ({
+      player_id: player.id,
+      player_name: player.name,
+      is_landlord: player.is_landlord,
+      score: player.is_landlord === winner.is_landlord ? 24 : -12,
+    })),
   };
 }
 
@@ -36,48 +62,94 @@ function finish(winnerId = 'p3') {
 }
 
 function reconnect(roundId = 'round-1') {
-  receive(MsgType.Reconnected, { player_id: 'p1', player_name: '青竹', room_code: '123456', game_state: {
-    phase: 'ended', deal_id: roundId, players, hand: [], bottom_cards: [],
-    last_played: lastPlayed, last_player_id: 'p3', last_hand_type: '单张'
-  } });
+  receive(MsgType.Reconnected, {
+    player_id: 'p1',
+    player_name: '青竹',
+    room_code: '123456',
+    game_state: {
+      phase: 'ended',
+      deal_id: roundId,
+      players,
+      hand: [],
+      bottom_cards: [],
+      last_played: lastPlayed,
+      last_player_id: 'p3',
+      last_hand_type: '单张',
+    },
+  });
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-09T08:00:00Z'));
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    }
+  );
   send.mockClear();
   useAppStore.setState(useAppStore.getInitialState(), true);
-  useAppStore.setState({ connected: true, playerId: 'p1', roomCode: '123456', phase: 'playing', roundId: 'round-1', players, currentTurn: 'p1', hand: lastPlayed });
+  useAppStore.setState({
+    connected: true,
+    playerId: 'p1',
+    roomCode: '123456',
+    phase: 'playing',
+    roundId: 'round-1',
+    players,
+    currentTurn: 'p1',
+    hand: lastPlayed,
+  });
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('terminal table snapshot', () => {
   it('keeps the winning combination body first during reveal and review without changing the snapshot', () => {
     const cards = [
-      { suit: 0, rank: 14, color: 0 }, { suit: 1, rank: 14, color: 1 },
-      { suit: 0, rank: 3, color: 0 }, { suit: 1, rank: 3, color: 1 }, { suit: 2, rank: 3, color: 0 }
+      { suit: 0, rank: 14, color: 0 },
+      { suit: 1, rank: 14, color: 1 },
+      { suit: 0, rank: 3, color: 0 },
+      { suit: 1, rank: 3, color: 1 },
+      { suit: 2, rank: 3, color: 0 },
     ];
     receive(MsgType.CardPlayed, { player_id: 'p3', cards, cards_left: 0, hand_type: '三带二' });
     receive(MsgType.GameOver, result('p3'));
     render(<App />);
-    const labels = () => within(screen.getByRole('region', { name: '获胜最后一手' }))
-      .getAllByRole('img').map(card => card.getAttribute('aria-label'));
+    const labels = () =>
+      within(screen.getByRole('region', { name: '获胜最后一手' }))
+        .getAllByRole('img')
+        .map((card) => card.getAttribute('aria-label'));
     expect(labels()).toEqual(['3♠', '3♥', '3♣', 'A♠', 'A♥']);
-    act(() => useAppStore.getState().showSettlement());
-    act(() => useAppStore.getState().reviewEndTable());
+    act(() => {
+      useAppStore.getState().showSettlement();
+    });
+    act(() => {
+      useAppStore.getState().reviewEndTable();
+    });
     expect(labels()).toEqual(['3♠', '3♥', '3♣', 'A♠', 'A♥']);
     expect(useAppStore.getState().endSnapshot?.lastPlayed).toEqual(cards);
     expect(useAppStore.getState().lastPlayed).toEqual(cards);
   });
 
-  it.each(['p1', 'p2', 'p3'])('reveals all three seats and the winning play for %s only after GameOver', winner => {
+  it.each(['p1', 'p2', 'p3'])('reveals all three seats and the winning play for %s only after GameOver', (winner) => {
     render(<App />);
     expect(screen.queryByRole('region', { name: '终局牌桌' })).not.toBeInTheDocument();
-    act(() => finish(winner));
-    for (const label of ['我', '上家', '下家']) expect(screen.getByRole('region', { name: `${label}剩余手牌` })).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: '获胜最后一手' })).getByRole('img', { name: 'A♠' })).not.toHaveAttribute('tabindex');
+    act(() => {
+      finish(winner);
+    });
+    for (const label of ['我', '上家', '下家']) {
+      expect(screen.getByRole('region', { name: `${label}剩余手牌` })).toBeInTheDocument();
+    }
+    expect(
+      within(screen.getByRole('region', { name: '获胜最后一手' })).getByRole('img', { name: 'A♠' })
+    ).not.toHaveAttribute('tabindex');
     expect(screen.getByText('已出完')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '出牌' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option')).not.toBeInTheDocument();
@@ -98,7 +170,7 @@ describe('terminal table snapshot', () => {
     expect(state.phase).toBe('game_over');
     expect(state.endSnapshot?.players).toHaveLength(3);
     expect(state.endSnapshot?.players[1].online).toBe(true);
-    expect(state.endSnapshot?.playerHands[0].cards.some(card => card.rank === 99)).toBe(false);
+    expect(state.endSnapshot?.playerHands[0].cards.some((card) => card.rank === 99)).toBe(false);
     expect(state.endSnapshot?.scores[0].score).toBe(24);
     expect(state.endSnapshot?.lastPlayed).toEqual([]);
   });
@@ -116,14 +188,19 @@ describe('end-screen navigation', () => {
   it('supports early settlement and repeated unlimited read-only review without sending messages', () => {
     finish();
     render(<App />);
-    act(() => vi.advanceTimersByTime(RESULT_ACTION_GUARD_MS));
+    act(() => {
+      vi.advanceTimersByTime(RESULT_ACTION_GUARD_MS);
+    });
     fireEvent.click(screen.getByRole('button', { name: '查看结算' }));
     expect(screen.getByText('最终倍数 x8')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'A♠' })).not.toBeInTheDocument();
     for (let i = 0; i < 3; i++) {
       fireEvent.click(screen.getByRole('button', { name: '查看本局牌面' }));
       expect(screen.getByRole('heading', { name: '本局牌面' })).toHaveFocus();
-      act(() => { vi.advanceTimersByTime(180_000); receive(MsgType.GameOver, result()); });
+      act(() => {
+        vi.advanceTimersByTime(180_000);
+        receive(MsgType.GameOver, result());
+      });
       expect(screen.getByText('仅供查看 · 不限时')).toBeInTheDocument();
       expect(screen.queryByText(/秒后显示结算/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '返回结算' }));
@@ -134,9 +211,14 @@ describe('end-screen navigation', () => {
   it('automatically settles at the original deadline despite duplicate messages', () => {
     finish();
     render(<App />);
-    act(() => vi.advanceTimersByTime(9000));
+    act(() => {
+      vi.advanceTimersByTime(9000);
+    });
     expect(screen.getByText('1 秒后显示结算')).toBeInTheDocument();
-    act(() => { receive(MsgType.GameOver, result()); vi.advanceTimersByTime(1000); });
+    act(() => {
+      receive(MsgType.GameOver, result());
+      vi.advanceTimersByTime(1000);
+    });
     expect(screen.getByRole('button', { name: '查看本局牌面' })).toBeInTheDocument();
   });
 
@@ -144,20 +226,29 @@ describe('end-screen navigation', () => {
     finish();
     render(<App />);
     vi.setSystemTime(Date.now() + 30_000);
-    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
     expect(screen.getByRole('button', { name: '查看本局牌面' })).toBeInTheDocument();
   });
 
   it('clears the timer and snapshot before starting another game', () => {
     finish();
     render(<App />);
-    act(() => vi.advanceTimersByTime(RESULT_ACTION_GUARD_MS));
+    act(() => {
+      vi.advanceTimersByTime(RESULT_ACTION_GUARD_MS);
+    });
     fireEvent.click(screen.getByRole('button', { name: '查看结算' }));
-    act(() => useAppStore.setState({ matchMode: 'practice' }));
+    act(() => {
+      useAppStore.setState({ matchMode: 'practice' });
+    });
     fireEvent.click(screen.getByRole('button', { name: '再练一局' }));
     expect(send).toHaveBeenCalledExactlyOnceWith(MsgType.PracticeMatch);
     expect(useAppStore.getState().endSnapshot).toBeNull();
-    act(() => { receive(MsgType.GameStart, { players }); vi.advanceTimersByTime(20_000); });
+    act(() => {
+      receive(MsgType.GameStart, { players });
+      vi.advanceTimersByTime(20_000);
+    });
     expect(useAppStore.getState().phase).toBe('dealing');
     expect(useAppStore.getState().revealDeadline).toBeNull();
   });
@@ -174,14 +265,18 @@ describe('end-screen navigation', () => {
     render(<App />);
     const play = screen.getByRole('button', { name: '出牌' });
     play.focus();
-    act(() => finish());
+    act(() => {
+      finish();
+    });
     const settle = screen.getByRole('button', { name: '查看结算' });
     expect(settle).not.toBe(play);
     expect(settle).not.toHaveFocus();
     expect(settle).toBeDisabled();
     fireEvent.click(settle);
     expect(screen.getByRole('region', { name: '终局牌桌' })).toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(RESULT_ACTION_GUARD_MS));
+    act(() => {
+      vi.advanceTimersByTime(RESULT_ACTION_GUARD_MS);
+    });
     expect(settle).toBeEnabled();
     fireEvent.click(settle, { detail: 2 });
     expect(screen.getByRole('region', { name: '终局牌桌' })).toBeInTheDocument();
@@ -189,21 +284,29 @@ describe('end-screen navigation', () => {
     expect(screen.getByRole('button', { name: '查看本局牌面' })).toBeInTheDocument();
     expect(send).not.toHaveBeenCalled();
     expect(useAppStore.getState().revealDeadline).toBeNull();
-    act(() => vi.advanceTimersByTime(END_REVEAL_DURATION_MS));
+    act(() => {
+      vi.advanceTimersByTime(END_REVEAL_DURATION_MS);
+    });
     expect(useAppStore.getState().endView).toBe('result');
   });
 
-  it.each(['leave', 'next game', 'unmount'])('cleans up a pending reveal on %s', action => {
+  it.each(['leave', 'next game', 'unmount'])('cleans up a pending reveal on %s', (action) => {
     finish();
     const { unmount } = render(<App />);
     act(() => {
       vi.advanceTimersByTime(500);
-      if (action === 'leave') useAppStore.getState().leaveLocalRoom();
-      else if (action === 'next game') receive(MsgType.GameStart, { players });
-      else unmount();
+      if (action === 'leave') {
+        useAppStore.getState().leaveLocalRoom();
+      } else if (action === 'next game') {
+        receive(MsgType.GameStart, { players });
+      } else {
+        unmount();
+      }
     });
     expect(vi.getTimerCount()).toBe(action === 'next game' ? 1 : 0);
-    act(() => vi.advanceTimersByTime(END_REVEAL_DURATION_MS));
+    act(() => {
+      vi.advanceTimersByTime(END_REVEAL_DURATION_MS);
+    });
     expect(screen.queryByRole('button', { name: '查看本局牌面' })).not.toBeInTheDocument();
   });
 
@@ -217,9 +320,13 @@ describe('end-screen navigation', () => {
       finish('p2');
     });
     expect(useAppStore.getState().turnToken).toBe('');
-    act(() => vi.advanceTimersByTime(END_REVEAL_DURATION_MS - 1000));
+    act(() => {
+      vi.advanceTimersByTime(END_REVEAL_DURATION_MS - 1000);
+    });
     expect(screen.getByRole('region', { name: '终局牌桌' })).toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(1000));
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
     expect(screen.getByRole('button', { name: '查看本局牌面' })).toBeInTheDocument();
   });
 });
@@ -231,15 +338,22 @@ describe('ended-game recovery', () => {
     expect(screen.getByRole('heading', { name: '正在恢复本局结果' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: '终局牌桌' })).not.toBeInTheDocument();
     expect(useAppStore.getState().revealDeadline).toBeNull();
-    act(() => { vi.advanceTimersByTime(5000); receive(MsgType.GameOver, result()); });
+    act(() => {
+      vi.advanceTimersByTime(5000);
+      receive(MsgType.GameOver, result());
+    });
     expect(screen.getByText('10 秒后显示结算')).toBeInTheDocument();
     expect(useAppStore.getState().endSnapshot?.lastPlayed).toEqual(lastPlayed);
   });
 
-  it.each(['reveal', 'result', 'review'] as const)('preserves %s through a same-round reconnect', view => {
+  it.each(['reveal', 'result', 'review'] as const)('preserves %s through a same-round reconnect', (view) => {
     finish();
-    if (view === 'result') useAppStore.getState().showSettlement();
-    if (view === 'review') useAppStore.getState().reviewEndTable();
+    if (view === 'result') {
+      useAppStore.getState().showSettlement();
+    }
+    if (view === 'review') {
+      useAppStore.getState().reviewEndTable();
+    }
     const before = useAppStore.getState();
     vi.advanceTimersByTime(4000);
     reconnect();

@@ -1,17 +1,27 @@
-interface IconProps {
-  name: 'play' | 'room' | 'bot' | 'rank' | 'stats' | 'counter' | 'history' | 'rules' | 'close' | 'sound' | 'muted' | 'copy' | 'check' | 'share' | 'refresh';
+/** Supported vector icon names used across lobby and table controls. */
+export type IconName =
+  | 'play'
+  | 'room'
+  | 'bot'
+  | 'rank'
+  | 'stats'
+  | 'counter'
+  | 'history'
+  | 'rules'
+  | 'close'
+  | 'sound'
+  | 'muted'
+  | 'copy'
+  | 'check'
+  | 'share'
+  | 'refresh';
+
+/** Props for the inline SVG icon component. */
+export interface IconProps {
+  name: IconName;
 }
 
-export function Icon({ name }: IconProps) {
-  const path = icons[name];
-  return (
-    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d={path} />
-    </svg>
-  );
-}
-
-const icons: Record<IconProps['name'], string> = {
+const ICON_PATHS: Record<IconName, string> = {
   sound: 'M3 9h4l5-4v14l-5-4H3V9Zm12-2a7 7 0 0 1 0 10v-3a4 4 0 0 0 0-4V7Zm3-3a11 11 0 0 1 0 16v-3a8 8 0 0 0 0-10V4Z',
   muted: 'M3 9h4l5-4v14l-5-4H3V9Zm12-1 3 3 3-3 1 1-3 3 3 3-1 1-3-3-3 3-1-1 3-3-3-3 1-1Z',
   play: 'M8 5v14l11-7-11-7Z',
@@ -28,3 +38,13 @@ const icons: Record<IconProps['name'], string> = {
   share: 'M18 16a3 3 0 0 0-2.4 1.2L8.9 13.7a3.2 3.2 0 0 0 0-3.4l6.7-3.5A3 3 0 1 0 15 5a3 3 0 0 0 .1.7L8.4 9.2a3 3 0 1 0 0 5.6l6.7 3.5a3 3 0 1 0 2.9-2.3Z',
   refresh: 'M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z'
 };
+
+/** Renders a decorative 24x24 inline SVG icon. */
+export function Icon({ name }: IconProps) {
+  const path = ICON_PATHS[name];
+  return (
+    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d={path} />
+    </svg>
+  );
+}

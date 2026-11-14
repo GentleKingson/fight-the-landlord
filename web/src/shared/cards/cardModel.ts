@@ -1,9 +1,13 @@
 import type { CardInfo } from '../../protocol/types';
 import { parseHand, suggestPlays } from './rules';
 
+/** Canonical playing card suit identifier. */
 export type CardSuit = 'spade' | 'heart' | 'club' | 'diamond' | 'joker';
+
+/** Display ink color for a playing card. */
 export type CardColor = 'red' | 'black';
 
+/** Normalized presentation metadata for rendering a card face. */
 export interface CardFace {
   rank: number;
   suit: CardSuit;
@@ -15,7 +19,14 @@ export interface CardFace {
   jokerColor?: CardColor;
 }
 
-const rankNames: Record<number, string> = {
+interface SuitMetadata {
+  suit: CardSuit;
+  symbol: string;
+  color: CardColor;
+  name: string;
+}
+
+const RANK_NAMES: Record<number, string> = {
   3: '3',
   4: '4',
   5: '5',
@@ -33,7 +44,7 @@ const rankNames: Record<number, string> = {
   17: 'JOKER'
 };
 
-const suitMeta: Record<number, { suit: CardSuit; symbol: string; color: CardColor; name: string }> = {
+const SUIT_META: Record<number, SuitMetadata> = {
   0: { suit: 'spade', symbol: '♠', color: 'black', name: '黑桃' },
   1: { suit: 'heart', symbol: '♥', color: 'red', name: '红桃' },
   2: { suit: 'club', symbol: '♣', color: 'black', name: '梅花' },
@@ -41,10 +52,12 @@ const suitMeta: Record<number, { suit: CardSuit; symbol: string; color: CardColo
   4: { suit: 'joker', symbol: '', color: 'black', name: '王' }
 };
 
+/** Returns a unique string key (`suit_rank`) for a physical card in a standard deck. */
 export function cardKey(card: CardInfo): string {
   return `${card.suit}_${card.rank}`;
 }
 
+/** Converts a protocol `CardInfo` object into display labels, symbols, and colors. */
 export function normalizeCard(card: CardInfo): CardFace {
   const isJoker = card.rank >= 16 || card.suit === 4;
   if (isJoker) {
@@ -61,8 +74,8 @@ export function normalizeCard(card: CardInfo): CardFace {
     };
   }
 
-  const meta = suitMeta[card.suit] ?? suitMeta[0];
-  const rankLabel = rankNames[card.rank] ?? String(card.rank);
+  const meta = SUIT_META[card.suit] ?? SUIT_META[0];
+  const rankLabel = RANK_NAMES[card.rank] ?? String(card.rank);
   return {
     rank: card.rank,
     suit: meta.suit,
@@ -74,49 +87,70 @@ export function normalizeCard(card: CardInfo): CardFace {
   };
 }
 
+/** Returns the human-readable accessible label for a card. */
 export function cardLabel(card: CardInfo): string {
   return normalizeCard(card).label;
 }
 
+/** Returns the display color (`red` or `black`) for a card. */
 export function cardColor(card: CardInfo): CardColor {
   return normalizeCard(card).color;
 }
 
+/** Sorts a hand copy in descending rank order, breaking ties by suit. */
 export function sortCards(cards: CardInfo[]): CardInfo[] {
   return [...cards].sort((a, b) => b.rank - a.rank || a.suit - b.suit);
 }
 
-// Match the terminal's groupPlayedForDisplay: the largest rank groups form
-// the body of a trio, four-of-a-kind or airplane; kickers follow by rank.
-// Sort a copy so presentation never changes protocol/history/snapshot data.
+/**
+ * Sorts a played hand copy so the largest rank groups (trio, four-of-a-kind,
+ * or airplane body) appear first, followed by kickers in descending rank order.
+ * Matches the terminal's `groupPlayedForDisplay` without mutating input data.
+ */
 export function sortPlayedCards(cards: CardInfo[]): CardInfo[] {
   const counts = new Map<number, number>();
-  for (const card of cards) counts.set(card.rank, (counts.get(card.rank) ?? 0) + 1);
+  for (const card of cards) {
+    counts.set(card.rank, (counts.get(card.rank) ?? 0) + 1);
+  }
   const bodyCount = Math.max(0, ...counts.values());
   const isBody = (card: CardInfo) => Number(counts.get(card.rank) === bodyCount);
   return [...cards].sort((a, b) => isBody(b) - isBody(a) || b.rank - a.rank || a.suit - b.suit);
 }
 
+/** Summarizes a selected card set into its Chinese hand-type name or `'无效牌型'`. */
 export function summarizeHand(cards: CardInfo[]): string {
   if (cards.length === 0) return '';
   return parseHand(cards)?.type ?? '无效牌型';
 }
 
-export function generateSimpleSuggestions(hand: CardInfo[], lastPlayed: CardInfo[], mustPlay: boolean): CardInfo[][] {
+/** Generates candidate legal plays from `hand` against `lastPlayed`. */
+export function generateSimpleSuggestions(
+  hand: CardInfo[],
+  lastPlayed: CardInfo[],
+  mustPlay: boolean
+): CardInfo[][] {
   return suggestPlays(hand, lastPlayed, mustPlay);
 }
 
+/** Builds an initial remaining-card counter excluding the player's own cards. */
 export function initialCounter(myCards: CardInfo[]): Record<number, number> {
   const counts: Record<number, number> = {};
-  for (let rank = 3; rank <= 15; rank += 1) counts[rank] = 4;
+  for (let rank = 3; rank <= 15; rank += 1) {
+    counts[rank] = 4;
+  }
   counts[16] = 1;
   counts[17] = 1;
-  for (const card of myCards) counts[card.rank] = Math.max(0, (counts[card.rank] ?? 0) - 1);
+  for (const card of myCards) {
+    counts[card.rank] = Math.max(0, (counts[card.rank] ?? 0) - 1);
+  }
   return counts;
 }
 
+/** Returns a new remaining-card counter with `cards` deducted. */
 export function deductCounter(counter: Record<number, number>, cards: CardInfo[]): Record<number, number> {
   const next = { ...counter };
-  for (const card of cards) next[card.rank] = Math.max(0, (next[card.rank] ?? 0) - 1);
+  for (const card of cards) {
+    next[card.rank] = Math.max(0, (next[card.rank] ?? 0) - 1);
+  }
   return next;
 }

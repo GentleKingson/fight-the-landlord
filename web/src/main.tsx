@@ -18,9 +18,16 @@ import './styles/theme.css';
 
 // Seed before the first render so demo pages request only their active scene.
 const demo = new URLSearchParams(window.location.search).get('demo');
-if (demo) seedDemoState(demo);
+if (demo) {
+  seedDemoState(demo);
+}
 
-createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error('Missing #root element');
+}
+
+createRoot(rootElement).render(
   <StrictMode>
     <App demo={demo} />
   </StrictMode>

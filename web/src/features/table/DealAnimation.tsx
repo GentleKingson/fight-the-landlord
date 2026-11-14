@@ -2,11 +2,19 @@ import { useLayoutEffect, useRef } from 'react';
 import type { DealStage } from '../../stores/appStore';
 import { dealFlightTiming } from './useDealPresentation';
 
-// The overlay spans the table so the arena cannot clip flights to the hand.
-// Only geometry is measured; transform/opacity do all per-frame work in CSS.
-export function DealAnimation({ deal, count, finished, reducedMotion }: {
-  deal: DealStage | null; count: number; finished: boolean; reducedMotion: boolean;
-}) {
+/** Props for the card-dealing overlay animation. */
+export interface DealAnimationProps {
+  deal: DealStage | null;
+  count: number;
+  finished: boolean;
+  reducedMotion: boolean;
+}
+
+/**
+ * Full-table overlay animating card flights from the center deck to seats and hand slots.
+ * Only geometry is measured in JS; `transform` and `opacity` perform per-frame work in CSS.
+ */
+export function DealAnimation({ deal, count, finished, reducedMotion }: DealAnimationProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -15,14 +23,14 @@ export function DealAnimation({ deal, count, finished, reducedMotion }: {
     if (!root || !table || !origin || !deal || finished) return;
     const flights = [...root.querySelectorAll<HTMLElement>('[data-flight-index]')];
     const slots = [...table.querySelectorAll<HTMLElement>('.hand__slot')];
-    const seats = ['left', 'right'].map(side => table.querySelector(`.seat-panel--${side}`));
+    const seats = ['left', 'right'].map((side) => table.querySelector(`.seat-panel--${side}`));
     const measure = () => {
       const bounds = root.getBoundingClientRect();
       const source = origin.getBoundingClientRect();
       const x = source.left + source.width / 2;
       const y = source.top + source.height / 2;
       // Read all targets before writing styles to avoid repeated layout work.
-      const targets = [...seats, ...slots].map(element => element?.getBoundingClientRect());
+      const targets = [...seats, ...slots].map((element) => element?.getBoundingClientRect());
       root.style.setProperty('--deal-origin-x', `${x - bounds.left - 15}px`);
       root.style.setProperty('--deal-origin-y', `${y - bounds.top - 21}px`);
       flights.forEach((card, index) => {
@@ -50,7 +58,11 @@ export function DealAnimation({ deal, count, finished, reducedMotion }: {
       frame = window.requestAnimationFrame(measure);
     };
     const observer = new ResizeObserver(scheduleMeasure);
-    [table, origin, ...slots, ...seats].forEach(element => { if (element) observer.observe(element); });
+    [table, origin, ...slots, ...seats].forEach((element) => {
+      if (element) {
+        observer.observe(element);
+      }
+    });
     window.addEventListener('resize', scheduleMeasure);
     return () => {
       observer.disconnect();
@@ -61,13 +73,19 @@ export function DealAnimation({ deal, count, finished, reducedMotion }: {
   }, [deal, count, finished, reducedMotion]);
   return (
     <div ref={rootRef} className="deal-animation" role="status" aria-label="正在发牌">
-      {!finished && <div aria-hidden="true">
-        <span className="deal-card deal-card--deck" />
-        {!reducedMotion && Array.from({ length: count * 3 }, (_, index) => (
-          <span key={`${deal?.id}-${index}`} data-flight-index={index}
-            className={`deal-card deal-card--${['left', 'right', 'me'][index % 3]}`} />
-        ))}
-      </div>}
+      {!finished && (
+        <div aria-hidden="true">
+          <span className="deal-card deal-card--deck" />
+          {!reducedMotion &&
+            Array.from({ length: count * 3 }, (_, index) => (
+              <span
+                key={`${deal?.id}-${index}`}
+                data-flight-index={index}
+                className={`deal-card deal-card--${['left', 'right', 'me'][index % 3]}`}
+              />
+            ))}
+        </div>
+      )}
     </div>
   );
 }

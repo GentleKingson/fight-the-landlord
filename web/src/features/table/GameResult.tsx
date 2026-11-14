@@ -1,11 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { MsgType } from '../../protocol/types';
-import type { GameSocket } from '../../transport/wsClient';
-import { useAppStore } from '../../stores/appStore';
 import { resolveSettlementOutcome } from '../../shared/ui/backgroundScene';
+import { useAppStore } from '../../stores/appStore';
+import type { GameSocket } from '../../transport/wsClient';
 
-export function GameResult({ socket }: { socket: GameSocket }) {
-  const matchMode = useAppStore(state => state.matchMode);
+/** Props for the round settlement view. */
+export interface GameResultProps {
+  socket: GameSocket;
+}
+
+/** Displays round settlement scores, outcome summary, and rematch/review actions. */
+export function GameResult({ socket }: GameResultProps) {
+  const matchMode = useAppStore((state) => state.matchMode);
   const playerId = useAppStore((state) => state.playerId);
   const winnerId = useAppStore((state) => state.winnerId);
   const winnerName = useAppStore((state) => state.winnerName);
@@ -16,7 +22,10 @@ export function GameResult({ socket }: { socket: GameSocket }) {
   const reviewEndTable = useAppStore((state) => state.reviewEndTable);
   const outcome = resolveSettlementOutcome(playerId, winnerId, winnerIsLandlord, scores);
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus(); }, []);
+
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
 
   function playAgain() {
     const state = useAppStore.getState();
@@ -34,23 +43,48 @@ export function GameResult({ socket }: { socket: GameSocket }) {
       <section className="result-panel">
         <header className="result-heading">
           <span className="result-badge">{winnerIsLandlord ? '地主获胜' : '农民获胜'}</span>
-          <h1 ref={heading} tabIndex={-1}>{outcome === 'victory' ? '你赢了' : outcome === 'defeat' ? '你输了' : '本局结束'}</h1>
-          <p>{winnerName || '获胜玩家'} · {winnerIsLandlord ? '地主' : '农民'}获胜</p>
+          <h1 ref={heading} tabIndex={-1}>
+            {outcome === 'victory' ? '你赢了' : outcome === 'defeat' ? '你输了' : '本局结束'}
+          </h1>
+          <p>
+            {winnerName || '获胜玩家'} · {winnerIsLandlord ? '地主' : '农民'}获胜
+          </p>
           <p>最终倍数 x{finalMultiplier || 1}</p>
         </header>
         <div className="score-list">
-          {[...scores].sort((a, b) => Number(b.player_id === playerId) - Number(a.player_id === playerId)).map((score) => (
-            <div className={`score-row${score.player_id === playerId ? ' is-me' : ''}`} key={score.player_id}>
-              <span>{score.player_name}{score.player_id === playerId ? '（我）' : ''}</span>
-              <strong className={score.score >= 0 ? 'is-positive' : 'is-negative'}>{score.score >= 0 ? '+' : ''}{score.score}</strong>
-            </div>
-          ))}
+          {[...scores]
+            .sort((a, b) => Number(b.player_id === playerId) - Number(a.player_id === playerId))
+            .map((score) => (
+              <div className={`score-row${score.player_id === playerId ? ' is-me' : ''}`} key={score.player_id}>
+                <span>
+                  {score.player_name}
+                  {score.player_id === playerId ? '（我）' : ''}
+                </span>
+                <strong className={score.score >= 0 ? 'is-positive' : 'is-negative'}>
+                  {score.score >= 0 ? '+' : ''}
+                  {score.score}
+                </strong>
+              </div>
+            ))}
         </div>
         <div className="result-actions">
-          <button className="primary-action" onClick={playAgain}>{matchMode === 'practice' ? '再练一局' : '重新匹配'}</button>
+          <button className="primary-action" onClick={playAgain}>
+            {matchMode === 'practice' ? '再练一局' : '重新匹配'}
+          </button>
           <div className="room-actions">
-            {snapshot ? <button className="secondary-action" onClick={reviewEndTable}>查看本局牌面</button> : null}
-            <button className="secondary-action" onClick={() => { useAppStore.getState().leaveLocalRoom(); }}>返回大厅</button>
+            {snapshot ? (
+              <button className="secondary-action" onClick={reviewEndTable}>
+                查看本局牌面
+              </button>
+            ) : null}
+            <button
+              className="secondary-action"
+              onClick={() => {
+                useAppStore.getState().leaveLocalRoom();
+              }}
+            >
+              返回大厅
+            </button>
           </div>
         </div>
       </section>

@@ -13,7 +13,9 @@ function cards(ranks: number[]): CardInfo[] {
   });
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+});
 
 describe('played-card display order', () => {
   it.each([
@@ -36,18 +38,22 @@ describe('played-card display order', () => {
     { type: '三张', input: [3, 3, 3], output: [3, 3, 3] },
   ])('$type places the body first regardless of incoming order', ({ type, input, output }) => {
     const source = cards(input);
-    const original = source.map(card => ({ ...card }));
-    source.forEach(Object.freeze);
+    const original = source.map((card) => ({ ...card }));
+    source.forEach((card) => {
+      Object.freeze(card);
+    });
     Object.freeze(source);
     const sorted = sortPlayedCards(source);
-    expect(sorted.map(card => card.rank)).toEqual(output);
+    expect(sorted.map((card) => card.rank)).toEqual(output);
     expect(sortPlayedCards([...source].reverse())).toEqual(sorted);
     expect(source).toEqual(original);
     expect(sorted).toHaveLength(source.length);
     expect(new Set(sorted)).toEqual(new Set(source));
 
     render(<PlayedCards cards={source} handType={type} />);
-    expect(screen.getAllByRole('img').map(card => card.getAttribute('aria-label'))).toEqual(sorted.map(cardLabel));
+    expect(screen.getAllByRole('img').map((card) => card.getAttribute('aria-label'))).toEqual(
+      sorted.map((card) => cardLabel(card))
+    );
   });
 
   it('handles an empty play', () => {

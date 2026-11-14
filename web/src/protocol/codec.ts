@@ -21,7 +21,7 @@ typeToEnum.set('maintenance_push', ProtoMessageType.MSG_MAINTENANCE);
 enumToType.set(ProtoMessageType.MSG_MAINTENANCE_STATUS, 'maintenance_pull');
 enumToType.set(ProtoMessageType.MSG_MAINTENANCE, 'maintenance_push');
 
-const payloadNames: Record<string, string> = {
+const PAYLOAD_NAMES: Record<string, string> = {
   reconnect: 'ReconnectPayload',
   ping: 'PingPayload',
   join_room: 'JoinRoomPayload',
@@ -60,20 +60,21 @@ const payloadNames: Record<string, string> = {
 };
 
 const payloadTypes = new Map<string, StaticPayloadCodec>();
-for (const [type, name] of Object.entries(payloadNames)) {
+for (const [type, name] of Object.entries(PAYLOAD_NAMES)) {
   const codec = staticMessageCodecs[name];
   if (codec) {
     payloadTypes.set(type, codec);
   }
 }
 
+/** Encodes a client message into a binary protobuf envelope. */
 export function encodeMessage(type: MessageType | string, payload?: OutgoingPayload): Uint8Array<ArrayBufferLike> {
   const enumValue = typeToEnum.get(type) ?? ProtoMessageType.MSG_UNKNOWN;
   const payloadCodec = payloadTypes.get(type);
   let payloadBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
 
   if (payload && payloadCodec) {
-    payloadBytes = payloadCodec.encode(payload as Record<string, unknown>);
+    payloadBytes = payloadCodec.encode(payload);
   } else if (payload) {
     payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
   }
@@ -81,6 +82,7 @@ export function encodeMessage(type: MessageType | string, payload?: OutgoingPayl
   return encodeProtoEnvelope({ type: enumValue, payload: payloadBytes }).finish();
 }
 
+/** Decodes a binary protobuf envelope from the server into a typed message. */
 export function decodeMessage(data: ArrayBuffer | Uint8Array): IncomingMessage {
   const buffer = ArrayBuffer.isView(data)
     ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
@@ -88,6 +90,7 @@ export function decodeMessage(data: ArrayBuffer | Uint8Array): IncomingMessage {
   const decoded = decodeProtoEnvelope(buffer) as { type: number; payload?: Uint8Array };
   const type = enumToType.get(decoded.type) ?? 'unknown';
   const payload = decodePayload(type, decoded.payload);
+  // Wire type string dynamically indexes IncomingPayloadMap variants.
   return { type, payload } as IncomingMessage;
 }
 
@@ -105,4 +108,3 @@ function decodePayload(type: string, bytes?: Uint8Array): unknown {
     return { _raw: Array.from(raw) };
   }
 }
-

@@ -73,7 +73,7 @@ describe('RoomWaiting copy and share controls', () => {
     expect(liveStatus.getAttribute('aria-live')).toBe('polite');
     expect(liveStatus.textContent).toBe('已复制房间号 654321');
 
-    // Consecutive identical copy appends NBSP so VoiceOver re-announces.
+    // Consecutive identical copy appends non-breaking space (\u00A0) so VoiceOver re-announces.
     await act(async () => {
       fireEvent.click(copyBtn);
     });
@@ -153,16 +153,25 @@ describe('RoomWaiting copy and share controls', () => {
   });
 });
 
+interface ManifestIcon {
+  src: string;
+  sizes: string;
+  type: string;
+  purpose?: string;
+}
+
+interface WebManifest {
+  id: string;
+  display: string;
+  orientation: string;
+  theme_color: string;
+  icons: ManifestIcon[];
+}
+
 describe('PWA manifest and lobby background preload links', () => {
   it('configures fullscreen landscape manifest with #143d2a theme color and valid PNG icons', () => {
     const raw = readFileSync(resolve(process.cwd(), 'public/manifest.webmanifest'), 'utf8');
-    const manifest = JSON.parse(raw) as {
-      id: string;
-      display: string;
-      orientation: string;
-      theme_color: string;
-      icons: Array<{ src: string; sizes: string; type: string; purpose?: string }>;
-    };
+    const manifest = JSON.parse(raw) as WebManifest;
 
     expect(manifest.id).toBe('/');
     expect(manifest.display).toBe('fullscreen');

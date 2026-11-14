@@ -2,7 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cardSoundNames, cardSoundUrls } from '../src/audio/cardSounds';
 import { GameAudio } from '../src/audio/gameAudio';
 
-const cards = (rank: number, count = 1) => Array.from({ length: count }, (_, suit) => ({ rank, suit, color: 0 }));
+function cards(rank: number, count = 1) {
+  return Array.from({ length: count }, (_, suit) => ({ rank, suit, color: 0 }));
+}
 
 it('includes exactly the 66 CLI assets and maps every single/pair/trio rank', () => {
   expect(Object.keys(cardSoundUrls)).toHaveLength(66);
@@ -17,15 +19,24 @@ it('includes exactly the 66 CLI assets and maps every single/pair/trio rank', ()
 });
 
 it.each([
-  ['三带一', ['type_trio_single']], ['三带二', ['type_trio_pair']],
-  ['顺子', ['type_straight']], ['连对', ['type_pairstraight']],
-  ['飞机', ['type_plane', 'plane']], ['飞机带单', ['type_plane', 'plane']], ['飞机带对', ['type_plane', 'plane']],
-  ['炸弹', ['type_bomb', 'bomb']], ['王炸', ['type_rocket', 'bomb']],
-  ['四带二', ['type_four_two']], ['四带两对', ['type_four_twopair']],
-  ['未来牌型', ['play']], ['constructor', ['play']],
+  ['三带一', ['type_trio_single']],
+  ['三带二', ['type_trio_pair']],
+  ['顺子', ['type_straight']],
+  ['连对', ['type_pairstraight']],
+  ['飞机', ['type_plane', 'plane']],
+  ['飞机带单', ['type_plane', 'plane']],
+  ['飞机带对', ['type_plane', 'plane']],
+  ['炸弹', ['type_bomb', 'bomb']],
+  ['王炸', ['type_rocket', 'bomb']],
+  ['四带二', ['type_four_two']],
+  ['四带两对', ['type_four_twopair']],
+  ['未来牌型', ['play']],
+  ['constructor', ['play']],
 ])('maps %s to voice/effects or a safe fallback', (type, expected) => {
   expect(cardSoundNames(type as string, [])).toEqual(expected);
-  for (const name of expected) expect(cardSoundUrls[name]).toBeTruthy();
+  for (const name of expected) {
+    expect(cardSoundUrls[name]).toBeTruthy();
+  }
 });
 
 it('falls back for missing ranks and uses the most frequent rank', () => {
@@ -37,36 +48,62 @@ it('falls back for missing ranks and uses the most frequent rank', () => {
 class FakeSource {
   buffer: unknown;
   onended: (() => void) | null = null;
-  connect = vi.fn();
-  disconnect = vi.fn();
-  start = vi.fn();
-  stop = vi.fn();
+  readonly connect = vi.fn();
+  readonly disconnect = vi.fn();
+  readonly start = vi.fn();
+  readonly stop = vi.fn();
 }
+
 class FakeContext {
   static latest: FakeContext;
   state = 'suspended';
-  sampleRate = 44100;
-  destination = {};
+  readonly sampleRate = 44100;
+  readonly destination = {};
   onstatechange?: () => void;
-  sources: FakeSource[] = [];
-  resume = vi.fn(async () => { this.state = 'running'; });
-  createBuffer = vi.fn(() => ({}));
-  decodeAudioData = vi.fn(async (): Promise<object> => ({ duration: 2.5 }));
-  createGain = vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }));
-  createBufferSource() { const source = new FakeSource(); this.sources.push(source); return source; }
-  constructor() { FakeContext.latest = this; }
+  readonly sources: FakeSource[] = [];
+  readonly resume = vi.fn(async () => {
+    this.state = 'running';
+  });
+  readonly createBuffer = vi.fn(() => ({}));
+  readonly decodeAudioData = vi.fn(async (): Promise<object> => ({ duration: 2.5 }));
+  readonly createGain = vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }));
+
+  constructor() {
+    FakeContext.latest = this;
+  }
+
+  createBufferSource() {
+    const source = new FakeSource();
+    this.sources.push(source);
+    return source;
+  }
 }
+
 let audio: GameAudio;
-const flush = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
-const spoken = () => FakeContext.latest.sources.slice(1); // First source unlocks with silence.
+
+async function flush() {
+  for (let i = 0; i < 15; i++) {
+    await Promise.resolve();
+  }
+}
+
+function spoken() {
+  // First source unlocks with silence.
+  return FakeContext.latest.sources.slice(1);
+}
 
 beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal('AudioContext', FakeContext);
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) })));
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(1))));
   audio = new GameAudio();
 });
-afterEach(() => { audio.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+afterEach(() => {
+  audio.stop();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 it('defaults to enabled, persists both choices and drops events before unlocking after reload', async () => {
   expect(audio.getEnabled()).toBe(true);
@@ -98,10 +135,15 @@ it('serializes voices and effects and bounds rapid pending turns', async () => {
   await flush();
   expect(spoken()).toHaveLength(2);
   expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.bomb, expect.anything());
-  for (const rank of [4, 5, 6, 7]) audio.play('单张', cards(rank));
-  for (let i = 1; i <= 4; i++) { spoken()[i].onended?.(); await flush(); }
-  expect(vi.mocked(fetch).mock.calls.map(call => call[0])).toEqual(
-    ['type_bomb', 'bomb', 'single_5', 'single_6', 'single_7'].map(name => cardSoundUrls[name]),
+  for (const rank of [4, 5, 6, 7]) {
+    audio.play('单张', cards(rank));
+  }
+  for (let i = 1; i <= 4; i++) {
+    spoken()[i].onended?.();
+    await flush();
+  }
+  expect(vi.mocked(fetch).mock.calls.map((call) => call[0])).toEqual(
+    ['type_bomb', 'bomb', 'single_5', 'single_6', 'single_7'].map((name) => cardSoundUrls[name]),
   );
 });
 
@@ -120,15 +162,20 @@ it('mute stops the active clip and clears all pending audio', async () => {
 
 it('does not revive an in-flight decode after stop and re-enable', async () => {
   audio.setEnabled(true);
-  let decode!: (value: object) => void;
-  FakeContext.latest.decodeAudioData.mockImplementationOnce(() => new Promise(resolve => { decode = resolve; }));
+  let decode: ((value: object) => void) | undefined;
+  FakeContext.latest.decodeAudioData.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        decode = resolve;
+      })
+  );
   audio.play('单张', cards(3));
   await flush();
   audio.setEnabled(false);
   audio.setEnabled(true);
   audio.play('单张', cards(4));
   await flush();
-  decode({});
+  decode?.({});
   await flush();
   expect(spoken()).toHaveLength(1);
   expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.single_4, expect.anything());
@@ -136,13 +183,21 @@ it('does not revive an in-flight decode after stop and re-enable', async () => {
 
 it.each(['fetch', 'decode', 'start'])('silently recovers from %s failure', async (failure) => {
   audio.setEnabled(true);
-  if (failure === 'fetch') vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'));
-  if (failure === 'decode') FakeContext.latest.decodeAudioData.mockRejectedValueOnce(new Error('invalid mp3'));
-  if (failure === 'start') vi.spyOn(FakeContext.latest, 'createBufferSource').mockImplementationOnce(() => {
-    const source = new FakeSource();
-    source.start.mockImplementation(() => { throw new Error('blocked'); });
-    return source;
-  });
+  if (failure === 'fetch') {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'));
+  }
+  if (failure === 'decode') {
+    FakeContext.latest.decodeAudioData.mockRejectedValueOnce(new Error('invalid mp3'));
+  }
+  if (failure === 'start') {
+    vi.spyOn(FakeContext.latest, 'createBufferSource').mockImplementationOnce(() => {
+      const source = new FakeSource();
+      source.start.mockImplementation(() => {
+        throw new Error('blocked');
+      });
+      return source;
+    });
+  }
   audio.play('单张', cards(3));
   await flush();
   audio.play('单张', cards(4));
@@ -178,7 +233,10 @@ it('drops stale pending turns and recovers from a stalled decode', async () => {
 });
 
 it.each([
-  ['fetch', 100], ['fetch', 1000], ['decode', 100], ['decode', 1000],
+  ['fetch', 100],
+  ['fetch', 1000],
+  ['decode', 100],
+  ['decode', 1000],
 ] as const)('includes queue time when checking expiry after %s takes %i ms', async (stage, loadMs) => {
   vi.useFakeTimers();
   audio.setEnabled(true);
@@ -187,13 +245,23 @@ it.each([
   audio.play('单张', cards(4));
 
   if (stage === 'fetch') {
-    vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
-      window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), loadMs);
-    }));
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          window.setTimeout(() => {
+            resolve(new Response(new Uint8Array(1)));
+          }, loadMs);
+        })
+    );
   } else {
-    FakeContext.latest.decodeAudioData.mockImplementationOnce(() => new Promise(resolve => {
-      window.setTimeout(() => resolve({}), loadMs);
-    }));
+    FakeContext.latest.decodeAudioData.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          window.setTimeout(() => {
+            resolve({});
+          }, loadMs);
+        })
+    );
   }
 
   // The second play has already waited 2.8 seconds before loading begins.
@@ -205,7 +273,9 @@ it.each([
 
   const expired = loadMs === 1000;
   expect(spoken()).toHaveLength(expired ? 1 : 2);
-  if (!expired) spoken()[1].onended?.();
+  if (!expired) {
+    spoken()[1].onended?.();
+  }
   await flush();
   // Dropping an expired clip must not stop a subsequent fresh announcement.
   audio.play('单张', cards(5));
@@ -219,15 +289,20 @@ it.each([1, 2])('announces %i remaining cards after the hand voice and effect', 
   audio.play('炸弹', cards(7, 4), remaining);
   await flush();
   expect(fetch).toHaveBeenCalledTimes(1);
-  for (let i = 0; i < 2; i++) { spoken()[i].onended?.(); await flush(); }
-  expect(vi.mocked(fetch).mock.calls.map(call => call[0])).toEqual(
-    ['type_bomb', 'bomb', `last${remaining}`].map(name => cardSoundUrls[name]),
+  for (let i = 0; i < 2; i++) {
+    spoken()[i].onended?.();
+    await flush();
+  }
+  expect(vi.mocked(fetch).mock.calls.map((call) => call[0])).toEqual(
+    ['type_bomb', 'bomb', `last${remaining}`].map((name) => cardSoundUrls[name]),
   );
 });
 
 it.each([
-  [true, false, 'bid_call'], [false, false, 'bid_nocall'],
-  [true, true, 'bid_grab'], [false, true, 'bid_nograb'],
+  [true, false, 'bid_call'],
+  [false, false, 'bid_nocall'],
+  [true, true, 'bid_grab'],
+  [false, true, 'bid_nograb'],
 ] as const)('maps confirmed bid=%s grab=%s to %s', async (bid, grab, name) => {
   audio.setEnabled(true);
   audio.bid(bid, grab);
@@ -273,14 +348,19 @@ it('drops queued turn cues without interrupting the current voice', async () => 
 
 it('cannot revive a cancelled turn cue after a delayed decode', async () => {
   audio.setEnabled(true);
-  let decode!: (value: object) => void;
-  FakeContext.latest.decodeAudioData.mockImplementationOnce(() => new Promise(resolve => { decode = resolve; }));
+  let decode: ((value: object) => void) | undefined;
+  FakeContext.latest.decodeAudioData.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        decode = resolve;
+      })
+  );
   audio.turn(true);
   await flush();
   audio.endTurn();
   audio.pass();
   await flush();
-  decode({ duration: 1 });
+  decode?.({ duration: 1 });
   await flush();
   expect(spoken()).toHaveLength(1);
   expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.pass_buyao, expect.anything());
@@ -295,9 +375,12 @@ it('preserves the winning hand before settlement and discards older pending acti
   audio.result(true);
   await flush();
   expect(spoken()[0].stop).toHaveBeenCalledOnce();
-  for (let i = 1; i <= 2; i++) { spoken()[i].onended?.(); await flush(); }
-  expect(vi.mocked(fetch).mock.calls.map(call => call[0])).toEqual(
-    ['pass_buyao', 'type_rocket', 'bomb', 'win'].map(name => cardSoundUrls[name]),
+  for (let i = 1; i <= 2; i++) {
+    spoken()[i].onended?.();
+    await flush();
+  }
+  expect(vi.mocked(fetch).mock.calls.map((call) => call[0])).toEqual(
+    ['pass_buyao', 'type_rocket', 'bomb', 'win'].map((name) => cardSoundUrls[name]),
   );
 });
 
@@ -317,8 +400,11 @@ it.each(['deal', 'win', 'lose'])('allows the long %s clip to finish beyond three
   vi.useFakeTimers();
   audio.setEnabled(true);
   FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 6 });
-  if (name === 'deal') audio.deal();
-  else audio.result(name === 'win');
+  if (name === 'deal') {
+    audio.deal();
+  } else {
+    audio.result(name === 'win');
+  }
   await flush();
   await vi.advanceTimersByTimeAsync(5500);
   expect(spoken()[0].stop).not.toHaveBeenCalled();
@@ -335,9 +421,14 @@ it('does not play a remaining-card alert for a hand that expired while loading',
   await flush();
   audio.play('单张', cards(3), 1);
   await vi.advanceTimersByTimeAsync(2800);
-  vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
-    window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), 1000);
-  }));
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        window.setTimeout(() => {
+          resolve(new Response(new Uint8Array(1)));
+        }, 1000);
+      })
+  );
   spoken()[0].onended?.();
   await flush();
   await vi.advanceTimersByTimeAsync(1000);
@@ -378,9 +469,14 @@ it('drops a queued warning if the turn ends before dealing finishes', async () =
 it('does not start a turn cue whose server deadline passed during loading', async () => {
   vi.useFakeTimers();
   audio.setEnabled(true);
-  vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
-    window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), 1000);
-  }));
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        window.setTimeout(() => {
+          resolve(new Response(new Uint8Array(1)));
+        }, 1000);
+      })
+  );
   audio.turn(true, Date.now() + 500);
   await vi.advanceTimersByTimeAsync(1000);
   expect(spoken()).toHaveLength(0);
@@ -390,9 +486,14 @@ it('seeks a delayed deal load to the shared timeline and stops on official turn'
   vi.useFakeTimers();
   audio.setEnabled(true);
   FakeContext.latest.decodeAudioData.mockResolvedValueOnce({ duration: 3.87 });
-  vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => {
-    window.setTimeout(() => resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) } as Response), 1000);
-  }));
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        window.setTimeout(() => {
+          resolve(new Response(new Uint8Array(1)));
+        }, 1000);
+      })
+  );
   audio.deal(Date.now(), Date.now() + 3870);
   await vi.advanceTimersByTimeAsync(1000);
   expect(spoken()[0].start).toHaveBeenCalledWith(0, 1, 2.87);
@@ -400,15 +501,24 @@ it('seeks a delayed deal load to the shared timeline and stops on official turn'
   expect(spoken()[0].stop).toHaveBeenCalledOnce();
 });
 
-it.each(['muted', 'locked', 'failed', 'expired'] as const)('drops %s deal audio without throwing or replaying later', async mode => {
-  vi.useFakeTimers();
-  if (mode === 'muted') audio.setEnabled(false);
-  if (mode === 'failed' || mode === 'expired') audio.setEnabled(true);
-  if (mode === 'failed') vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'));
-  audio.deal(Date.now() - (mode === 'expired' ? 4000 : 0), Date.now() + (mode === 'expired' ? -130 : 3870));
-  await flush();
-  audio.endDeal();
-  audio.setEnabled(true);
-  await flush();
-  expect(spoken()).toHaveLength(0);
-});
+it.each(['muted', 'locked', 'failed', 'expired'] as const)(
+  'drops %s deal audio without throwing or replaying later',
+  async (mode) => {
+    vi.useFakeTimers();
+    if (mode === 'muted') {
+      audio.setEnabled(false);
+    }
+    if (mode === 'failed' || mode === 'expired') {
+      audio.setEnabled(true);
+    }
+    if (mode === 'failed') {
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'));
+    }
+    audio.deal(Date.now() - (mode === 'expired' ? 4000 : 0), Date.now() + (mode === 'expired' ? -130 : 3870));
+    await flush();
+    audio.endDeal();
+    audio.setEnabled(true);
+    await flush();
+    expect(spoken()).toHaveLength(0);
+  }
+);

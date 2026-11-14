@@ -6,26 +6,46 @@ import { connectGameAudio } from '../src/audio/connectGameAudio';
 import type { GameAudio } from '../src/audio/gameAudio';
 
 class FakeSocket {
-  static OPEN = 1;
+  static readonly OPEN = 1;
   static latest: FakeSocket;
   readyState = 1;
   sent: Uint8Array[] = [];
   onopen?: () => void;
   onmessage?: (event: { data: Uint8Array }) => void;
   onclose?: (event: { code: number }) => void;
-  constructor() { FakeSocket.latest = this; }
+
+  constructor() {
+    FakeSocket.latest = this;
+  }
+
   send(data: Uint8Array) {
     this.sent.push(data);
     const message = decodeMessage(data);
-    if (message.type === 'ping') this.receive('pong', { client_timestamp: (message.payload as { timestamp: number }).timestamp, server_timestamp: Date.now() });
+    if (message.type === 'ping') {
+      this.receive('pong', {
+        client_timestamp: (message.payload as { timestamp: number }).timestamp,
+        server_timestamp: Date.now(),
+      });
+    }
   }
-  close(code = 1000) { this.onclose?.({ code }); }
-  receive(type: string, payload: Record<string, unknown>) { this.onmessage?.({ data: encodeMessage(type, payload) }); }
+
+  close(code = 1000) {
+    this.onclose?.({ code });
+  }
+
+  receive(type: string, payload: Record<string, unknown>) {
+    this.onmessage?.({ data: encodeMessage(type, payload) });
+  }
 }
 
-beforeEach(() => { sessionStorage.clear(); vi.stubGlobal('WebSocket', FakeSocket); });
+beforeEach(() => {
+  sessionStorage.clear();
+  vi.stubGlobal('WebSocket', FakeSocket);
+});
 
-const sentTypes = (socket: FakeSocket) => socket.sent.map((data) => decodeMessage(data).type);
+function sentTypes(socket: FakeSocket) {
+  return socket.sent.map((data) => decodeMessage(data).type);
+}
 
 test('opening queries online count immediately and applies online_count responses', () => {
   vi.useFakeTimers();
@@ -65,24 +85,30 @@ test('queries online count every two five-second heartbeats using one timer', ()
   socket.close();
 });
 
-test.each(['manual', 'replaced', 'network'])('%s disconnect stops heartbeat queries and close cancels retries', (reason) => {
-  vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
-  socket.connect();
-  const transport = FakeSocket.latest;
-  transport.onopen?.();
-  vi.advanceTimersByTime(5000);
-  if (reason === 'manual') socket.close();
-  else transport.close(reason === 'replaced' ? 4001 : 1006);
-  expect(useAppStore.getState().connected).toBe(false);
-  expect(vi.getTimerCount()).toBe(reason === 'network' ? 1 : 0);
-  const messagesBeforeClose = sentTypes(transport);
-  socket.close();
-  expect(vi.getTimerCount()).toBe(0);
-  vi.advanceTimersByTime(20000);
-  expect(sentTypes(transport)).toEqual(messagesBeforeClose);
-  expect(FakeSocket.latest).toBe(transport);
-});
+test.each(['manual', 'replaced', 'network'])(
+  '%s disconnect stops heartbeat queries and close cancels retries',
+  (reason) => {
+    vi.useFakeTimers();
+    const socket = new GameSocket('ws://localhost/ws');
+    socket.connect();
+    const transport = FakeSocket.latest;
+    transport.onopen?.();
+    vi.advanceTimersByTime(5000);
+    if (reason === 'manual') {
+      socket.close();
+    } else {
+      transport.close(reason === 'replaced' ? 4001 : 1006);
+    }
+    expect(useAppStore.getState().connected).toBe(false);
+    expect(vi.getTimerCount()).toBe(reason === 'network' ? 1 : 0);
+    const messagesBeforeClose = sentTypes(transport);
+    socket.close();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(20000);
+    expect(sentTypes(transport)).toEqual(messagesBeforeClose);
+    expect(FakeSocket.latest).toBe(transport);
+  }
+);
 
 test('reconnect queries immediately and restarts the full heartbeat cycle without duplicate timers', () => {
   vi.useFakeTimers();
@@ -134,7 +160,11 @@ test('reload relies on server cookie authentication and removes legacy JS creden
   }
 });
 
-afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 test('a replaced tab stops reconnecting while network failures still retry', () => {
   vi.useFakeTimers();
@@ -156,7 +186,14 @@ test('a replaced tab stops reconnecting while network failures still retry', () 
 });
 
 test('audio only follows confirmed live plays, never sends, errors, snapshots or remounts', () => {
-  const audio = { play: vi.fn(), stop: vi.fn(), unlock: vi.fn(), endDeal: vi.fn(), endTurn: vi.fn(), subscribe: vi.fn(() => () => {}) };
+  const audio = {
+    play: vi.fn(),
+    stop: vi.fn(),
+    unlock: vi.fn(),
+    endDeal: vi.fn(),
+    endTurn: vi.fn(),
+    subscribe: vi.fn(() => () => {}),
+  };
   const socket = new GameSocket('ws://localhost/ws');
   let dispose = connectGameAudio(socket, audio as unknown as GameAudio);
   socket.connect();
@@ -166,14 +203,20 @@ test('audio only follows confirmed live plays, never sends, errors, snapshots or
   socket.send('play_cards', { cards });
   FakeSocket.latest.receive('error', { code: 1, message: '非法出牌' });
   expect(audio.play).not.toHaveBeenCalled();
-  for (const player_id of ['me', 'opponent']) {
-    FakeSocket.latest.receive('card_played', { player_id, cards, hand_type: '单张', cards_left: 16 });
+  for (const playerId of ['me', 'opponent']) {
+    FakeSocket.latest.receive('card_played', { player_id: playerId, cards, hand_type: '单张', cards_left: 16 });
   }
   expect(audio.play).toHaveBeenCalledTimes(2);
   expect(audio.play).toHaveBeenLastCalledWith('单张', cards, 16);
-  FakeSocket.latest.receive('reconnected', { player_id: 'me', room_code: '123456', game_state: {
-    phase: 'playing', last_played: cards, last_player_id: 'opponent',
-  } });
+  FakeSocket.latest.receive('reconnected', {
+    player_id: 'me',
+    room_code: '123456',
+    game_state: {
+      phase: 'playing',
+      last_played: cards,
+      last_player_id: 'opponent',
+    },
+  });
   dispose();
   dispose = connectGameAudio(socket, audio as unknown as GameAudio);
   useAppStore.setState({ drawer: 'history' });
@@ -191,7 +234,14 @@ test('audio only follows confirmed live plays, never sends, errors, snapshots or
 });
 
 test('audio clears on backgrounding/disconnect and gesture listeners are removed on cleanup', () => {
-  const audio = { play: vi.fn(), stop: vi.fn(), unlock: vi.fn(), endDeal: vi.fn(), endTurn: vi.fn(), subscribe: vi.fn(() => () => {}) };
+  const audio = {
+    play: vi.fn(),
+    stop: vi.fn(),
+    unlock: vi.fn(),
+    endDeal: vi.fn(),
+    endTurn: vi.fn(),
+    subscribe: vi.fn(() => () => {}),
+  };
   const socket = new GameSocket('ws://localhost/ws');
   const dispose = connectGameAudio(socket, audio as unknown as GameAudio);
   document.dispatchEvent(new Event('pointerup'));
@@ -211,9 +261,18 @@ test('audio clears on backgrounding/disconnect and gesture listeners are removed
 
 function audioSession() {
   const audio = {
-    play: vi.fn(), bid: vi.fn(), pass: vi.fn(), deal: vi.fn(), turn: vi.fn(), result: vi.fn(),
-    stop: vi.fn(), endDeal: vi.fn(), endTurn: vi.fn(), unlock: vi.fn(), getEnabled: vi.fn(() => true),
-    subscribe: vi.fn((_listener: () => void) => () => {}),
+    play: vi.fn(),
+    bid: vi.fn(),
+    pass: vi.fn(),
+    deal: vi.fn(),
+    turn: vi.fn(),
+    result: vi.fn(),
+    stop: vi.fn(),
+    endDeal: vi.fn(),
+    endTurn: vi.fn(),
+    unlock: vi.fn(),
+    getEnabled: vi.fn(() => true),
+    subscribe: vi.fn((_listener: () => void): (() => void) => () => {}),
   };
   const socket = new GameSocket('ws://localhost/ws');
   const dispose = connectGameAudio(socket, audio as unknown as GameAudio);
@@ -221,11 +280,23 @@ function audioSession() {
   FakeSocket.latest.onopen?.();
   FakeSocket.latest.receive('connected', { player_id: 'me', player_name: 'Me', reconnect_token: 'token' });
   useAppStore.setState({ roomCode: '123456', phase: 'bidding' });
-  const receive = (type: string, payload: Record<string, unknown> = {}) => FakeSocket.latest.receive(type, payload);
-  return { audio, socket, receive, close: () => { dispose(); socket.close(); } };
+  const receive = (type: string, payload: Record<string, unknown> = {}) => {
+    FakeSocket.latest.receive(type, payload);
+  };
+  return {
+    audio,
+    socket,
+    receive,
+    close: () => {
+      dispose();
+      socket.close();
+    },
+  };
 }
 
-const testCards = (count: number) => Array.from({ length: count }, (_, i) => ({ rank: i % 13 + 3, suit: 0, color: 0 }));
+function testCards(count: number) {
+  return Array.from({ length: count }, (_, i) => ({ rank: (i % 13) + 3, suit: 0, color: 0 }));
+}
 
 test('bid/pass sounds require server confirmation and dispatch every call/grab outcome', () => {
   const { audio, socket, receive, close } = audioSession();
@@ -235,9 +306,11 @@ test('bid/pass sounds require server confirmation and dispatch every call/grab o
   }
   expect(audio.bid).not.toHaveBeenCalled();
   expect(audio.pass).not.toHaveBeenCalled();
-  for (const bid of [true, false]) for (const is_grab of [true, false]) {
-    receive('bid_result', { player_id: 'me', bid, is_grab });
-    expect(audio.bid).toHaveBeenLastCalledWith(bid, is_grab);
+  for (const bid of [true, false]) {
+    for (const isGrab of [true, false]) {
+      receive('bid_result', { player_id: 'me', bid, is_grab: isGrab });
+      expect(audio.bid).toHaveBeenLastCalledWith(bid, isGrab);
+    }
   }
   receive('player_pass', { player_id: 'opponent' });
   expect(audio.pass).toHaveBeenCalledOnce();
@@ -262,14 +335,14 @@ test.each([
   ['call', 'bid_turn', false],
   ['grab', 'bid_turn', true],
   ['play', 'play_turn', false],
-] as const)('%s starts silently and warns only the local player once at five seconds', (_stage, type, is_grab) => {
+] as const)('%s starts silently and warns only the local player once at five seconds', (_stage, type, isGrab) => {
   vi.useFakeTimers();
   const { audio, receive, close } = audioSession();
-  receive(type, { player_id: 'opponent', timeout: 10, is_grab });
+  receive(type, { player_id: 'opponent', timeout: 10, is_grab: isGrab });
   vi.advanceTimersByTime(10000);
   expect(audio.turn).not.toHaveBeenCalled();
   const deadline = Date.now() + 10000;
-  receive(type, { player_id: 'me', timeout: 10, is_grab });
+  receive(type, { player_id: 'me', timeout: 10, is_grab: isGrab });
   expect(audio.turn).not.toHaveBeenCalled();
   vi.advanceTimersByTime(4999);
   expect(audio.turn).not.toHaveBeenCalled();
@@ -286,67 +359,103 @@ test.each([
 test('call, grab and counter-grab start silently while confirmed bids and warnings still play', () => {
   vi.useFakeTimers();
   const { audio, receive, close } = audioSession();
-  for (const [player_id, is_grab] of [['me', false], ['opponent', true], ['me', true]] as const) {
+  for (const [playerId, isGrab] of [
+    ['me', false],
+    ['opponent', true],
+    ['me', true],
+  ] as const) {
     const deadline = Date.now() + 10000;
     audio.turn.mockClear();
-    receive('bid_turn', { player_id, is_grab, timeout: 10 });
+    receive('bid_turn', { player_id: playerId, is_grab: isGrab, timeout: 10 });
     expect(audio.turn).not.toHaveBeenCalled();
     vi.advanceTimersByTime(4999);
     expect(audio.turn).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    if (player_id === 'me') expect(audio.turn).toHaveBeenCalledExactlyOnceWith(true, deadline);
-    else expect(audio.turn).not.toHaveBeenCalled();
-    receive('bid_result', { player_id, bid: true, is_grab });
-    expect(audio.bid).toHaveBeenLastCalledWith(true, is_grab);
+    if (playerId === 'me') {
+      expect(audio.turn).toHaveBeenCalledExactlyOnceWith(true, deadline);
+    } else {
+      expect(audio.turn).not.toHaveBeenCalled();
+    }
+    receive('bid_result', { player_id: playerId, bid: true, is_grab: isGrab });
+    expect(audio.bid).toHaveBeenLastCalledWith(true, isGrab);
     expect(audio.endTurn).toHaveBeenCalled();
     vi.advanceTimersByTime(5000);
-    expect(audio.turn).toHaveBeenCalledTimes(player_id === 'me' ? 1 : 0);
+    expect(audio.turn).toHaveBeenCalledTimes(playerId === 'me' ? 1 : 0);
   }
-  expect(audio.bid.mock.calls).toEqual([[true, false], [true, true], [true, true]]);
+  expect(audio.bid.mock.calls).toEqual([
+    [true, false],
+    [true, true],
+    [true, true],
+  ]);
   close();
 });
 
-test.each(['bid_result', 'player_pass', 'card_played', 'game_over'])('%s cancels the warning before its deadline', (type) => {
-  vi.useFakeTimers();
-  const { audio, receive, close } = audioSession();
-  receive('play_turn', { player_id: 'me', timeout: 10 });
-  receive(type, { player_id: 'me', cards: testCards(1), cards_left: 2 });
-  vi.advanceTimersByTime(10000);
-  expect(audio.turn).not.toHaveBeenCalled();
-  expect(audio.endTurn).toHaveBeenCalled();
-  close();
-});
+test.each(['bid_result', 'player_pass', 'card_played', 'game_over'])(
+  '%s cancels the warning before its deadline',
+  (type) => {
+    vi.useFakeTimers();
+    const { audio, receive, close } = audioSession();
+    receive('play_turn', { player_id: 'me', timeout: 10 });
+    receive(type, { player_id: 'me', cards: testCards(1), cards_left: 2 });
+    vi.advanceTimersByTime(10000);
+    expect(audio.turn).not.toHaveBeenCalled();
+    expect(audio.endTurn).toHaveBeenCalled();
+    close();
+  }
+);
 
-test.each(['disconnect', 'leave', 'background', 'pagehide', 'mute', 'dispose'])('%s clears scheduled warnings', (action) => {
-  vi.useFakeTimers();
-  const { audio, receive, close } = audioSession();
-  receive('play_turn', { player_id: 'me', timeout: 10 });
-  if (action === 'disconnect') useAppStore.getState().setConnected(false);
-  if (action === 'leave') useAppStore.getState().leaveLocalRoom();
-  if (action === 'background') {
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
-    document.dispatchEvent(new Event('visibilitychange'));
+test.each(['disconnect', 'leave', 'background', 'pagehide', 'mute', 'dispose'])(
+  '%s clears scheduled warnings',
+  (action) => {
+    vi.useFakeTimers();
+    const { audio, receive, close } = audioSession();
+    receive('play_turn', { player_id: 'me', timeout: 10 });
+    if (action === 'disconnect') {
+      useAppStore.getState().setConnected(false);
+    }
+    if (action === 'leave') {
+      useAppStore.getState().leaveLocalRoom();
+    }
+    if (action === 'background') {
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+    if (action === 'pagehide') {
+      window.dispatchEvent(new Event('pagehide'));
+    }
+    if (action === 'mute') {
+      audio.getEnabled.mockReturnValue(false);
+      const listener = audio.subscribe.mock.calls[0]?.[0];
+      listener?.();
+      audio.getEnabled.mockReturnValue(true);
+    }
+    if (action === 'dispose') {
+      close();
+    }
+    vi.advanceTimersByTime(10000);
+    expect(audio.turn).not.toHaveBeenCalled();
+    if (action !== 'dispose') {
+      close();
+    }
+    vi.restoreAllMocks();
   }
-  if (action === 'pagehide') window.dispatchEvent(new Event('pagehide'));
-  if (action === 'mute') {
-    audio.getEnabled.mockReturnValue(false);
-    audio.subscribe.mock.calls[0][0]();
-    audio.getEnabled.mockReturnValue(true);
-  }
-  if (action === 'dispose') close();
-  vi.advanceTimersByTime(10000);
-  expect(audio.turn).not.toHaveBeenCalled();
-  if (action !== 'dispose') close();
-  vi.restoreAllMocks();
-});
+);
 
 test.each(['bidding', 'playing'])('does not replay the restored %s turn or its warning', (phase) => {
   vi.useFakeTimers();
   const { audio, receive, close } = audioSession();
   const type = phase === 'bidding' ? 'bid_turn' : 'play_turn';
-  receive('reconnected', { player_id: 'me', room_code: '123456', game_state: {
-    phase, current_turn: 'me', hand: testCards(17), last_played: testCards(1), last_player_id: 'opponent',
-  } });
+  receive('reconnected', {
+    player_id: 'me',
+    room_code: '123456',
+    game_state: {
+      phase,
+      current_turn: 'me',
+      hand: testCards(17),
+      last_played: testCards(1),
+      last_player_id: 'opponent',
+    },
+  });
   receive(type, { player_id: 'me', timeout: 10 });
   vi.advanceTimersByTime(10000);
   expect(audio.turn).not.toHaveBeenCalled();
@@ -375,10 +484,17 @@ test('does not replay a cached settlement after reconnect or duplicate a live se
 });
 
 test.each([
-  [false, false, true], [false, true, false], [true, false, false], [true, true, true],
+  [false, false, true],
+  [false, true, false],
+  [true, false, false],
+  [true, true, true],
 ])('settlement uses local landlord=%s and winning landlord=%s to determine won=%s', (mine, winner, won) => {
   const { audio, receive, close } = audioSession();
-  receive('game_over', { winner_id: 'another-player', is_landlord: winner, scores: [{ player_id: 'me', is_landlord: mine }] });
+  receive('game_over', {
+    winner_id: 'another-player',
+    is_landlord: winner,
+    scores: [{ player_id: 'me', is_landlord: mine }],
+  });
   expect(audio.result).toHaveBeenCalledExactlyOnceWith(won);
   close();
 });
@@ -398,7 +514,7 @@ test('authoritative deal rounds replay audio, seek on reconnect, and stop at the
   vi.setSystemTime(now);
   const { audio, receive, close } = audioSession();
   const timing = { deal_id: 'r1', deal_start_at: 100000, deal_end_at: 103870, server_time: 100000 };
-  receive('deal_cards', { cards: Array.from({length:17}, () => ({rank:3,suit:0,color:0})), ...timing });
+  receive('deal_cards', { cards: Array.from({ length: 17 }, () => ({ rank: 3, suit: 0, color: 0 })), ...timing });
   expect(audio.deal).toHaveBeenLastCalledWith(now, now + 3870);
   receive('deal_cards', timing);
   expect(audio.deal).toHaveBeenCalledTimes(1);
@@ -430,11 +546,11 @@ test.each([500, 1000, 2000])('RTT %d: one submission, matching acknowledgement, 
   transport.receive('bid_result', { player_id: 'me', action_token: 'bid-1', bid: true });
   expect(useAppStore.getState().submission).toBe('confirmed');
   expect(useAppStore.getState().submissionMessage).toBe('');
-  expect(sentTypes(transport).filter(t => t === 'bid')).toHaveLength(1);
+  expect(sentTypes(transport).filter((t) => t === 'bid')).toHaveLength(1);
   socket.close();
 });
 
-test.each([true, false])('disconnect during submission resolves committed=%s from snapshot', committed => {
+test.each([true, false])('disconnect during submission resolves committed=%s from snapshot', (committed) => {
   vi.useFakeTimers();
   const socket = new GameSocket('ws://localhost/ws');
   socket.connect();
@@ -452,7 +568,10 @@ test.each([true, false])('disconnect during submission resolves committed=%s fro
   transport.receive('connected', { player_id: 'me' });
   expect(useAppStore.getState().submission).toBe('unknown');
   expect(sessionStorage.getItem('ddz_pending_action')).toContain('play-1');
-  transport.receive('reconnected', { player_id: 'me', game_state: { phase: 'playing', last_action_token: committed ? 'play-1' : '', hand: [{rank: 3}] } });
+  transport.receive('reconnected', {
+    player_id: 'me',
+    game_state: { phase: 'playing', last_action_token: committed ? 'play-1' : '', hand: [{ rank: 3 }] },
+  });
   expect(useAppStore.getState().submission).toBe(committed ? 'confirmed' : 'rejected');
   expect(useAppStore.getState().hand).toHaveLength(1);
   expect(sentTypes(transport)).not.toContain('play_cards');
@@ -465,7 +584,10 @@ test('half-open socket times out and ignores messages from the old transport', (
   socket.connect();
   const transport = FakeSocket.latest;
   transport.onopen?.();
-  transport.send = data => { transport.sent.push(data); }; // blackhole pong
+  // Blackhole pong responses to simulate a half-open connection.
+  transport.send = (data) => {
+    transport.sent.push(data);
+  };
   vi.advanceTimersByTime(15000);
   expect(useAppStore.getState().connected).toBe(false);
   vi.advanceTimersByTime(2500);
@@ -476,14 +598,14 @@ test('half-open socket times out and ignores messages from the old transport', (
   socket.close();
 });
 
-test.each([1, 5])('%d%% heartbeat response loss does not cause false disconnects', loss => {
+test.each([1, 5])('%d%% heartbeat response loss does not cause false disconnects', (loss) => {
   vi.useFakeTimers();
   const socket = new GameSocket('ws://localhost/ws');
   socket.connect();
   const transport = FakeSocket.latest;
   transport.onopen?.();
   let pings = 0;
-  transport.send = data => {
+  transport.send = (data) => {
     transport.sent.push(data);
     const m = decodeMessage(data);
     if (m.type === 'ping' && ++pings % (100 / loss) !== 0) {
@@ -542,31 +664,51 @@ function submitPendingPlay() {
   return socket;
 }
 
-test.each(['quota', 'read-denied', 'storage-disabled'])('reconnect keeps memory pending when storage is %s', failure => {
-  vi.useFakeTimers();
-  if (failure !== 'read-denied') vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
-  if (failure !== 'quota') vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('denied', 'SecurityError'); });
-  const socket = submitPendingPlay();
-  try {
-    FakeSocket.latest.close(1006);
-    vi.advanceTimersByTime(2500);
-    const transport = FakeSocket.latest;
-    transport.onopen?.();
-    transport.receive('connected', { player_id: 'me' });
-    expect(useAppStore.getState().submission).toBe('unknown');
-    transport.receive('reconnected', { player_id: 'me', game_state: {
-      phase: 'playing', current_turn: 'me', turn_token: 'play-2', last_action_token: 'play-1',
-      turn_deadline: Date.now() + 30000, server_time: Date.now(),
-    } });
-    expect(useAppStore.getState().submission).toBe('confirmed');
-    expect(useAppStore.getState().submissionMessage).toBe('');
-    expect(sentTypes(transport)).not.toContain('play_cards');
-    // The recovered page can submit a new turn instead of remaining locked.
-    expect(socket.send('pass', { turn_token: 'play-2' })).toBe(true);
-  } finally { socket.close(); }
-});
+test.each(['quota', 'read-denied', 'storage-disabled'])(
+  'reconnect keeps memory pending when storage is %s',
+  (failure) => {
+    vi.useFakeTimers();
+    if (failure !== 'read-denied') {
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('full', 'QuotaExceededError');
+      });
+    }
+    if (failure !== 'quota') {
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+        throw new DOMException('denied', 'SecurityError');
+      });
+    }
+    const socket = submitPendingPlay();
+    try {
+      FakeSocket.latest.close(1006);
+      vi.advanceTimersByTime(2500);
+      const transport = FakeSocket.latest;
+      transport.onopen?.();
+      transport.receive('connected', { player_id: 'me' });
+      expect(useAppStore.getState().submission).toBe('unknown');
+      transport.receive('reconnected', {
+        player_id: 'me',
+        game_state: {
+          phase: 'playing',
+          current_turn: 'me',
+          turn_token: 'play-2',
+          last_action_token: 'play-1',
+          turn_deadline: Date.now() + 30000,
+          server_time: Date.now(),
+        },
+      });
+      expect(useAppStore.getState().submission).toBe('confirmed');
+      expect(useAppStore.getState().submissionMessage).toBe('');
+      expect(sentTypes(transport)).not.toContain('play_cards');
+      // The recovered page can submit a new turn instead of remaining locked.
+      expect(socket.send('pass', { turn_token: 'play-2' })).toBe(true);
+    } finally {
+      socket.close();
+    }
+  }
+);
 
-test.each([true, false])('reload waits for final recovery response, snapshot available=%s', hasSnapshot => {
+test.each([true, false])('reload waits for final recovery response, snapshot available=%s', (hasSnapshot) => {
   vi.useFakeTimers();
   submitPendingPlay().close();
   const socket = new GameSocket('ws://localhost/ws');
@@ -577,13 +719,20 @@ test.each([true, false])('reload waits for final recovery response, snapshot ava
     transport.receive('connected', { player_id: 'me' });
     expect(useAppStore.getState().submission).toBe('unknown');
     expect(sessionStorage.getItem('ddz_pending_action')).toContain('play-1');
-    transport.receive('reconnected', { player_id: 'me', ...(hasSnapshot ? {
-      game_state: { phase: 'playing', last_action_token: 'play-1' },
-    } : {}) });
+    transport.receive('reconnected', {
+      player_id: 'me',
+      ...(hasSnapshot
+        ? {
+            game_state: { phase: 'playing', last_action_token: 'play-1' },
+          }
+        : {}),
+    });
     expect(useAppStore.getState().submission).toBe(hasSnapshot ? 'confirmed' : 'idle');
     expect(sessionStorage.getItem('ddz_pending_action')).toBeNull();
     expect(sentTypes(transport)).not.toContain('play_cards');
-  } finally { socket.close(); }
+  } finally {
+    socket.close();
+  }
 });
 
 test('identity message alone does not unlock game submissions', () => {
@@ -596,5 +745,7 @@ test('identity message alone does not unlock game submissions', () => {
     useAppStore.setState({ currentTurn: 'me', bidToken: 'bid-1', timerStart: Date.now(), timeout: 30 });
     expect(socket.send('bid', { bid: true, bid_token: 'bid-1' })).toBe(false);
     expect(sentTypes(transport)).not.toContain('bid');
-  } finally { socket.close(); }
+  } finally {
+    socket.close();
+  }
 });

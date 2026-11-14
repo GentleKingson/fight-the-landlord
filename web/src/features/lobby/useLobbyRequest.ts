@@ -1,27 +1,67 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { GameSocket } from '../../transport/wsClient';
 import { MsgType, type MessageType } from '../../protocol/types';
+import type { GameSocket } from '../../transport/wsClient';
 
-// These three lobby reads have distinct response types and no request IDs.
-export function useLobbyRequest(socket: GameSocket, request: MessageType, response: MessageType, immediate = true) {
+const LOBBY_REQUEST_TIMEOUT_MS = 10_000;
+const LEADERBOARD_LIMIT = 30;
+
+/** State and retry handle returned by `useLobbyRequest`. */
+export interface LobbyRequestResult {
+  status: string;
+  retry: () => void;
+  requested: boolean;
+}
+
+/**
+ * Issues a lobby read request (`get_leaderboard`, `get_stats`, `get_room_list`)
+ * and tracks loading/error status. These three lobby reads have distinct response
+ * types and no request IDs.
+ */
+export function useLobbyRequest(
+  socket: GameSocket,
+  request: MessageType,
+  response: MessageType,
+  immediate = true
+): LobbyRequestResult {
   const isDemo = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demo');
   const [status, setStatus] = useState(immediate && !isDemo ? '正在加载…' : '');
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (isDemo || (!immediate && attempt === 0)) return;
     let done = false;
-    const finish = (message: string) => { done = true; setStatus(message); };
+    const finish = (message: string) => {
+      done = true;
+      setStatus(message);
+    };
     setStatus('正在加载…');
-    const unsubscribe = socket.subscribe(message => {
+    const unsubscribe = socket.subscribe((message) => {
       if (done) return;
-      if (message.type === response) finish('');
-      if (message.type === MsgType.Error) finish((message.payload as { message?: string }).message || '请求失败，请重试');
+      if (message.type === response) {
+        finish('');
+      }
+      if (message.type === MsgType.Error) {
+        finish((message.payload as { message?: string }).message || '请求失败，请重试');
+      }
     });
-    const sent = socket.send(request, request === MsgType.GetLeaderboard ? { type: 'total', offset: 0, limit: 30 } : undefined);
-    if (sent === false) finish('连接不可用，请连接恢复后重试');
-    const timer = window.setTimeout(() => { if (!done) finish('请求超时，请重试'); }, 10000);
-    return () => { unsubscribe(); window.clearTimeout(timer); };
+    const sent = socket.send(
+      request,
+      request === MsgType.GetLeaderboard ? { type: 'total', offset: 0, limit: LEADERBOARD_LIMIT } : undefined
+    );
+    if (sent === false) {
+      finish('连接不可用，请连接恢复后重试');
+    }
+    const timer = window.setTimeout(() => {
+      if (!done) {
+        finish('请求超时，请重试');
+      }
+    }, LOBBY_REQUEST_TIMEOUT_MS);
+    return () => {
+      unsubscribe();
+      window.clearTimeout(timer);
+    };
   }, [socket, request, response, attempt, immediate, isDemo]);
-  const retry = useCallback(() => setAttempt(value => value + 1), []);
+  const retry = useCallback(() => {
+    setAttempt((value) => value + 1);
+  }, []);
   return { status, retry, requested: isDemo || immediate || attempt > 0 };
 }

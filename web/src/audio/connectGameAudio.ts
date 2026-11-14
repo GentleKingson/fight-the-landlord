@@ -5,31 +5,41 @@ import { gameAudio, type GameAudio } from './gameAudio';
 
 const WARNING_SECONDS = 5;
 
-// App lifetime, not table-render lifetime: only live socket messages can speak.
+/**
+ * Connects live socket messages and page lifecycle events to game sound effects.
+ * Bound to app lifetime rather than table-render lifetime so only live socket messages speak.
+ */
 export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudio): () => void {
   let warningTimer: number | undefined;
   let replayTurn: { type: string; playerId: string } | null = null;
   let replayResult = false;
   let dealt = false;
-  let dealID = '';
+  let dealId = '';
   const endTurn = () => {
     window.clearInterval(warningTimer);
     warningTimer = undefined;
     audio.endTurn();
   };
-  const stop = () => { endTurn(); audio.stop(); };
-  const unsubscribe = socket.subscribe(message => {
+  const stop = () => {
+    endTurn();
+    audio.stop();
+  };
+  const unsubscribe = socket.subscribe((message) => {
     const state = useAppStore.getState();
     if (message.type === MsgType.Reconnected) {
       stop();
       const snapshot = (message.payload as IncomingPayloadMap['reconnected']).game_state;
       // The server follows the snapshot with a restored turn or cached settlement.
-      replayTurn = snapshot && ['bidding', 'playing'].includes(snapshot.phase)
-        ? { type: snapshot.phase === 'bidding' ? MsgType.BidTurn : MsgType.PlayTurn, playerId: snapshot.current_turn }
-        : null;
+      replayTurn =
+        snapshot && ['bidding', 'playing'].includes(snapshot.phase)
+          ? {
+              type: snapshot.phase === 'bidding' ? MsgType.BidTurn : MsgType.PlayTurn,
+              playerId: snapshot.current_turn
+            }
+          : null;
       replayResult = snapshot?.phase === 'ended';
       dealt = Boolean(snapshot);
-      dealID = snapshot?.deal_id ?? '';
+      dealId = snapshot?.deal_id ?? '';
       if (snapshot?.phase === 'dealing' && state.deal && state.deal.endAt > Date.now()) {
         audio.deal(state.deal.startAt, state.deal.endAt);
       }
@@ -38,21 +48,27 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
     if (message.type === MsgType.GameStart) {
       stop();
       replayTurn = null;
-      replayResult = dealt = false;
-      dealID = '';
+      replayResult = false;
+      dealt = false;
+      dealId = '';
       return;
     }
-    if (!state.connected || !['dealing', 'bidding', 'playing', 'game_over'].includes(state.phase)) return;
+    if (!state.connected || !['dealing', 'bidding', 'playing', 'game_over'].includes(state.phase)) {
+      return;
+    }
     switch (message.type) {
       case MsgType.DealCards: {
         const payload = message.payload as IncomingPayloadMap['deal_cards'];
         // The landlord also receives a 20-card hand after taking the bottom cards.
-        if (payload.deal_id && payload.deal_id !== dealID && state.deal) {
+        if (payload.deal_id && payload.deal_id !== dealId && state.deal) {
           endTurn();
-          dealID = payload.deal_id;
+          dealId = payload.deal_id;
           audio.deal(state.deal.startAt, state.deal.endAt);
           dealt = true;
-        } else if (!payload.deal_id && !dealt && payload.cards?.length === 17) { audio.deal(); dealt = true; }
+        } else if (!payload.deal_id && !dealt && payload.cards?.length === 17) {
+          audio.deal();
+          dealt = true;
+        }
         break;
       }
       case MsgType.BidTurn:
@@ -62,7 +78,15 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
         const payload = message.payload as IncomingPayloadMap['play_turn'];
         const restored = replayTurn?.type === message.type && replayTurn.playerId === payload.player_id;
         replayTurn = null;
-        if (restored || payload.player_id !== state.playerId || payload.timeout <= 0 || document.hidden || !audio.getEnabled()) break;
+        if (
+          restored ||
+          payload.player_id !== state.playerId ||
+          payload.timeout <= 0 ||
+          document.hidden ||
+          !audio.getEnabled()
+        ) {
+          break;
+        }
         let warned = false;
         // Poll the shared corrected deadline so a later RTT sample updates audio
         // as well as the visible countdown, without repeating a warning.
@@ -70,7 +94,10 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
           const current = useAppStore.getState();
           const deadline = current.timerStart + current.timeout * 1000;
           const remaining = deadline - Date.now();
-          if (remaining <= 0) { endTurn(); return; }
+          if (remaining <= 0) {
+            endTurn();
+            return;
+          }
           if (!warned && remaining <= WARNING_SECONDS * 1000) {
             warned = true;
             audio.turn(true, deadline);
@@ -104,19 +131,39 @@ export function connectGameAudio(socket: GameSocket, audio: GameAudio = gameAudi
         if (replayResult) break;
         replayResult = true;
         const payload = message.payload as IncomingPayloadMap['game_over'];
-        const me = payload.scores?.find(score => score.player_id === state.playerId)
-          ?? state.players.find(player => player.id === state.playerId);
-        if (me) audio.result(me.is_landlord === payload.is_landlord);
+        const me =
+          payload.scores?.find((score) => score.player_id === state.playerId) ??
+          state.players.find((player) => player.id === state.playerId);
+        if (me) {
+          audio.result(me.is_landlord === payload.is_landlord);
+        }
         break;
       }
+      default:
+        break;
     }
   });
   const unsubscribeStore = useAppStore.subscribe((state, previous) => {
-    if (!state.connected || state.roomCode !== previous.roomCode ||
-        !['dealing', 'bidding', 'playing', 'game_over'].includes(state.phase)) stop();
+    if (
+      !state.connected ||
+      state.roomCode !== previous.roomCode ||
+      !['dealing', 'bidding', 'playing', 'game_over'].includes(state.phase)
+    ) {
+      stop();
+    }
   });
-  const unsubscribeAudio = audio.subscribe(() => { if (!audio.getEnabled()) endTurn(); });
-  const onVisibility = () => { if (document.hidden) stop(); else audio.unlock(); };
+  const unsubscribeAudio = audio.subscribe(() => {
+    if (!audio.getEnabled()) {
+      endTurn();
+    }
+  });
+  const onVisibility = () => {
+    if (document.hidden) {
+      stop();
+    } else {
+      audio.unlock();
+    }
+  };
   document.addEventListener('pointerup', audio.unlock);
   document.addEventListener('touchend', audio.unlock);
   window.addEventListener('pageshow', audio.unlock);

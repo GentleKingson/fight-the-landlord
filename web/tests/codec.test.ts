@@ -2,14 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { decodeMessage, encodeMessage } from '../src/protocol/codec';
 import { MsgType } from '../src/protocol/types';
 
+interface DecodedBotPlayer {
+  is_bot: boolean;
+}
+
+interface DecodedBotPayload {
+  players: DecodedBotPlayer[];
+  game_state: { players: DecodedBotPlayer[] };
+}
+
 describe('protocol codec', () => {
-  it.each([MsgType.GameStart, MsgType.Reconnected])('preserves explicit bot identity in %s messages', type => {
-    const players = [{ id: 'human', name: '🤖不是机器人', is_bot: false }, { id: 'bot', name: '小王', is_bot: true }];
+  it.each([MsgType.GameStart, MsgType.Reconnected])('preserves explicit bot identity in %s messages', (type) => {
+    const players = [
+      { id: 'human', name: '🤖不是机器人', is_bot: false },
+      { id: 'bot', name: '小王', is_bot: true },
+    ];
     const payload = type === MsgType.GameStart ? { players } : { game_state: { players } };
     const decoded = decodeMessage(encodeMessage(type, payload));
-    const result = decoded.payload as { players: { is_bot: boolean }[]; game_state: { players: { is_bot: boolean }[] } };
+    const result = decoded.payload as DecodedBotPayload;
     const actual = type === MsgType.GameStart ? result.players : result.game_state.players;
-    expect(actual.map(player => player.is_bot)).toEqual([false, true]);
+    expect(actual.map((player) => player.is_bot)).toEqual([false, true]);
   });
 
   it('round trips room join payloads', () => {

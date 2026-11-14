@@ -1,35 +1,110 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { RulesPanel } from '../../shared/ui/RulesPanel';
-import { DealAnimation } from './DealAnimation';
-import { useDealPresentation } from './useDealPresentation';
-import { assignBotAvatars } from './botAvatars';
-import { PlayerAvatar } from './PlayerAvatar';
-import { MsgType } from '../../protocol/types';
-import type { GameSocket } from '../../transport/wsClient';
-import { useAppStore, type AppState, type SeatAction, type TableAction } from '../../stores/appStore';
-import { cardKey, generateSimpleSuggestions, sortPlayedCards, summarizeHand } from '../../shared/cards/cardModel';
-import { canBeat, handSignature, parseHand } from '../../shared/cards/rules';
+import { SoundToggle } from '../../audio/SoundToggle';
+import { MsgType, type CardInfo, type Phase, type PlayerInfo, type UtilityDrawer } from '../../protocol/types';
 import { Card } from '../../shared/cards/Card';
 import { Hand } from '../../shared/cards/Hand';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
+import { cardKey, generateSimpleSuggestions, sortPlayedCards, summarizeHand } from '../../shared/cards/cardModel';
+import { canBeat, handSignature, parseHand } from '../../shared/cards/rules';
 import { Icon } from '../../shared/ui/Icon';
-import { SoundToggle } from '../../audio/SoundToggle';
-import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
+import { RulesPanel } from '../../shared/ui/RulesPanel';
+import { useAppStore, type AppState, type SeatAction, type TableAction } from '../../stores/appStore';
+import type { GameSocket } from '../../transport/wsClient';
+import { DealAnimation } from './DealAnimation';
+import { PlayerAvatar } from './PlayerAvatar';
+import { assignBotAvatars } from './botAvatars';
+import { useDealPresentation } from './useDealPresentation';
 
-interface GameTableProps {
+/** Props for the main live game table view. */
+export interface GameTableProps {
   socket: GameSocket;
 }
 
-const landscape = window.matchMedia?.('(orientation: landscape)');
-function subscribeOrientation(update: () => void) {
-  landscape?.addEventListener('change', update);
-  return () => landscape?.removeEventListener('change', update);
+interface HintSession {
+  context: string;
+  suggestions: CardInfo[][];
 }
-const isLandscape = () => landscape?.matches ?? false;
+
+interface SeatPlayedCardsProps {
+  player?: PlayerInfo;
+  action?: SeatAction;
+  side: 'left' | 'me' | 'right';
+  focusPlayerId: string;
+}
+
+interface BottomCardsProps {
+  cards: CardInfo[];
+  revealed: boolean;
+}
+
+interface ToolButtonProps {
+  drawer: UtilityDrawer;
+  label: string;
+  icon: 'counter' | 'history' | 'rules';
+}
+
+interface SeatPanelProps {
+  player?: PlayerInfo;
+  avatarSrc?: string;
+  side: 'left' | 'right';
+  active: boolean;
+  showTurn: boolean;
+  action?: SeatAction;
+}
+
+interface PlayerBadgeProps {
+  player: PlayerInfo;
+  avatarSrc?: string;
+  active: boolean;
+  action?: SeatAction;
+}
+
+interface ActionBarProps extends GameTableProps {
+  isMyTurn: boolean;
+  phase: Phase;
+}
+
+interface ActionSummaryProps {
+  selectedCount: number;
+  summary: string;
+  reason?: string;
+  blocked?: boolean;
+}
+
+interface UtilityDrawerPanelProps {
+  drawer: UtilityDrawer;
+  onClose: () => void;
+}
+
+interface CounterPanelProps {
+  counter: Record<number, number>;
+}
+
+interface HistoryPanelProps {
+  actions: TableAction[];
+}
+
+interface ArrangedSeats {
+  me?: PlayerInfo;
+  left?: PlayerInfo;
+  right?: PlayerInfo;
+}
+
+const landscape = window.matchMedia?.('(orientation: landscape)');
+
+function subscribeOrientation(update: () => void): () => void {
+  landscape?.addEventListener('change', update);
+  return () => {
+    landscape?.removeEventListener('change', update);
+  };
+}
+
+function isLandscape(): boolean {
+  return landscape?.matches ?? false;
+}
 
 function selectTargetPlayerId(state: AppState): string {
-  return state.phase === 'playing' && !state.mustPlay && state.lastPlayed.length > 0
-    ? state.lastPlayedBy : '';
+  return state.phase === 'playing' && !state.mustPlay && state.lastPlayed.length > 0 ? state.lastPlayedBy : '';
 }
 
 function hasSeatPlay(player: PlayerInfo | undefined, seatActions: Record<string, SeatAction>): boolean {
@@ -42,6 +117,7 @@ function seatActionLabel(action?: SeatAction): string {
   return action?.type === 'bid' ? action.label || '' : action?.type === 'pass' ? '不出' : '';
 }
 
+/** Renders the active Dou Dizhu table across dealing, bidding, and card-play phases. */
 export function GameTable({ socket }: GameTableProps) {
   const playerId = useAppStore((state) => state.playerId);
   const players = useAppStore((state) => state.players);
@@ -75,18 +151,28 @@ export function GameTable({ socket }: GameTableProps) {
   const meHasPlay = showSeatPlays && hasSeatPlay(seats.me, seatActions);
   const hasOpponentAction = Boolean(
     (seats.left && seatActionLabel(seatActions[seats.left.id])) ||
-    (seats.right && seatActionLabel(seatActions[seats.right.id]))
+      (seats.right && seatActionLabel(seatActions[seats.right.id]))
   );
   const focusPlayerId = useMemo(() => {
     if (!showSeatPlays) return '';
-    if (targetPlayerId && seatActions[targetPlayerId]?.type === 'play' && seatActions[targetPlayerId]?.cards?.length) {
+    if (
+      targetPlayerId &&
+      seatActions[targetPlayerId]?.type === 'play' &&
+      seatActions[targetPlayerId]?.cards?.length
+    ) {
       return targetPlayerId;
     }
-    if (lastPlayedBy && seatActions[lastPlayedBy]?.type === 'play' && seatActions[lastPlayedBy]?.cards?.length) {
+    if (
+      lastPlayedBy &&
+      seatActions[lastPlayedBy]?.type === 'play' &&
+      seatActions[lastPlayedBy]?.cards?.length
+    ) {
       return lastPlayedBy;
     }
     for (const candidate of [seats.left, seats.right, seats.me]) {
-      if (hasSeatPlay(candidate, seatActions)) return candidate!.id;
+      if (candidate && hasSeatPlay(candidate, seatActions)) {
+        return candidate.id;
+      }
     }
     return '';
   }, [showSeatPlays, targetPlayerId, lastPlayedBy, seatActions, seats.left, seats.right, seats.me]);
@@ -97,8 +183,10 @@ export function GameTable({ socket }: GameTableProps) {
     leftHasPlay && !rightHasPlay ? 'felt-table--only-left' : '',
     rightHasPlay && !leftHasPlay ? 'felt-table--only-right' : '',
     meHasPlay ? 'felt-table--has-me' : '',
-    focusPlayerId ? 'felt-table--has-focus' : '',
-  ].filter(Boolean).join(' ');
+    focusPlayerId ? 'felt-table--has-focus' : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <main className="table-screen">
@@ -123,25 +211,59 @@ export function GameTable({ socket }: GameTableProps) {
         </div>
       </header>
 
-      <section className={`table-arena${hasOpponentAction ? ' table-arena--has-opp-action' : ''}`} aria-label="斗地主牌桌">
+      <section
+        className={`table-arena${hasOpponentAction ? ' table-arena--has-opp-action' : ''}`}
+        aria-label="斗地主牌桌"
+      >
         <div className="opponent-row">
-          <SeatPanel player={seats.left} avatarSrc={seats.left ? botAvatars.get(seats.left.id) : undefined} side="left" showTurn={useTurnColumn && phase !== 'dealing'} active={currentTurn === seats.left?.id} action={seats.left ? seatActions[seats.left.id] : undefined} />
+          <SeatPanel
+            player={seats.left}
+            avatarSrc={seats.left ? botAvatars.get(seats.left.id) : undefined}
+            side="left"
+            showTurn={useTurnColumn && phase !== 'dealing'}
+            active={currentTurn === seats.left?.id}
+            action={seats.left ? seatActions[seats.left.id] : undefined}
+          />
           <BottomCards cards={bottomCards} revealed={bottomCardsRevealed} />
-          <SeatPanel player={seats.right} avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined} side="right" showTurn={useTurnColumn && phase !== 'dealing'} active={currentTurn === seats.right?.id} action={seats.right ? seatActions[seats.right.id] : undefined} />
+          <SeatPanel
+            player={seats.right}
+            avatarSrc={seats.right ? botAvatars.get(seats.right.id) : undefined}
+            side="right"
+            showTurn={useTurnColumn && phase !== 'dealing'}
+            active={currentTurn === seats.right?.id}
+            action={seats.right ? seatActions[seats.right.id] : undefined}
+          />
         </div>
 
         <div className={feltTableClassName}>
           {phase === 'dealing' ? (
             <div className="deal-origin">
-              <span className="deal-animation__label">{presentation.finished ? '等待叫地主通知…' : '正在发牌…'}</span>
+              <span className="deal-animation__label">
+                {presentation.finished ? '等待叫地主通知…' : '正在发牌…'}
+              </span>
             </div>
           ) : phase === 'bidding' ? (
             <div className="table-center-hint">等待叫抢地主</div>
           ) : (
             <>
-              <SeatPlayedCards player={seats.left} action={seats.left ? seatActions[seats.left.id] : undefined} side="left" focusPlayerId={focusPlayerId} />
-              <SeatPlayedCards player={seats.me} action={seats.me ? seatActions[seats.me.id] : undefined} side="me" focusPlayerId={focusPlayerId} />
-              <SeatPlayedCards player={seats.right} action={seats.right ? seatActions[seats.right.id] : undefined} side="right" focusPlayerId={focusPlayerId} />
+              <SeatPlayedCards
+                player={seats.left}
+                action={seats.left ? seatActions[seats.left.id] : undefined}
+                side="left"
+                focusPlayerId={focusPlayerId}
+              />
+              <SeatPlayedCards
+                player={seats.me}
+                action={seats.me ? seatActions[seats.me.id] : undefined}
+                side="me"
+                focusPlayerId={focusPlayerId}
+              />
+              <SeatPlayedCards
+                player={seats.right}
+                action={seats.right ? seatActions[seats.right.id] : undefined}
+                side="right"
+                focusPlayerId={focusPlayerId}
+              />
             </>
           )}
         </div>
@@ -153,8 +275,13 @@ export function GameTable({ socket }: GameTableProps) {
 
       <section className="hand-zone">
         <div className="hand-heading">
-          <strong>{seats.me?.name || '我'} · {phase === 'dealing' || phase === 'bidding' ? '等待定地主' : seats.me?.is_landlord ? '地主' : '农民'}</strong>
-          <span className={phase === 'playing' && hand.length <= 2 ? 'cards-warning' : undefined}>{phase === 'playing' && hand.length <= 2 ? '⚠ ' : ''}手牌 {presentation.visibleCount} 张</span>
+          <strong>
+            {seats.me?.name || '我'} ·{' '}
+            {phase === 'dealing' || phase === 'bidding' ? '等待定地主' : seats.me?.is_landlord ? '地主' : '农民'}
+          </strong>
+          <span className={phase === 'playing' && hand.length <= 2 ? 'cards-warning' : undefined}>
+            {phase === 'playing' && hand.length <= 2 ? '⚠ ' : ''}手牌 {presentation.visibleCount} 张
+          </span>
         </div>
         <Hand
           cards={hand}
@@ -167,22 +294,18 @@ export function GameTable({ socket }: GameTableProps) {
       </section>
 
       {phase === 'dealing' && <DealAnimation deal={deal} count={hand.length} {...presentation} />}
-      <UtilityDrawer key={roomCode} drawer={drawer} onClose={() => setDrawer('none')} />
+      <UtilityDrawer
+        key={roomCode}
+        drawer={drawer}
+        onClose={() => {
+          setDrawer('none');
+        }}
+      />
     </main>
   );
 }
 
-function SeatPlayedCards({
-  player,
-  action,
-  side,
-  focusPlayerId,
-}: {
-  player?: PlayerInfo;
-  action?: SeatAction;
-  side: 'left' | 'me' | 'right';
-  focusPlayerId: string;
-}) {
+function SeatPlayedCards({ player, action, side, focusPlayerId }: SeatPlayedCardsProps) {
   const targetPlayerId = useAppStore(selectTargetPlayerId);
   const cards = action?.type === 'play' ? action.cards : undefined;
   const isTarget = Boolean(cards?.length && targetPlayerId && player?.id === targetPlayerId);
@@ -192,19 +315,23 @@ function SeatPlayedCards({
       className={`played-seat played-seat--${side}${isTarget ? ' played-seat--target' : ''}${isFocus ? ' played-seat--focus' : ''}`}
       aria-label={player && cards?.length ? `${player.name}的出牌` : undefined}
     >
-      {cards?.length ? <PlayedCards cards={cards} handType={action?.hand_type} playerName={player?.name} isTarget={isTarget} /> : null}
+      {cards?.length ? (
+        <PlayedCards cards={cards} handType={action?.hand_type} playerName={player?.name} isTarget={isTarget} />
+      ) : null}
     </section>
   );
 }
 
-function BottomCards({ cards, revealed }: { cards: CardInfo[]; revealed: boolean }) {
+function BottomCards({ cards, revealed }: BottomCardsProps) {
   return (
     <div className={`bottom-cards ${revealed ? 'is-revealed' : 'is-hidden'}`} aria-label="底牌">
       <span>{revealed ? '底牌' : '底牌未揭'}</span>
       <div>
-        {revealed && cards.length ? cards.map((card, index) => (
-          <Card key={`${card.suit}_${card.rank}_${index}`} card={card} size="mini" />
-        )) : (
+        {revealed && cards.length ? (
+          cards.map((card, index) => (
+            <Card key={`${card.suit}_${card.rank}_${index}`} card={card} size="mini" />
+          ))
+        ) : (
           <>
             <span className="mini-card-placeholder" />
             <span className="mini-card-placeholder" />
@@ -216,7 +343,7 @@ function BottomCards({ cards, revealed }: { cards: CardInfo[]; revealed: boolean
   );
 }
 
-function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: string; icon: 'counter' | 'history' | 'rules' }) {
+function ToolButton({ drawer, label, icon }: ToolButtonProps) {
   const setDrawer = useAppStore((state) => state.setDrawer);
   const open = useAppStore((state) => state.drawer === drawer);
   return (
@@ -224,7 +351,9 @@ function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: str
       type="button"
       className="tool-button"
       data-drawer={drawer}
-      onClick={() => setDrawer(open ? 'none' : drawer)}
+      onClick={() => {
+        setDrawer(open ? 'none' : drawer);
+      }}
       title={label}
       aria-label={label}
       aria-expanded={open}
@@ -236,7 +365,7 @@ function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: str
   );
 }
 
-function SeatPanel({ player, avatarSrc, side, active, action, showTurn }: { player?: PlayerInfo; avatarSrc?: string; side: 'left' | 'right'; active: boolean; showTurn: boolean; action?: SeatAction }) {
+function SeatPanel({ player, avatarSrc, side, active, action, showTurn }: SeatPanelProps) {
   if (!player) {
     return <aside className={`seat-panel seat-panel--${side}`} aria-hidden="true" />;
   }
@@ -248,8 +377,8 @@ function SeatPanel({ player, avatarSrc, side, active, action, showTurn }: { play
   );
 }
 
-function PlayerBadge({ player, avatarSrc, active, action }: { player: PlayerInfo; avatarSrc?: string; active: boolean; action?: SeatAction }) {
-  const phase = useAppStore(state => state.phase);
+function PlayerBadge({ player, avatarSrc, active, action }: PlayerBadgeProps) {
+  const phase = useAppStore((state) => state.phase);
   const pendingRole = phase === 'dealing' || phase === 'bidding';
   const low = phase === 'playing' && player.cards_count > 0 && player.cards_count <= 2;
   const actionLabel = seatActionLabel(action);
@@ -257,11 +386,22 @@ function PlayerBadge({ player, avatarSrc, active, action }: { player: PlayerInfo
     <div className={`player-badge ${active ? 'is-active' : ''} ${player.is_landlord ? 'is-landlord' : ''}`}>
       <PlayerAvatar name={player.name} src={avatarSrc} />
       <div className="player-info">
-        <div className="player-identity"><strong title={player.name}>{player.name}</strong>
-        <span>{pendingRole ? '身份待定' : player.is_landlord ? '地主' : '农民'}{active ? ' · 行动中' : ''}</span></div>
-        <span className={low ? 'cards-warning' : 'cards-remaining'} role={low ? 'status' : undefined}>{low ? '⚠ ' : ''}剩余 <b>{player.cards_count || 0}</b> 张</span>
+        <div className="player-identity">
+          <strong title={player.name}>{player.name}</strong>
+          <span>
+            {pendingRole ? '身份待定' : player.is_landlord ? '地主' : '农民'}
+            {active ? ' · 行动中' : ''}
+          </span>
+        </div>
+        <span className={low ? 'cards-warning' : 'cards-remaining'} role={low ? 'status' : undefined}>
+          {low ? '⚠ ' : ''}剩余 <b>{player.cards_count || 0}</b> 张
+        </span>
       </div>
-      {actionLabel ? <em className="player-action" title={actionLabel}>{actionLabel}</em> : null}
+      {actionLabel ? (
+        <em className="player-action" title={actionLabel}>
+          {actionLabel}
+        </em>
+      ) : null}
       {!player.online ? <em className="player-offline">离线</em> : null}
     </div>
   );
@@ -280,16 +420,27 @@ function TurnBanner() {
   const targetPlayerId = useAppStore(selectTargetPlayerId);
   const lastPlayedName = useAppStore((state) => state.lastPlayedName);
   const mustPlay = useAppStore((state) => state.mustPlay);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (phase === 'game_over') return;
-    const id = window.setInterval(() => setNow(Date.now()), 400);
-    return () => window.clearInterval(id);
+    const id = window.setInterval(() => {
+      setNow(Date.now());
+    }, 400);
+    return () => {
+      window.clearInterval(id);
+    };
   }, [phase]);
 
   if (phase === 'game_over') {
-    return <div className="turn-banner" role="status"><div className="turn-banner__copy"><strong>{winnerName} 获胜</strong><span>本局已结束，即将显示结算</span></div></div>;
+    return (
+      <div className="turn-banner" role="status">
+        <div className="turn-banner__copy">
+          <strong>{winnerName} 获胜</strong>
+          <span>本局已结束，即将显示结算</span>
+        </div>
+      </div>
+    );
   }
 
   const remaining = timeout ? Math.max(0, Math.ceil(timeout - Math.max(0, now - timerStart) / 1000)) : 0;
@@ -297,25 +448,36 @@ function TurnBanner() {
   const isMe = currentTurn === playerId;
   const lastBid = [...recentActions].reverse().find((action) => action.type === 'bid');
   const title = isMe ? '轮到你' : `等待 ${actor?.name || '玩家'}`;
-  const subtitle = phase === 'bidding'
-    ? (lastBid?.label ? `${lastBid.player_name || '玩家'}：${lastBid.label}` : isGrabTurn ? '抢地主阶段' : '叫地主阶段')
-    : mustPlay ? '新一轮，请出牌'
-    : targetPlayerId ? `跟牌目标：${players.find(player => player.id === targetPlayerId)?.name || lastPlayedName || '玩家'}`
-    : '出牌阶段';
+  const subtitle =
+    phase === 'bidding'
+      ? lastBid?.label
+        ? `${lastBid.player_name || '玩家'}：${lastBid.label}`
+        : isGrabTurn
+          ? '抢地主阶段'
+          : '叫地主阶段'
+      : mustPlay
+        ? '新一轮，请出牌'
+        : targetPlayerId
+          ? `跟牌目标：${players.find((player) => player.id === targetPlayerId)?.name || lastPlayedName || '玩家'}`
+          : '出牌阶段';
 
   return (
-    <div className={`turn-banner ${isMe ? 'is-mine' : ''} ${isMe && remaining > 0 && remaining <= 5 ? 'is-urgent' : ''}`}>
+    <div
+      className={`turn-banner ${isMe ? 'is-mine' : ''} ${isMe && remaining > 0 && remaining <= 5 ? 'is-urgent' : ''}`}
+    >
       {phase !== 'dealing' ? <time>{remaining || 0}</time> : null}
       <div className="turn-banner__copy" role="status" aria-atomic="true">
         <strong>{phase === 'dealing' ? '正在发牌' : title}</strong>
-        <span className={phase === 'playing' ? 'turn-banner__play-hint' : undefined}>{phase === 'dealing' ? '发牌结束后开始叫地主' : subtitle}</span>
+        <span className={phase === 'playing' ? 'turn-banner__play-hint' : undefined}>
+          {phase === 'dealing' ? '发牌结束后开始叫地主' : subtitle}
+        </span>
       </div>
     </div>
   );
 }
 
-function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boolean; phase: string }) {
-  const hintSession = useRef<{ context: string; suggestions: CardInfo[][] } | null>(null);
+function ActionBar({ socket, isMyTurn, phase }: ActionBarProps) {
+  const hintSession = useRef<HintSession | null>(null);
   const hand = useAppStore((state) => state.hand);
   const selectedCards = useAppStore((state) => state.selectedCards);
   const lastPlayed = useAppStore((state) => state.lastPlayed);
@@ -325,20 +487,28 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
   const selected = hand.filter((card) => selectedCards.has(cardKey(card)));
   const summary = summarizeHand(selected);
   const parsedHand = parseHand(selected);
-  const connected = useAppStore(state => state.connected);
-  const submission = useAppStore(state => state.submission);
+  const connected = useAppStore((state) => state.connected);
+  const submission = useAppStore((state) => state.submission);
   const blocked = !connected || submission === 'pending' || submission === 'unknown';
   const target = parseHand(lastPlayed);
-  const reason = submission === 'unknown' ? '操作结果待核对，请勿重复提交'
-    : submission === 'pending' ? '等待服务器确认，请勿重复提交'
-    : !connected ? '网络已断开，请等待连接恢复'
-    : !isMyTurn ? '未轮到自己，可提前选牌'
-    : !selected.length ? '请选择要出的牌'
-    : !parsedHand ? '牌型错误，请重新选牌'
-    : !mustPlay && lastPlayed.length > 0 && !canBeat(parsedHand, target)
-      ? (target && parsedHand.type === target.type && parsedHand.length === target.length
-        ? '点数不足，需要大于当前出牌' : '牌型不匹配，无法压过当前出牌')
-      : '';
+  const reason =
+    submission === 'unknown'
+      ? '操作结果待核对，请勿重复提交'
+      : submission === 'pending'
+        ? '等待服务器确认，请勿重复提交'
+        : !connected
+          ? '网络已断开，请等待连接恢复'
+          : !isMyTurn
+            ? '未轮到自己，可提前选牌'
+            : !selected.length
+              ? '请选择要出的牌'
+              : !parsedHand
+                ? '牌型错误，请重新选牌'
+                : !mustPlay && lastPlayed.length > 0 && !canBeat(parsedHand, target)
+                  ? target && parsedHand.type === target.type && parsedHand.length === target.length
+                    ? '点数不足，需要大于当前出牌'
+                    : '牌型不匹配，无法压过当前出牌'
+                  : '';
   const canPlay = phase === 'playing' && !reason;
 
   function play() {
@@ -354,34 +524,57 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       useAppStore.setState({ tableMessage: '本轮必须出牌' });
       return;
     }
-    if (socket.send(MsgType.Pass, { turn_token: useAppStore.getState().turnToken })) clearSelection();
+    if (socket.send(MsgType.Pass, { turn_token: useAppStore.getState().turnToken })) {
+      clearSelection();
+    }
   }
 
   function hint() {
     const state = useAppStore.getState();
     if (state.phase !== 'playing' || state.currentTurn !== state.playerId) return;
-    if (state.submission === 'rejected') useAppStore.setState({ submission: 'idle', submissionMessage: '' });
-    const context = JSON.stringify([state.roundId, state.playerId, state.currentTurn, state.turnToken,
-      state.hand.map(cardKey).sort(), state.lastPlayedBy, handSignature(state.lastPlayed), state.mustPlay]);
-    const isNewContext = hintSession.current?.context !== context;
-    if (isNewContext) {
-      hintSession.current = { context, suggestions: generateSimpleSuggestions(state.hand, state.lastPlayed, state.mustPlay) };
+    if (state.submission === 'rejected') {
+      useAppStore.setState({ submission: 'idle', submissionMessage: '' });
     }
-    const suggestions = hintSession.current!.suggestions;
+    const context = JSON.stringify([
+      state.roundId,
+      state.playerId,
+      state.currentTurn,
+      state.turnToken,
+      state.hand.map((card) => cardKey(card)).sort(),
+      state.lastPlayedBy,
+      handSignature(state.lastPlayed),
+      state.mustPlay
+    ]);
+    let session = hintSession.current;
+    const isNewContext = session?.context !== context;
+    if (!session || isNewContext) {
+      session = {
+        context,
+        suggestions: generateSimpleSuggestions(state.hand, state.lastPlayed, state.mustPlay)
+      };
+      hintSession.current = session;
+    }
+    const suggestions = session.suggestions;
     if (!suggestions.length) {
       useAppStore.setState({ tableMessage: '暂无提示，请手动选牌' });
       return;
     }
-    const selection = handSignature(state.hand.filter(card => state.selectedCards.has(cardKey(card))));
-    const current = isNewContext ? -1 : suggestions.findIndex(cards => handSignature(cards) === selection);
+    const selection = handSignature(state.hand.filter((card) => state.selectedCards.has(cardKey(card))));
+    const current = isNewContext ? -1 : suggestions.findIndex((cards) => handSignature(cards) === selection);
     const index = (current + 1) % suggestions.length;
     useAppStore.setState({
-      selectedCards: new Set(suggestions[index].map(cardKey)),
+      selectedCards: new Set(suggestions[index].map((card) => cardKey(card))),
       tableMessage: `提示 ${index + 1}/${suggestions.length}：${summarizeHand(suggestions[index])}${suggestions.length > 1 ? ' · 再点切换' : ''}`
     });
   }
 
-  if (phase === 'dealing') return <section className="action-bar action-bar--dealing" aria-label="发牌中"><small>等待发牌完成</small></section>;
+  if (phase === 'dealing') {
+    return (
+      <section className="action-bar action-bar--dealing" aria-label="发牌中">
+        <small>等待发牌完成</small>
+      </section>
+    );
+  }
   if (phase === 'game_over') return null;
 
   if (phase === 'bidding') {
@@ -389,10 +582,28 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
       <section className="action-bar action-bar--bidding" aria-label="叫地主操作">
         {isMyTurn ? (
           <>
-            <button className="primary-action" disabled={blocked} onClick={() => socket.send(MsgType.Bid, { bid: true, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '抢地主' : '叫地主'}</button>
-            <button className="secondary-action secondary-action--muted" disabled={blocked} onClick={() => socket.send(MsgType.Bid, { bid: false, bid_token: useAppStore.getState().bidToken })}>{isGrabTurn ? '不抢' : '不叫'}</button>
+            <button
+              className="primary-action"
+              disabled={blocked}
+              onClick={() => {
+                socket.send(MsgType.Bid, { bid: true, bid_token: useAppStore.getState().bidToken });
+              }}
+            >
+              {isGrabTurn ? '抢地主' : '叫地主'}
+            </button>
+            <button
+              className="secondary-action secondary-action--muted"
+              disabled={blocked}
+              onClick={() => {
+                socket.send(MsgType.Bid, { bid: false, bid_token: useAppStore.getState().bidToken });
+              }}
+            >
+              {isGrabTurn ? '不抢' : '不叫'}
+            </button>
           </>
-        ) : <span>等待其他玩家{isGrabTurn ? '抢地主' : '叫地主'}...</span>}
+        ) : (
+          <span>等待其他玩家{isGrabTurn ? '抢地主' : '叫地主'}...</span>
+        )}
         <ActionSummary selectedCount={0} summary="" />
       </section>
     );
@@ -400,30 +611,56 @@ function ActionBar({ socket, isMyTurn, phase }: GameTableProps & { isMyTurn: boo
 
   return (
     <section className="action-bar" aria-label="出牌操作">
-      <button className="secondary-action secondary-action--blue" disabled={blocked || !isMyTurn || mustPlay} onClick={pass}>不出</button>
-      <button className="secondary-action secondary-action--green" disabled={!isMyTurn} onClick={hint}>提示</button>
-      <button className="secondary-action secondary-action--muted" disabled={!selectedCards.size} onClick={clearSelection}>重选</button>
-      <button className="primary-action" disabled={!canPlay} aria-describedby="play-action-summary" onClick={play}>出牌</button>
+      <button
+        className="secondary-action secondary-action--blue"
+        disabled={blocked || !isMyTurn || mustPlay}
+        onClick={pass}
+      >
+        不出
+      </button>
+      <button className="secondary-action secondary-action--green" disabled={!isMyTurn} onClick={hint}>
+        提示
+      </button>
+      <button
+        className="secondary-action secondary-action--muted"
+        disabled={!selectedCards.size}
+        onClick={clearSelection}
+      >
+        重选
+      </button>
+      <button className="primary-action" disabled={!canPlay} aria-describedby="play-action-summary" onClick={play}>
+        出牌
+      </button>
       <ActionSummary selectedCount={selected.length} summary={summary} reason={reason} blocked={blocked} />
     </section>
   );
 }
 
-function ActionSummary({ selectedCount, summary, reason, blocked }: { selectedCount: number; summary: string; reason?: string; blocked?: boolean }) {
+function ActionSummary({ selectedCount, summary, reason, blocked }: ActionSummaryProps) {
   const tableMessage = useAppStore((state) => state.tableMessage);
-  const submissionMessage = useAppStore(state => state.submissionMessage);
-  const phase = useAppStore(state => state.phase);
+  const submissionMessage = useAppStore((state) => state.submissionMessage);
+  const phase = useAppStore((state) => state.phase);
   const message = submissionMessage || tableMessage;
-  const feedback = blocked ? submissionMessage || reason
-    : message && reason && selectedCount > 0 && message !== reason ? `${message} · ${reason}` : message || reason;
+  const feedback = blocked
+    ? submissionMessage || reason
+    : message && reason && selectedCount > 0 && message !== reason
+      ? `${message} · ${reason}`
+      : message || reason;
   return (
-    <small id="play-action-summary" role="status" aria-live="polite" aria-atomic="true" className={reason || tableMessage ? 'is-warning' : ''}>
-      {feedback || (phase === 'bidding' ? '请选择叫抢操作' : selectedCount ? `已选 ${selectedCount} 张 · ${summary}` : '选择手牌后出牌')}
+    <small
+      id="play-action-summary"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className={reason || tableMessage ? 'is-warning' : ''}
+    >
+      {feedback ||
+        (phase === 'bidding' ? '请选择叫抢操作' : selectedCount ? `已选 ${selectedCount} 张 · ${summary}` : '选择手牌后出牌')}
     </small>
   );
 }
 
-function UtilityDrawer({ drawer, onClose }: { drawer: UtilityDrawer; onClose: () => void }) {
+function UtilityDrawer({ drawer, onClose }: UtilityDrawerPanelProps) {
   const counter = useAppStore((state) => state.cardCounter);
   const actions = useAppStore((state) => state.recentActions);
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -507,12 +744,15 @@ function UtilityDrawer({ drawer, onClose }: { drawer: UtilityDrawer; onClose: ()
       }
     }
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [open]);
 
   if (activeDrawer === 'none') return null;
 
-  const supportsPopover = typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.showPopover === 'function';
+  const supportsPopover =
+    typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.showPopover === 'function';
 
   return (
     <aside
@@ -524,7 +764,9 @@ function UtilityDrawer({ drawer, onClose }: { drawer: UtilityDrawer; onClose: ()
     >
       <header>
         <strong>{drawerTitle(activeDrawer)}</strong>
-        <button ref={closeBtnRef} type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
+        <button ref={closeBtnRef} type="button" onClick={onClose} aria-label="关闭">
+          <Icon name="close" />
+        </button>
       </header>
       {activeDrawer === 'counter' ? <CounterPanel counter={counter} /> : null}
       {activeDrawer === 'history' ? <HistoryPanel actions={actions} /> : null}
@@ -533,38 +775,52 @@ function UtilityDrawer({ drawer, onClose }: { drawer: UtilityDrawer; onClose: ()
   );
 }
 
-function CounterPanel({ counter }: { counter: Record<number, number> }) {
-  if (!Object.keys(counter).length) return <p role="status">重连后缺少完整出牌记录，本局记牌器不可用。下一局将自动恢复。</p>;
+function CounterPanel({ counter }: CounterPanelProps) {
+  if (!Object.keys(counter).length) {
+    return <p role="status">重连后缺少完整出牌记录，本局记牌器不可用。下一局将自动恢复。</p>;
+  }
   return (
     <div>
-      <p className="counter-note">数字为你手牌以外尚未打出的张数；包含对手手牌及尚未归属的底牌，不含你的手牌。</p>
-    <div className="counter-grid">
-      {Object.entries(counter).map(([rank, count]) => (
-        <div key={rank} className={count === 0 ? 'is-zero' : undefined}>
-          <span>{rankName(Number(rank))}</span>
-          <strong>{count}</strong>
-        </div>
-      ))}
-    </div>
+      <p className="counter-note">
+        数字为你手牌以外尚未打出的张数；包含对手手牌及尚未归属的底牌，不含你的手牌。
+      </p>
+      <div className="counter-grid">
+        {Object.entries(counter).map(([rank, count]) => (
+          <div key={rank} className={count === 0 ? 'is-zero' : undefined}>
+            <span>{rankName(Number(rank))}</span>
+            <strong>{count}</strong>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function HistoryPanel({ actions }: { actions: TableAction[] }) {
+function HistoryPanel({ actions }: HistoryPanelProps) {
   return (
     <div className="history-list">
-      {actions.length ? [...actions].reverse().map((action, index) => (
-        <div key={index}>
-          <span>{action.player_name || '系统'}</span>
-          <strong>{action.label || (action.type === 'pass' ? '不出' : action.hand_type || '出牌')}</strong>
-          {action.cards?.length ? <div className="history-cards">{sortPlayedCards(action.cards).map((card, i) => <Card key={`${card.suit}_${card.rank}_${i}`} card={card} size="mini" />)}</div> : null}
-        </div>
-      )) : <p className="empty-text">暂无动作</p>}
+      {actions.length ? (
+        [...actions].reverse().map((action, index) => (
+          <div key={index}>
+            <span>{action.player_name || '系统'}</span>
+            <strong>{action.label || (action.type === 'pass' ? '不出' : action.hand_type || '出牌')}</strong>
+            {action.cards?.length ? (
+              <div className="history-cards">
+                {sortPlayedCards(action.cards).map((card, i) => (
+                  <Card key={`${card.suit}_${card.rank}_${i}`} card={card} size="mini" />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))
+      ) : (
+        <p className="empty-text">暂无动作</p>
+      )}
     </div>
   );
 }
 
-function arrangeSeats(players: PlayerInfo[], playerId: string): { me?: PlayerInfo; left?: PlayerInfo; right?: PlayerInfo } {
+function arrangeSeats(players: PlayerInfo[], playerId: string): ArrangedSeats {
   const me = players.find((player) => player.id === playerId);
   if (!me) return { left: players[2], right: players[1], me: players[0] };
   // Turns advance by seat + 1: the previous player sits left, the next sits right.
@@ -574,7 +830,9 @@ function arrangeSeats(players: PlayerInfo[], playerId: string): { me?: PlayerInf
 }
 
 function drawerTitle(drawer: UtilityDrawer): string {
-  return ({ counter: '记牌器', history: '动作历史', rules: '玩法说明', none: '' } satisfies Record<UtilityDrawer, string>)[drawer];
+  return (
+    { counter: '记牌器', history: '动作历史', rules: '玩法说明', none: '' } satisfies Record<UtilityDrawer, string>
+  )[drawer];
 }
 
 function rankName(rank: number): string {

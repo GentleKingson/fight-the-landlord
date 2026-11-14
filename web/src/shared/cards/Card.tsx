@@ -2,24 +2,29 @@ import type { CSSProperties, FocusEventHandler, KeyboardEventHandler, MouseEvent
 import type { CardInfo } from '../../protocol/types';
 import { normalizeCard, type CardSuit } from './cardModel';
 
-const suitPaths: Record<Exclude<CardSuit, 'joker'>, string> = {
+const SUIT_PATHS: Record<Exclude<CardSuit, 'joker'>, string> = {
   spade: 'M12 2C9 6 3 9 3 14a5 5 0 0 0 8 4c0 2-1 3-3 4h8c-2-1-3-2-3-4a5 5 0 0 0 8-4c0-5-6-8-9-12Z',
   heart: 'M12 22 3 13C-3 6 6-2 12 5c6-7 15 1 9 8Z',
   club: 'M12 2a5 5 0 0 0-4 8 5 5 0 1 0 3 8c0 2-1 3-3 4h8c-2-1-3-2-3-4a5 5 0 1 0 3-8 5 5 0 0 0-4-8Z',
   diamond: 'M12 2 22 12 12 22 2 12Z'
 };
 
+interface SuitIconProps {
+  suit: CardSuit;
+}
+
 // Paths avoid platform-dependent emoji/font fallback for Unicode suits.
-function SuitIcon({ suit }: { suit: CardSuit }) {
+function SuitIcon({ suit }: SuitIconProps) {
   if (suit === 'joker') return null;
   return (
     <svg className="card__suit-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d={suitPaths[suit]} />
+      <path d={SUIT_PATHS[suit]} />
     </svg>
   );
 }
 
-interface CardProps {
+/** Props for rendering an interactive or read-only playing card. */
+export interface CardProps {
   card: CardInfo;
   as?: 'button' | 'option';
   selected?: boolean;
@@ -33,6 +38,7 @@ interface CardProps {
   onKeyUp?: KeyboardEventHandler<HTMLElement>;
 }
 
+/** Renders a playing card as a button, listbox option, or static image. */
 export function Card({
   card,
   as = 'button',

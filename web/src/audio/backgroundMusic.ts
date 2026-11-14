@@ -1,32 +1,58 @@
-import { useAppStore } from '../stores/appStore';
-import { gameAudio } from './gameAudio';
 import tableMusic from '../../../internal/sound/gaming/bgm/bgm_normal.mp3?url&no-inline';
 import lobbyMusic from '../../../internal/sound/lobby/bgm_welcome.mp3?url&no-inline';
+import { useAppStore } from '../stores/appStore';
+import { gameAudio } from './gameAudio';
 
-// A separate channel keeps turn announcements from cancelling the music loop.
+const BGM_VOLUME = 0.18;
+
+/**
+ * Connects background music playback to lobby/table phase and audio settings.
+ * A separate channel keeps turn announcements from cancelling the music loop.
+ */
 export function connectBackgroundMusic(): () => void {
   const music = new Audio();
   music.loop = true;
-  music.volume = 0.18;
+  music.volume = BGM_VOLUME;
   music.preload = 'none';
   let unlocked = false;
   let disposed = false;
   let source = '';
   const sync = () => {
     const state = useAppStore.getState();
-    if (disposed || !unlocked || document.hidden || !state.connected || !gameAudio.getEnabled() || state.phase === 'game_over') {
+    if (
+      disposed ||
+      !unlocked ||
+      document.hidden ||
+      !state.connected ||
+      !gameAudio.getEnabled() ||
+      state.phase === 'game_over'
+    ) {
       music.pause();
       return;
     }
     const next = ['dealing', 'bidding', 'playing'].includes(state.phase) ? tableMusic : lobbyMusic;
-    if (source !== next) { source = next; music.src = next; }
-    if (music.paused) void music.play().catch(() => { /* Retry on the next gesture or foreground transition. */ });
+    if (source !== next) {
+      source = next;
+      music.src = next;
+    }
+    if (music.paused) {
+      void music.play().catch(() => {
+        // Retry on the next gesture or foreground transition.
+      });
+    }
   };
   // Safari requires play() to be called synchronously from a user gesture.
-  const unlock = () => { unlocked = true; sync(); };
-  const pause = () => music.pause();
+  const unlock = () => {
+    unlocked = true;
+    sync();
+  };
+  const pause = () => {
+    music.pause();
+  };
   const unsubscribeStore = useAppStore.subscribe((state, previous) => {
-    if (state.phase !== previous.phase || state.connected !== previous.connected) sync();
+    if (state.phase !== previous.phase || state.connected !== previous.connected) {
+      sync();
+    }
   });
   const unsubscribeAudio = gameAudio.subscribe(sync);
   document.addEventListener('pointerup', unlock);
