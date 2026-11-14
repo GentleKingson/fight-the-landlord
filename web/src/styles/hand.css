@@ -111,10 +111,8 @@
 }
 
 @media (orientation: landscape) and (max-height: 520px) {
-  .hand-heading { font-size: 10px; }
-  /* Share the action feedback row without hiding the hand count. */
-  .table-screen:has(.action-bar small) .hand-heading { position: absolute; top: -21px; right: 12px; }
-  .table-screen:has(.action-bar small) .hand-heading strong { display: none; }
+  .hand-zone { gap: 1px; }
+  .hand-heading { font-size: 10px; line-height: 1.2; }
   .hand { height: 68px; }
   .hand .card { --w: 58px; --h: 60px; --index-inset: 3px; --index-size: 11px; --index-suit-size: 9px; --pip-size: 15px; border-radius: 7px; }
   .hand__slot { left: calc(50% + var(--compact-x, 0px) - 29px); bottom: 4px; }
@@ -144,7 +142,6 @@
 }
 
 @media (orientation: landscape) and (max-height: 360px) {
-  .table-screen:has(.action-bar small) .hand-heading { top: -18px; }
   .hand { height: 52px; }
   .hand .card { --h: 46px; --index-size: 10px; --index-suit-size: 8px; --pip-size: 12px; }
   .hand__slot { bottom: 3px; }

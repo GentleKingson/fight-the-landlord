@@ -16,6 +16,68 @@ test('bidding demo hides bottom cards and only shows bidding actions', async ({ 
   await expect(page.getByRole('button', { name: '出牌' })).toHaveCount(0);
 });
 
+test('table controls stay compact inside the lower felt across phases and viewports', async ({ page }) => {
+  const viewports = [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 320, height: 568 },
+    { width: 667, height: 375 }
+  ];
+
+  await page.goto('/?demo=table');
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    const playingLayout = await page.evaluate(() => {
+      const doc = document.documentElement;
+      const arena = document.querySelector<HTMLElement>('.table-arena')?.getBoundingClientRect();
+      const felt = document.querySelector<HTMLElement>('.felt-table')?.getBoundingClientRect();
+      const controls = document.querySelector<HTMLElement>('.table-controls')?.getBoundingClientRect();
+      const timer = document.querySelector<HTMLElement>('.turn-banner time')?.getBoundingClientRect();
+      const buttons = Array.from(document.querySelectorAll<HTMLElement>('.action-bar button')).map((btn) => btn.getBoundingClientRect());
+      const heading = document.querySelector<HTMLElement>('.hand-heading')?.getBoundingClientRect();
+      if (!arena || !felt || !controls || !timer || buttons.length !== 4 || !heading) return null;
+      return {
+        fitsViewport: doc.scrollHeight <= window.innerHeight && doc.scrollWidth <= window.innerWidth,
+        controlsInsideArena: controls.top >= arena.top && controls.bottom <= arena.bottom && controls.left >= arena.left && controls.right <= arena.right,
+        feltAboveControls: felt.bottom <= controls.top + 1,
+        timerCompact: timer.width >= 18 && timer.width <= 26 && timer.height >= 18 && timer.height <= 26,
+        buttonsCompactAndTappable: buttons.every((b) => b.height >= 24 && b.height <= 32 && b.width >= 56),
+        arenaTop: Math.round(arena.top),
+        arenaBottom: Math.round(arena.bottom),
+        headingTop: Math.round(heading.top)
+      };
+    });
+
+    expect(playingLayout, `playing @ ${viewport.width}x${viewport.height}`).not.toBeNull();
+    expect(playingLayout?.fitsViewport).toBe(true);
+    expect(playingLayout?.controlsInsideArena).toBe(true);
+    expect(playingLayout?.feltAboveControls).toBe(true);
+    expect(playingLayout?.timerCompact).toBe(true);
+    expect(playingLayout?.buttonsCompactAndTappable).toBe(true);
+
+    // Switching between dealing -> bidding (mine) -> bidding (opponent) keeps outer table bounds steady.
+    for (const nextState of [
+      { phase: 'dealing', currentTurn: '' },
+      { phase: 'bidding', currentTurn: 'p1' },
+      { phase: 'bidding', currentTurn: 'p2' },
+      { phase: 'playing', currentTurn: 'p1' }
+    ]) {
+      await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => useAppStore.setState(${JSON.stringify(nextState)}))`);
+      const bounds = await page.evaluate(() => {
+        const arena = document.querySelector<HTMLElement>('.table-arena')!.getBoundingClientRect();
+        const heading = document.querySelector<HTMLElement>('.hand-heading')!.getBoundingClientRect();
+        return { arenaTop: Math.round(arena.top), arenaBottom: Math.round(arena.bottom), headingTop: Math.round(heading.top) };
+      });
+      expect(bounds, `${nextState.phase}/${nextState.currentTurn} @ ${viewport.width}x${viewport.height}`).toEqual({
+        arenaTop: playingLayout!.arenaTop,
+        arenaBottom: playingLayout!.arenaBottom,
+        headingTop: playingLayout!.headingTop
+      });
+    }
+  }
+});
+
 test('lobby demo renders the basic room actions', async ({ page }) => {
   await page.goto('/?demo=lobby');
   await expect(page.getByRole('button', { name: /快速开局/ })).toBeVisible();
