@@ -58,8 +58,7 @@ cd web
 npm ci
 npm test
 npm run build
-# 对真实 Go + Redis 服务运行浏览器验收；服务需启用训练数据采集
-DDZ_LIVE_URL=http://127.0.0.1:1780 npx playwright test tests/e2e/live.spec.ts --project=desktop --workers=1
+npm run test:e2e
 ```
 
 Go 集成测试覆盖 Cookie 刷新/关页重开、身份和战绩跨服务实例、终端重连、Origin、篡改与过期、Redis 故障、单连接替换、禁止第二局、离线托管、全员离线回收、结算补发、公开历史和本人手牌隔离。前端测试覆盖无 JS 凭据重连、倍数/历史/记牌器/计时恢复及被替换标签页停止重连。

@@ -36,7 +36,7 @@ convert "$LANDSCAPE_SRC" -filter Lanczos -resize 1600x900^ -gravity center -exte
 convert "$PORTRAIT_SRC" -filter Lanczos -resize 900x1600^ -gravity center -extent 900x1600 -strip -quality 80 -define webp:method=6 web/src/assets/scene-NAME-portrait-900.webp
 ```
 
-`tests/backgroundAssets.test.ts` and `tests/e2e/background.spec.ts` check VP8 headers, decoded dimensions, payload budgets, single-variant network loading, scene transitions, viewport rotation, image-failure fallbacks, intact felt, and interactive drawers/cards on desktop and mobile viewports.
+`tests/backgroundAssets.test.ts` checks VP8 headers, decoded dimensions, payload budgets, and scene selection. Browser and device-specific presentation remains part of manual acceptance.
 
 ## Bot portraits
 
@@ -70,8 +70,6 @@ magick "$SOURCE_PNG" -filter Lanczos -resize 192x192 -strip -quality 82 -define 
 
 `?demo=practice` previews the two bot portraits without a backend. Unit tests
 cover deterministic assignment, uniqueness, Unicode/error fallbacks and protocol
-round trips. `tests/e2e/botAvatars.spec.ts` covers payload/decoded dimensions,
-reload, image failures, human opponents, repeated interactions and live resizing
-from 320px portrait to desktop. `live.spec.ts` checks real practice/reconnect when
-`DDZ_LIVE_URL` is set. The server and web should be updated together; older servers
+round trips. Browser payload, responsive layout and real practice/reconnect behavior
+remain part of manual acceptance. The server and web should be updated together; older servers
 that omit `is_bot` safely retain initials rather than guessing robot identities.

@@ -230,8 +230,6 @@ go test -race -tags ci ./...
 cd web && npm test && npm run build
 npx playwright install chromium
 npm run test:e2e
-# 可选：已运行真实后端时，验证人机整局与刷新恢复
-DDZ_LIVE_URL=http://localhost:1780 npx playwright test live.spec.ts --project=desktop
 cd ../douzero
 .venv/bin/python -m unittest discover -s tests -v
 MARVEL_INTEGRATION=1 .venv/bin/python -m unittest discover -s tests -v
