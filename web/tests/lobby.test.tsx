@@ -64,6 +64,7 @@ it('leaves matching when the connection drops', () => {
 it.each(['waiting', 'matching'] as const)('explains why lobby navigation is unavailable while %s', phase => {
   useAppStore.setState({ phase, lobbyPanel: 'rules', matchMode: 'online', connected: true });
   render(<Lobby socket={{ send: vi.fn() } as unknown as GameSocket} />);
+  expect(screen.queryByRole('button', { name: '聊天' })).toBeNull();
   const rules = screen.getByRole('button', { name: '规则' });
   expect(rules).toBeDisabled();
   expect(rules).toHaveAccessibleDescription(/可使用大厅导航/);

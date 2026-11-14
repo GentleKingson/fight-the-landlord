@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { RulesPanel } from '../../shared/ui/RulesPanel';
-import { ChatFeed } from '../../shared/ui/ChatFeed';
 import { DealAnimation } from './DealAnimation';
 import { useDealPresentation } from './useDealPresentation';
 import { assignBotAvatars } from './botAvatars';
@@ -14,7 +13,6 @@ import { Card } from '../../shared/cards/Card';
 import { Hand } from '../../shared/cards/Hand';
 import { PlayedCards } from '../../shared/cards/PlayedCards';
 import { Icon } from '../../shared/ui/Icon';
-import { useImeSafeEnter } from '../../shared/ui/imeSafeSubmit';
 import { SoundToggle } from '../../audio/SoundToggle';
 import type { CardInfo, PlayerInfo, UtilityDrawer } from '../../protocol/types';
 
@@ -120,7 +118,6 @@ export function GameTable({ socket }: GameTableProps) {
         <div className="table-tools">
           <SoundToggle />
           <ToolButton drawer="counter" label="记牌器" icon="counter" />
-          <ToolButton drawer="chat" label="聊天" icon="chat" />
           <ToolButton drawer="history" label="历史" icon="history" />
           <ToolButton drawer="rules" label="规则" icon="rules" />
         </div>
@@ -172,7 +169,7 @@ export function GameTable({ socket }: GameTableProps) {
       </section>
 
       {phase === 'dealing' && <DealAnimation deal={deal} count={hand.length} {...presentation} />}
-      <UtilityDrawer key={roomCode} socket={socket} drawer={drawer} onClose={() => setDrawer('none')} />
+      <UtilityDrawer key={roomCode} drawer={drawer} onClose={() => setDrawer('none')} />
     </main>
   );
 }
@@ -221,7 +218,7 @@ function BottomCards({ cards, revealed }: { cards: CardInfo[]; revealed: boolean
   );
 }
 
-function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: string; icon: 'chat' | 'counter' | 'history' | 'rules' }) {
+function ToolButton({ drawer, label, icon }: { drawer: UtilityDrawer; label: string; icon: 'counter' | 'history' | 'rules' }) {
   const setDrawer = useAppStore((state) => state.setDrawer);
   const open = useAppStore((state) => state.drawer === drawer);
   return (
@@ -428,12 +425,9 @@ function ActionSummary({ selectedCount, summary, reason, blocked }: { selectedCo
   );
 }
 
-function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: UtilityDrawer; onClose: () => void }) {
-  const chatInput = useAppStore((state) => state.chatInput);
-  const setChatInput = useAppStore((state) => state.setChatInput);
+function UtilityDrawer({ drawer, onClose }: { drawer: UtilityDrawer; onClose: () => void }) {
   const counter = useAppStore((state) => state.cardCounter);
   const actions = useAppStore((state) => state.recentActions);
-  const imeEnter = useImeSafeEnter();
   const drawerRef = useRef<HTMLElement | null>(null);
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -522,13 +516,6 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
 
   const supportsPopover = typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.showPopover === 'function';
 
-  function sendChat() {
-    const content = chatInput.trim();
-    if (!content) return;
-    if (socket.send(MsgType.Chat, { content, scope: 'room' })) setChatInput('');
-    else useAppStore.getState().setError('聊天发送失败，草稿已保留，请等待连接恢复后重试');
-  }
-
   return (
     <aside
       ref={drawerRef}
@@ -541,24 +528,6 @@ function UtilityDrawer({ socket, drawer, onClose }: GameTableProps & { drawer: U
         <strong>{drawerTitle(activeDrawer)}</strong>
         <button ref={closeBtnRef} type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button>
       </header>
-      {activeDrawer === 'chat' ? (
-        <>
-          <ChatFeed scope="room" />
-          <form className="chat-input-row" onSubmit={(event) => { event.preventDefault(); sendChat(); }}>
-            <label className="visually-hidden" htmlFor="room-chat-input">房间聊天消息</label>
-            <input
-              id="room-chat-input"
-              name="message"
-              enterKeyHint="send"
-              value={chatInput}
-              onChange={(event) => setChatInput(event.target.value)}
-              {...imeEnter}
-              placeholder="房间聊天"
-            />
-            <button type="submit">发送</button>
-          </form>
-        </>
-      ) : null}
       {activeDrawer === 'counter' ? <CounterPanel counter={counter} /> : null}
       {activeDrawer === 'history' ? <HistoryPanel actions={actions} /> : null}
       {activeDrawer === 'rules' ? <RulesPanel /> : null}
@@ -607,7 +576,7 @@ function arrangeSeats(players: PlayerInfo[], playerId: string): { me?: PlayerInf
 }
 
 function drawerTitle(drawer: UtilityDrawer): string {
-  return ({ chat: '房间聊天', counter: '记牌器', history: '动作历史', rules: '玩法说明', none: '' } satisfies Record<UtilityDrawer, string>)[drawer];
+  return ({ counter: '记牌器', history: '动作历史', rules: '玩法说明', none: '' } satisfies Record<UtilityDrawer, string>)[drawer];
 }
 
 function rankName(rank: number): string {

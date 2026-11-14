@@ -1,6 +1,6 @@
 import { turnTiming, observeClock } from '../transport/clock';
 import { create } from 'zustand';
-import { MsgType, type DealTiming, type CardInfo, type ChatPayload, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
+import { MsgType, type DealTiming, type CardInfo, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
 import { captureEndSnapshot, END_REVEAL_DURATION_MS, type EndSnapshot, type EndView } from './endGame';
 
@@ -73,7 +73,6 @@ interface TableSlice {
 interface UiSlice {
   selectedCards: Set<string>;
   drawer: UtilityDrawer;
-  chatInput: string;
   tableMessage: string;
 }
 
@@ -100,7 +99,6 @@ interface AppActions {
   setError: (error: string) => void;
   setLobbyPanel: (panel: LobbyPanel) => void;
   setRoomCodeInput: (value: string) => void;
-  setChatInput: (value: string) => void;
   setDrawer: (drawer: UtilityDrawer) => void;
   toggleCard: (key: string) => void;
   setSelection: (keys: string[]) => void;
@@ -172,14 +170,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...initialTable,
   selectedCards: new Set<string>(),
   drawer: 'none',
-  chatInput: '',
   tableMessage: '',
 
   setConnected: (connected) => set({ connected, ...(!connected ? { latency: 0, cancellingMatch: false, roomRequest: null } : {}), ...(!connected && get().phase === 'matching' ? { phase: 'lobby' as const } : {}) }),
   setError: (error) => set({ error }),
   setLobbyPanel: (lobbyPanel) => set({ lobbyPanel }),
   setRoomCodeInput: (roomCodeInput) => set({ roomCodeInput }),
-  setChatInput: (chatInput) => set({ chatInput }),
   setDrawer: (drawer) => set({ drawer }),
   toggleCard: (key) => {
     const selectedCards = new Set(get().selectedCards);
@@ -190,7 +186,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelection: (keys) => set({ selectedCards: new Set(keys), tableMessage: '' }),
   clearSelection: () => set({ selectedCards: new Set(), tableMessage: '' }),
   leaveLocalRoom: () => {
-    useChatStore.getState().setRoom('');
     set({ roomCode: '', roomRequest: null, players: [], phase: 'lobby', ...initialTable, selectedCards: new Set(), tableMessage: '', ...(!['pending', 'unknown'].includes(get().submission) ? { submission: 'idle', submissionMessage: '' } as const : {}) });
   },
   showSettlement: () => {
@@ -205,7 +200,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       case MsgType.Connected: {
         const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
         const keepResult = state.phase === 'game_over' && state.endSnapshot && state.playerId === payload.player_id;
-        if (state.playerId !== payload.player_id) useChatStore.getState().setRoom('');
         set({
           ...(!keepResult ? { ...initialTable, players: [], roomCode: '', selectedCards: new Set<string>() } : {}),
           connected: true,
@@ -231,7 +225,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({ playerName: payload.player_name });
           break;
         }
-        useChatStore.getState().setRoom(payload.room_code ?? '');
         if (payload.game_state) {
           set({ playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
         } else {
@@ -258,13 +251,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.RoomCreated: {
         const payload = message.payload as { room_code: string; player: PlayerInfo };
-        useChatStore.getState().setRoom(payload.room_code);
         set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
       case MsgType.RoomJoined: {
         const payload = message.payload as { room_code: string; players: PlayerInfo[] };
-        useChatStore.getState().setRoom(payload.room_code);
         set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
         break;
       }
@@ -410,9 +401,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       case MsgType.RoomListResult:
         set({ roomList: (message.payload as { rooms: RoomListItem[] }).rooms ?? [] });
         break;
-      case MsgType.Chat:
-        useChatStore.getState().push(message.payload as ChatPayload);
-        break;
       case MsgType.PlayerOffline: {
         const payload = message.payload as { player_id: string };
         set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, online: false } : player) });
@@ -433,22 +421,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
     }
   }
-}));
-
-export const useChatStore = create<{
-  roomCode: string;
-  messages: (ChatPayload & { id: number })[];
-  push: (message: ChatPayload) => void;
-  setRoom: (roomCode: string) => void;
-  clear: () => void;
-}>((set, get) => ({
-  roomCode: '',
-  messages: [],
-  push: (message) => set(({ messages }) => ({ messages: [...messages, { ...message, id: (messages.at(-1)?.id ?? 0) + 1 }].slice(-80) })),
-  setRoom: (roomCode) => {
-    if (roomCode !== get().roomCode) set({ roomCode, messages: get().messages.filter(message => message.scope !== 'room') });
-  },
-  clear: () => set({ messages: [] })
 }));
 
 export function loadMatchMode(): 'practice' | 'online' {
