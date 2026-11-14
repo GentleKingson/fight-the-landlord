@@ -165,16 +165,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	s.roomManager.SetBotFactory(func() types.ClientInterface {
 		return bot.NewBotClient(botEngine)
 	})
-	s.roomManager.SetOnGameStart(func(r *room.Room) {
-		gs := session.NewGameSession(r, s.leaderboard, s.config.Game)
-		for _, client := range r.GetClients() {
-			if b, ok := client.(*bot.BotClient); ok {
-				b.SetSession(gs)
-			}
-		}
-		s.handler.SetGameSession(r.Code, gs)
-		gs.Start()
-	})
+	s.roomManager.SetOnGameStart(s.startRoomGame)
 	if err := s.restoreGames(ctx, botEngine); err != nil {
 		s.SuspendRecovery()
 		_ = rdb.Close()
@@ -188,6 +179,17 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)
 
 	return s, nil
+}
+
+func (s *Server) startRoomGame(r *room.Room) {
+	gs := session.NewGameSession(r, s.leaderboard, s.config.Game)
+	for _, client := range r.GetClients() {
+		if b, ok := client.(*bot.BotClient); ok {
+			b.SetSession(gs)
+		}
+	}
+	s.handler.SetGameSession(r.Code, gs)
+	gs.Start()
 }
 
 // Start 启动服务器

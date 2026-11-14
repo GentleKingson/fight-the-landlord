@@ -1,6 +1,7 @@
 package room
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -161,7 +162,7 @@ func TestStartRoomValidationsAndBotFill(t *testing.T) {
 		seq := 0
 		return func() types.ClientInterface {
 			seq++
-			id := "bot-" + string(rune('0'+seq))
+			id := "bot-" + strconv.Itoa(seq)
 			return &testBotClient{SimpleClient: testutil.NewSimpleClient(id, "🤖Bot")}
 		}
 	}

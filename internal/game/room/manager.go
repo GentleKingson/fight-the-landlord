@@ -152,28 +152,7 @@ func (rm *RoomManager) leaveRoomLocked(client types.ClientInterface) (*Room, err
 		delete(rm.rooms, code)
 		return r, nil
 	}
-	var resetReadyPlayerID string
-	if r.OwnerID == client.GetID() {
-		r.OwnerID = ""
-		for _, id := range r.PlayerOrder {
-			if p := r.Players[id]; p != nil && !p.Client.IsBot() && !p.Offline {
-				r.OwnerID = id
-				break
-			}
-		}
-		if r.OwnerID == "" {
-			for _, id := range r.PlayerOrder {
-				if p := r.Players[id]; p != nil && !p.Client.IsBot() {
-					r.OwnerID = id
-					break
-				}
-			}
-		}
-		if newOwner := r.Players[r.OwnerID]; newOwner != nil && newOwner.Ready {
-			newOwner.Ready = false
-			resetReadyPlayerID = r.OwnerID
-		}
-	}
+	resetReadyPlayerID := r.transferOwnerLocked(client.GetID())
 	r.Broadcast(codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
 		PlayerID:   client.GetID(),
 		PlayerName: client.GetName(),
@@ -199,6 +178,33 @@ func (rm *RoomManager) leaveRoomLocked(client types.ClientInterface) (*Room, err
 		go func() { _ = rm.redisStore.SaveRoom(context.Background(), r.Code, r.ToRoomData()) }()
 	}
 	return nil, nil
+}
+
+// transferOwnerLocked prefers an online human, then any remaining human.
+func (r *Room) transferOwnerLocked(leavingID string) string {
+	if r.OwnerID != leavingID {
+		return ""
+	}
+	r.OwnerID = ""
+	for _, id := range r.PlayerOrder {
+		if p := r.Players[id]; p != nil && !p.Client.IsBot() && !p.Offline {
+			r.OwnerID = id
+			break
+		}
+	}
+	if r.OwnerID == "" {
+		for _, id := range r.PlayerOrder {
+			if p := r.Players[id]; p != nil && !p.Client.IsBot() {
+				r.OwnerID = id
+				break
+			}
+		}
+	}
+	if newOwner := r.Players[r.OwnerID]; newOwner != nil && newOwner.Ready {
+		newOwner.Ready = false
+		return r.OwnerID
+	}
+	return ""
 }
 
 // SetPlayerReady 设置玩家准备状态
@@ -278,38 +284,9 @@ func (rm *RoomManager) StartRoom(client types.ClientInterface) error {
 	}
 
 	room.mu.Lock()
-	if room.State != RoomStateWaiting {
+	if err := room.validateStartLocked(client); err != nil {
 		room.mu.Unlock()
-		return apperrors.ErrGameStarted
-	}
-
-	player := room.Players[client.GetID()]
-	if player == nil || player.Client != client {
-		room.mu.Unlock()
-		return apperrors.ErrNotInRoom
-	}
-
-	ownerID := room.OwnerID
-	if ownerID == "" && len(room.PlayerOrder) > 0 {
-		ownerID = room.PlayerOrder[0]
-	}
-	if client.GetID() != ownerID {
-		room.mu.Unlock()
-		return apperrors.ErrNotRoomOwner
-	}
-
-	for id, p := range room.Players {
-		if id == client.GetID() || p.Client.IsBot() {
-			continue
-		}
-		if p.Offline {
-			room.mu.Unlock()
-			return apperrors.ErrPlayerOffline
-		}
-		if !p.Ready {
-			room.mu.Unlock()
-			return apperrors.ErrPlayersNotReady
-		}
+		return err
 	}
 
 	if len(room.Players) < 3 && botFactory == nil {
@@ -317,7 +294,7 @@ func (rm *RoomManager) StartRoom(client types.ClientInterface) error {
 		return &apperrors.GameError{Code: protocol.ErrCodeUnknown, Message: "人机服务暂未就绪"}
 	}
 
-	player.Ready = true
+	room.Players[client.GetID()].Ready = true
 	for len(room.Players) < 3 {
 		used := [3]bool{}
 		for _, p := range room.Players {
@@ -351,6 +328,39 @@ func (rm *RoomManager) StartRoom(client types.ClientInterface) error {
 
 	if rm.redisStore != nil && rm.redisStore.IsReady() {
 		go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
+	}
+
+	return nil
+}
+
+func (room *Room) validateStartLocked(client types.ClientInterface) error {
+	if room.State != RoomStateWaiting {
+		return apperrors.ErrGameStarted
+	}
+
+	player := room.Players[client.GetID()]
+	if player == nil || player.Client != client {
+		return apperrors.ErrNotInRoom
+	}
+
+	ownerID := room.OwnerID
+	if ownerID == "" && len(room.PlayerOrder) > 0 {
+		ownerID = room.PlayerOrder[0]
+	}
+	if client.GetID() != ownerID {
+		return apperrors.ErrNotRoomOwner
+	}
+
+	for id, p := range room.Players {
+		if id == client.GetID() || p.Client.IsBot() {
+			continue
+		}
+		if p.Offline {
+			return apperrors.ErrPlayerOffline
+		}
+		if !p.Ready {
+			return apperrors.ErrPlayersNotReady
+		}
 	}
 
 	return nil
