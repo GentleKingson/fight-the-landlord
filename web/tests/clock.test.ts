@@ -1,7 +1,11 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { observeClock, resetClock, turnTiming } from '../src/transport/clock';
-afterEach(() => { resetClock(); vi.useRealTimers(); });
-test.each([500, 1000, 2000])('RTT %d and clock skew preserve the absolute deadline', rtt => {
+afterEach(() => {
+  resetClock();
+  vi.useRealTimers();
+});
+
+test.each([500, 1000, 2000])('RTT %d and clock skew preserve the absolute deadline', (rtt) => {
   vi.useFakeTimers();
   vi.setSystemTime(100000 + rtt);
   observeClock(100000, 500000 + rtt / 2);

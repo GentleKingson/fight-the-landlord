@@ -10,7 +10,10 @@ test('all dense portrait hand cards remain visible and selectable at 320px', asy
     await expect(cards).toHaveCount(ranks.length);
     for (let index = 0; index < ranks.length; index++) {
       const card = cards.nth(index);
-      const box = (await card.boundingBox())!;
+      const box = await card.boundingBox();
+      if (!box) {
+        throw new Error('Expected card bounding box');
+      }
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(320);
       expect(box.y).toBeGreaterThanOrEqual(0);
@@ -18,9 +21,11 @@ test('all dense portrait hand cards remain visible and selectable at 320px', asy
       await page.touchscreen.tap(box.x + 5, box.y + 30);
       await expect(card).toHaveAttribute('aria-selected', 'true');
     }
-    expect(await cards.evaluateAll(elements => elements.every(card => {
+    expect(await cards.evaluateAll((elements) => elements.every((card) => {
       const rank = card.querySelector('.card__index--top b');
-      if (!rank) return true;
+      if (!rank) {
+        return true;
+      }
       const box = rank.getBoundingClientRect();
       return document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('.card') === card;
     }))).toBe(true);

@@ -6,19 +6,31 @@ import {
   type KeyboardEventHandler
 } from 'react';
 
-export function isImeComposing(
-  event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
-  composing = false
-): boolean {
-  return composing || event.nativeEvent.isComposing || event.keyCode === 229 || event.nativeEvent.keyCode === 229;
-}
+const IME_PROCESSING_KEYCODE = 229;
 
-export function useImeSafeEnter(): {
+/** Event handlers that prevent Enter key submission while an IME composition is active. */
+export interface ImeSafeEnterHandlers {
   onCompositionStart: CompositionEventHandler<HTMLInputElement>;
   onCompositionEnd: CompositionEventHandler<HTMLInputElement>;
   onBlur: FocusEventHandler<HTMLInputElement>;
   onKeyDown: KeyboardEventHandler<HTMLInputElement>;
-} {
+}
+
+/** Returns whether a keyboard event occurred while IME composition was in progress. */
+export function isImeComposing(
+  event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+  composing = false
+): boolean {
+  return (
+    composing ||
+    event.nativeEvent.isComposing ||
+    event.keyCode === IME_PROCESSING_KEYCODE ||
+    event.nativeEvent.keyCode === IME_PROCESSING_KEYCODE
+  );
+}
+
+/** React hook returning input handlers that submit the enclosing form on non-IME Enter. */
+export function useImeSafeEnter(): ImeSafeEnterHandlers {
   const composingRef = useRef(false);
 
   return {

@@ -7,7 +7,9 @@ import { cardKey } from '../src/shared/cards/cardModel';
 import type { GameSocket } from '../src/transport/wsClient';
 
 vi.mock('../src/shared/cards/Hand', () => ({ Hand: () => null }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+});
 
 it.each([
   { name: 'empty selection', ranks: [], target: [], mustPlay: true, allowed: false },
@@ -22,13 +24,26 @@ it.each([
   { name: 'bomb below a rocket', ranks: [3, 3, 3, 3], target: [16, 17], mustPlay: false, allowed: false },
   { name: 'opening hand with no previous play', ranks: [3], target: [], mustPlay: true, allowed: true },
   { name: 'new trick with previous cards retained', ranks: [3], target: [4, 4], mustPlay: true, allowed: true },
-  { name: 'another player turn', ranks: [5], target: [4], mustPlay: false, allowed: false, currentTurn: 'b' }
+  { name: 'another player turn', ranks: [5], target: [4], mustPlay: false, allowed: false, currentTurn: 'b' },
 ])('validates $name before enabling and submitting a play', ({ ranks, target, mustPlay, allowed, currentTurn }) => {
   const cards = (values: number[]) => values.map((rank, index) => ({ rank, suit: index % 4, color: 0 }));
   const hand = cards(ranks);
-  useAppStore.setState({ turnToken: 'turn-test', phase: 'playing', connected: true, submission: 'idle', playerId: 'a', currentTurn: currentTurn ?? 'a', hand,
-    selectedCards: new Set(hand.map(cardKey)), mustPlay, canBeat: true, players: [],
-    lastPlayed: cards(target), drawer: 'none', tableMessage: '' });
+  useAppStore.setState({
+    turnToken: 'turn-test',
+    phase: 'playing',
+    connected: true,
+    submission: 'idle',
+    playerId: 'a',
+    currentTurn: currentTurn ?? 'a',
+    hand,
+    selectedCards: new Set(hand.map((item) => cardKey(item))),
+    mustPlay,
+    canBeat: true,
+    players: [],
+    lastPlayed: cards(target),
+    drawer: 'none',
+    tableMessage: '',
+  });
   const send = vi.fn();
   render(<GameTable socket={{ send } as unknown as GameSocket} />);
   const button = screen.getByRole('button', { name: /^出牌$/ }) as HTMLButtonElement;
@@ -45,10 +60,23 @@ it.each([
 });
 
 it('allows manually selected replies regardless of the advisory can_beat flag', () => {
-  const hand = [4, 5, 6, 7, 8].map(rank => ({ rank, suit: 0, color: 0 }));
-  useAppStore.setState({ turnToken: 'turn-test', phase: 'playing', connected: true, submission: 'idle', playerId: 'a', currentTurn: 'a', hand,
-    selectedCards: new Set(hand.map(cardKey)), mustPlay: false, canBeat: false, players: [],
-    lastPlayed: [3, 4, 5, 6, 7].map(rank => ({ rank, suit: 1, color: 1 })), drawer: 'none', tableMessage: '' });
+  const hand = [4, 5, 6, 7, 8].map((rank) => ({ rank, suit: 0, color: 0 }));
+  useAppStore.setState({
+    turnToken: 'turn-test',
+    phase: 'playing',
+    connected: true,
+    submission: 'idle',
+    playerId: 'a',
+    currentTurn: 'a',
+    hand,
+    selectedCards: new Set(hand.map((item) => cardKey(item))),
+    mustPlay: false,
+    canBeat: false,
+    players: [],
+    lastPlayed: [3, 4, 5, 6, 7].map((rank) => ({ rank, suit: 1, color: 1 })),
+    drawer: 'none',
+    tableMessage: '',
+  });
   const send = vi.fn();
   render(<GameTable socket={{ send } as unknown as GameSocket} />);
   fireEvent.click(screen.getByRole('button', { name: /^出牌$/ }));

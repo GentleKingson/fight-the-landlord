@@ -10,19 +10,45 @@ import { MsgType, type IncomingMessage } from '../src/protocol/types';
 import type { GameSocket } from '../src/transport/wsClient';
 
 beforeEach(() => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    }
+  );
   seedDemoState('table');
   useAppStore.setState({ cancellingMatch: false, error: '', tableMessage: '' });
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
 function transport() {
   let listener: (message: IncomingMessage) => void = () => {};
   const send = vi.fn(() => true);
-  const socket = { send, subscribe: (fn: typeof listener) => { listener = fn; return () => { listener = () => {}; }; } } as unknown as GameSocket;
-  return { socket, send, receive: (message: IncomingMessage) => act(() => {
-    useAppStore.getState().handleMessage(message);
-    listener(message);
-  }) };
+  const socket = {
+    send,
+    subscribe: (fn: typeof listener) => {
+      listener = fn;
+      return () => {
+        listener = () => {};
+      };
+    },
+  } as unknown as GameSocket;
+  return {
+    socket,
+    send,
+    receive: (message: IncomingMessage) => {
+      act(() => {
+        useAppStore.getState().handleMessage(message);
+        listener(message);
+      });
+    },
+  };
 }
 
 it('keeps matching until the server confirms cancellation and keeps a reserved match on rejection', () => {
@@ -50,7 +76,9 @@ it('distinguishes loading, empty response, timeout and retry in the leaderboard'
   receive({ type: MsgType.LeaderboardResult, payload: { entries: [], type: 'total' } });
   expect(screen.getByText(/尚无玩家积分/)).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
-  act(() => vi.advanceTimersByTime(10000));
+  act(() => {
+    vi.advanceTimersByTime(10000);
+  });
   expect(screen.getByText('请求超时，请重试')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
   expect(send).toHaveBeenCalledTimes(3);
@@ -64,12 +92,23 @@ it('shows pending roles, read-only faces, low cards, disconnected status and onl
   const { container } = render(<GameTable socket={socket} />);
   expect(screen.getAllByText(/身份待定/)).toHaveLength(2);
   expect(within(screen.getByLabelText('底牌')).queryAllByRole('button')).toHaveLength(0);
-  act(() => useAppStore.setState({ phase: 'playing', currentTurn: useAppStore.getState().playerId, players: useAppStore.getState().players.map(p => ({ ...p, cards_count: 2 })) }));
+  act(() => {
+    useAppStore.setState({
+      phase: 'playing',
+      currentTurn: useAppStore.getState().playerId,
+      players: useAppStore.getState().players.map((p) => ({ ...p, cards_count: 2 })),
+    });
+  });
   expect(container.querySelectorAll('.cards-warning').length).toBeGreaterThanOrEqual(2);
   expect(container.querySelector('.turn-banner')).not.toHaveClass('is-urgent');
-  act(() => vi.advanceTimersByTime(15200));
+  act(() => {
+    vi.advanceTimersByTime(15200);
+  });
   expect(container.querySelector('.turn-banner')).toHaveClass('is-urgent');
-  act(() => { useAppStore.setState({ latency: 88 }); useAppStore.getState().setConnected(false); });
+  act(() => {
+    useAppStore.setState({ latency: 88 });
+    useAppStore.getState().setConnected(false);
+  });
   expect(screen.getByText('连接中断')).toBeVisible();
   expect(useAppStore.getState().latency).toBe(0);
   expect(screen.queryByText('88ms')).toBeNull();
@@ -77,8 +116,14 @@ it('shows pending roles, read-only faces, low cards, disconnected status and onl
 
 it('announces a teammate win as your victory', () => {
   const { socket } = transport();
-  useAppStore.setState({ playerId: 'me', winnerId: 'ally', winnerName: '队友', winnerIsLandlord: false,
-    scores: [{ player_id: 'me', player_name: '我', is_landlord: false, score: 3 }], matchMode: 'online' });
+  useAppStore.setState({
+    playerId: 'me',
+    winnerId: 'ally',
+    winnerName: '队友',
+    winnerIsLandlord: false,
+    scores: [{ player_id: 'me', player_name: '我', is_landlord: false, score: 3 }],
+    matchMode: 'online',
+  });
   render(<GameResult socket={socket} />);
   expect(screen.getByRole('heading', { name: '你赢了' })).toBeVisible();
   expect(screen.getByRole('button', { name: '重新匹配' })).toBeVisible();

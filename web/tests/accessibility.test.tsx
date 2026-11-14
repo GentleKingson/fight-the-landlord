@@ -25,7 +25,44 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function StatefulHand({ cards, disabled = false }: { cards: CardInfo[]; disabled?: boolean }) {
+interface StatefulHandProps {
+  cards: CardInfo[];
+  disabled?: boolean;
+}
+
+class MockDomRect implements DOMRect {
+  readonly bottom: number;
+  readonly right: number;
+  readonly x: number;
+  readonly y: number;
+
+  constructor(
+    readonly left: number,
+    readonly top: number,
+    readonly width: number,
+    readonly height: number,
+  ) {
+    this.x = left;
+    this.y = top;
+    this.right = left + width;
+    this.bottom = top + height;
+  }
+
+  toJSON() {
+    return {
+      x: this.x,
+      y: this.y,
+      left: this.left,
+      top: this.top,
+      right: this.right,
+      bottom: this.bottom,
+      width: this.width,
+      height: this.height,
+    };
+  }
+}
+
+function StatefulHand({ cards, disabled = false }: StatefulHandProps) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   return (
     <Hand
@@ -35,12 +72,17 @@ function StatefulHand({ cards, disabled = false }: { cards: CardInfo[]; disabled
       onToggle={(key) => {
         setSelected((prev) => {
           const next = new Set(prev);
-          if (next.has(key)) next.delete(key);
-          else next.add(key);
+          if (next.has(key)) {
+            next.delete(key);
+          } else {
+            next.add(key);
+          }
           return next;
         });
       }}
-      onRangeSelect={(keys) => setSelected(new Set(keys))}
+      onRangeSelect={(keys) => {
+        setSelected(new Set(keys));
+      }}
     />
   );
 }
@@ -52,7 +94,7 @@ describe('Hand accessibility and spatial keyboard interaction', () => {
     { rank: 12, suit: 2, color: 0 }, // Q♣
     { rank: 11, suit: 3, color: 1 }, // J♦
     { rank: 10, suit: 0, color: 0 }, // 10♠
-    { rank: 9, suit: 1, color: 1 }   // 9♥
+    { rank: 9, suit: 1, color: 1 },  // 9♥
   ];
 
   it('passes axe nested-interactive and ARIA checks on Hand and GameTable with open drawer', async () => {
@@ -67,8 +109,8 @@ describe('Hand accessibility and spatial keyboard interaction', () => {
 
     const results = await axe.run(container, {
       rules: {
-        'color-contrast': { enabled: false }
-      }
+        'color-contrast': { enabled: false },
+      },
     });
     const nestedViolations = results.violations.filter((violation) => violation.id === 'nested-interactive');
     expect(nestedViolations).toEqual([]);
@@ -138,27 +180,17 @@ describe('Hand accessibility and spatial keyboard interaction', () => {
       const row = index < 3 ? 0 : 1;
       const col = index % 3;
       const left = 20 + col * 30;
-      const isSelected = option.getAttribute('aria-selected') === 'true';
       const baseTop = row === 0 ? 14 : 94;
       vi.spyOn(option, 'getBoundingClientRect').mockImplementation(() => {
         const liftedTop = option.getAttribute('aria-selected') === 'true' ? baseTop - 14 : baseTop;
-        return {
-          x: left,
-          y: liftedTop,
-          left,
-          top: liftedTop,
-          right: left + 58,
-          bottom: liftedTop + 78,
-          width: 58,
-          height: 78,
-          toJSON: () => ({})
-        } as DOMRect;
+        return new MockDomRect(left, liftedTop, 58, 78);
       });
-      void isSelected;
     });
 
     // Focus middle card of top row (index 1: K♥) and press ArrowDown -> middle card of bottom row (index 4: 10♠)
-    act(() => options[1].focus());
+    act(() => {
+      options[1].focus();
+    });
     const downEvent = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
     act(() => {
       options[1].dispatchEvent(downEvent);

@@ -1,11 +1,28 @@
-import { turnTiming, observeClock } from '../transport/clock';
 import { create } from 'zustand';
-import { MsgType, type DealTiming, type CardInfo, type GameStateDTO, type IncomingMessage, type LeaderboardEntry, type LobbyPanel, type Phase, type PlayerHand, type PlayerInfo, type PlayerScore, type RoomListItem, type StatsResultPayload, type UtilityDrawer } from '../protocol/types';
+import {
+  MsgType,
+  type CardInfo,
+  type DealTiming,
+  type GameStateDto,
+  type IncomingMessage,
+  type LeaderboardEntry,
+  type LobbyPanel,
+  type Phase,
+  type PlayerHand,
+  type PlayerInfo,
+  type PlayerScore,
+  type RoomListItem,
+  type StatsResultPayload,
+  type UtilityDrawer
+} from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
+import { observeClock, turnTiming } from '../transport/clock';
 import { captureEndSnapshot, END_REVEAL_DURATION_MS, type EndSnapshot, type EndView } from './endGame';
 
+const MATCH_MODE_STORAGE_KEY = 'ddz_match_mode';
+
 interface ConnectionSlice {
-  submission: "idle" | "pending" | "unknown" | "confirmed" | "rejected";
+  submission: 'idle' | 'pending' | 'unknown' | 'confirmed' | 'rejected';
   submissionMessage: string;
   connected: boolean;
   sessionReplaced: boolean;
@@ -34,7 +51,12 @@ interface LobbySlice {
   roomList: RoomListItem[];
 }
 
-export interface DealStage { id: string; startAt: number; endAt: number }
+/** Local wall-clock window for an active card-dealing animation. */
+export interface DealStage {
+  id: string;
+  startAt: number;
+  endAt: number;
+}
 
 interface TableSlice {
   roundId: string;
@@ -77,6 +99,7 @@ interface UiSlice {
   tableMessage: string;
 }
 
+/** Recent play, pass, bid, or system event recorded in the table history drawer. */
 export interface TableAction {
   type: 'play' | 'pass' | 'bid' | 'system';
   player_id?: string;
@@ -86,6 +109,7 @@ export interface TableAction {
   label?: string;
 }
 
+/** Most recent action displayed next to a player's seat on the table. */
 export interface SeatAction {
   type: 'play' | 'pass' | 'bid';
   player_id: string;
@@ -110,9 +134,10 @@ interface AppActions {
   handleMessage: (message: IncomingMessage) => void;
 }
 
+/** Combined application state and store actions. */
 export type AppState = ConnectionSlice & LobbySlice & TableSlice & UiSlice & AppActions;
 
-const initialTable: TableSlice = {
+const INITIAL_TABLE: TableSlice = {
   roundId: '',
   endSnapshot: null,
   endView: 'reveal',
@@ -133,7 +158,9 @@ const initialTable: TableSlice = {
   multiplier: 1,
   isGrabTurn: false,
   timeout: 0,
-  timerStart: 0, serverDeadline: 0, serverTimestamp: 0,
+  timerStart: 0,
+  serverDeadline: 0,
+  serverTimestamp: 0,
   winnerId: '',
   winnerName: '',
   winnerIsLandlord: false,
@@ -145,8 +172,10 @@ const initialTable: TableSlice = {
   seatActions: {}
 };
 
+/** Global Zustand store managing lobby, connection, and game table state. */
 export const useAppStore = create<AppState>((set, get) => ({
-  submission: "idle", submissionMessage: "",
+  submission: 'idle',
+  submissionMessage: '',
   connected: false,
   sessionReplaced: false,
   playerId: '',
@@ -169,32 +198,69 @@ export const useAppStore = create<AppState>((set, get) => ({
   leaderboard: [],
   leaderboardType: 'total',
   roomList: [],
-  ...initialTable,
+  ...INITIAL_TABLE,
   selectedCards: new Set<string>(),
   drawer: 'none',
   tableMessage: '',
 
-  setConnected: (connected) => set({ connected, ...(!connected ? { latency: 0, cancellingMatch: false, roomRequest: null } : {}), ...(!connected && get().phase === 'matching' ? { phase: 'lobby' as const } : {}) }),
-  setError: (error) => set({ error }),
-  setLobbyPanel: (lobbyPanel) => set({ lobbyPanel }),
-  setRoomCodeInput: (roomCodeInput) => set({ roomCodeInput }),
-  setDrawer: (drawer) => set({ drawer }),
+  setConnected: (connected) => {
+    set({
+      connected,
+      ...(!connected ? { latency: 0, cancellingMatch: false, roomRequest: null } : {}),
+      ...(!connected && get().phase === 'matching' ? { phase: 'lobby' as const } : {})
+    });
+  },
+  setError: (error) => {
+    set({ error });
+  },
+  setLobbyPanel: (lobbyPanel) => {
+    set({ lobbyPanel });
+  },
+  setRoomCodeInput: (roomCodeInput) => {
+    set({ roomCodeInput });
+  },
+  setDrawer: (drawer) => {
+    set({ drawer });
+  },
   toggleCard: (key) => {
     const selectedCards = new Set(get().selectedCards);
-    if (selectedCards.has(key)) selectedCards.delete(key);
-    else selectedCards.add(key);
+    if (selectedCards.has(key)) {
+      selectedCards.delete(key);
+    } else {
+      selectedCards.add(key);
+    }
     set({ selectedCards, tableMessage: '' });
   },
-  setSelection: (keys) => set({ selectedCards: new Set(keys), tableMessage: '' }),
-  clearSelection: () => set({ selectedCards: new Set(), tableMessage: '' }),
+  setSelection: (keys) => {
+    set({ selectedCards: new Set(keys), tableMessage: '' });
+  },
+  clearSelection: () => {
+    set({ selectedCards: new Set(), tableMessage: '' });
+  },
   leaveLocalRoom: () => {
-    set({ roomCode: '', ownerId: '', roomRequest: null, players: [], phase: 'lobby', ...initialTable, selectedCards: new Set(), tableMessage: '', ...(!['pending', 'unknown'].includes(get().submission) ? { submission: 'idle', submissionMessage: '' } as const : {}) });
+    set({
+      roomCode: '',
+      ownerId: '',
+      roomRequest: null,
+      players: [],
+      phase: 'lobby',
+      ...INITIAL_TABLE,
+      selectedCards: new Set(),
+      tableMessage: '',
+      ...(!['pending', 'unknown'].includes(get().submission)
+        ? ({ submission: 'idle', submissionMessage: '' } as const)
+        : {})
+    });
   },
   showSettlement: () => {
-    if (get().phase === 'game_over' && get().endSnapshot) set({ endView: 'result', revealDeadline: null });
+    if (get().phase === 'game_over' && get().endSnapshot) {
+      set({ endView: 'result', revealDeadline: null });
+    }
   },
   reviewEndTable: () => {
-    if (get().phase === 'game_over' && get().endSnapshot) set({ endView: 'review', revealDeadline: null });
+    if (get().phase === 'game_over' && get().endSnapshot) {
+      set({ endView: 'review', revealDeadline: null });
+    }
   },
   handleMessage: (message) => {
     const state = get();
@@ -203,9 +269,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
         const keepResult = state.phase === 'game_over' && state.endSnapshot && state.playerId === payload.player_id;
         set({
-          ...(!keepResult ? { ...initialTable, players: [], roomCode: '', ownerId: '', selectedCards: new Set<string>() } : {}),
+          ...(!keepResult
+            ? { ...INITIAL_TABLE, players: [], roomCode: '', ownerId: '', selectedCards: new Set<string>() }
+            : {}),
           connected: true,
-          ...(!['pending', 'unknown'].includes(state.submission) ? { submission: 'idle', submissionMessage: '' } as const : {}),
+          ...(!['pending', 'unknown'].includes(state.submission)
+            ? ({ submission: 'idle', submissionMessage: '' } as const)
+            : {}),
           cancellingMatch: false,
           roomRequest: null,
           error: '',
@@ -217,35 +287,69 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case MsgType.Reconnected: {
-        const payload = message.payload as { player_id: string; player_name: string; room_code?: string; game_state?: GameStateDTO };
+        const payload = message.payload as {
+          player_id: string;
+          player_name: string;
+          room_code?: string;
+          game_state?: GameStateDto;
+        };
         const snapshot = state.endSnapshot;
         const samePlayer = state.playerId === payload.player_id;
-        const sameEndedRound = snapshot && payload.game_state?.phase === 'ended' && snapshot.roomCode === payload.room_code
-          && (!payload.game_state.deal_id || !snapshot.roundId || snapshot.roundId === payload.game_state.deal_id);
+        const sameEndedRound =
+          snapshot &&
+          payload.game_state?.phase === 'ended' &&
+          snapshot.roomCode === payload.room_code &&
+          (!payload.game_state.deal_id || !snapshot.roundId || snapshot.roundId === payload.game_state.deal_id);
         // The server may already have expired the room; a local snapshot remains readable.
-        if (state.phase === 'game_over' && snapshot && samePlayer && (sameEndedRound || (!payload.game_state && !payload.room_code))) {
+        if (
+          state.phase === 'game_over' &&
+          snapshot &&
+          samePlayer &&
+          (sameEndedRound || (!payload.game_state && !payload.room_code))
+        ) {
           set({ playerName: payload.player_name });
           break;
         }
         if (payload.game_state) {
-          set({ ownerId: '', playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', ...restoreSnapshot(payload.game_state) });
+          set({
+            ownerId: '',
+            playerId: payload.player_id,
+            playerName: payload.player_name,
+            roomCode: payload.room_code ?? '',
+            ...restoreSnapshot(payload.game_state)
+          });
         } else {
-          set({ ...initialTable, players: [], ownerId: payload.room_code ? state.ownerId : '', playerId: payload.player_id, playerName: payload.player_name, roomCode: payload.room_code ?? '', phase: payload.room_code ? 'waiting' : 'lobby' });
+          set({
+            ...INITIAL_TABLE,
+            players: [],
+            ownerId: payload.room_code ? state.ownerId : '',
+            playerId: payload.player_id,
+            playerName: payload.player_name,
+            roomCode: payload.room_code ?? '',
+            phase: payload.room_code ? 'waiting' : 'lobby'
+          });
         }
         break;
       }
       case MsgType.Pong: {
         const payload = message.payload as { client_timestamp: number; server_timestamp: number };
         observeClock(payload.client_timestamp, payload.server_timestamp);
-        set({ latency: Date.now() - (payload.client_timestamp || Date.now()),
+        set({
+          latency: Date.now() - (payload.client_timestamp || Date.now()),
           ...(state.serverDeadline && ['bidding', 'playing'].includes(state.phase)
-            ? turnTiming({ turn_deadline: state.serverDeadline, server_time: state.serverTimestamp }) : {}) });
+            ? turnTiming({ turn_deadline: state.serverDeadline, server_time: state.serverTimestamp })
+            : {})
+        });
         break;
       }
       case MsgType.Error: {
         const payload = message.payload as { message?: string; request_type?: string };
-        set({ error: payload.message || '未知错误', roomRequest: payload.request_type === state.roomRequest ? null : state.roomRequest,
-          cancellingMatch: false, phase: state.phase === 'matching' && !state.cancellingMatch ? 'lobby' : state.phase });
+        set({
+          error: payload.message || '未知错误',
+          roomRequest: payload.request_type === state.roomRequest ? null : state.roomRequest,
+          cancellingMatch: false,
+          phase: state.phase === 'matching' && !state.cancellingMatch ? 'lobby' : state.phase
+        });
         break;
       }
       case MsgType.OnlineCount:
@@ -253,12 +357,28 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.RoomCreated: {
         const payload = message.payload as { room_code: string; player: PlayerInfo; owner_id?: string };
-        set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, ownerId: payload.owner_id || payload.player.id, players: [normalizeLobbyPlayer(payload.player)], phase: 'waiting', lobbyPanel: 'home' });
+        set({
+          ...INITIAL_TABLE,
+          roomRequest: null,
+          roomCode: payload.room_code,
+          ownerId: payload.owner_id || payload.player.id,
+          players: [normalizeLobbyPlayer(payload.player)],
+          phase: 'waiting',
+          lobbyPanel: 'home'
+        });
         break;
       }
       case MsgType.RoomJoined: {
         const payload = message.payload as { room_code: string; players: PlayerInfo[]; owner_id?: string };
-        set({ ...initialTable, roomRequest: null, roomCode: payload.room_code, ownerId: payload.owner_id ?? '', players: normalizeLobbyPlayers(payload.players ?? []), phase: 'waiting', lobbyPanel: 'home' });
+        set({
+          ...INITIAL_TABLE,
+          roomRequest: null,
+          roomCode: payload.room_code,
+          ownerId: payload.owner_id ?? '',
+          players: normalizeLobbyPlayers(payload.players ?? []),
+          phase: 'waiting',
+          lobbyPanel: 'home'
+        });
         break;
       }
       case MsgType.PlayerJoined: {
@@ -279,13 +399,14 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? (remaining.find((player) => !player.is_bot)?.id ?? '')
               : state.ownerId;
           const ownerChanged = Boolean(nextOwnerId && nextOwnerId !== state.ownerId);
-          const resetPendingReady = nextOwnerId === state.playerId
-            && (state.roomRequest === MsgType.Ready || state.roomRequest === MsgType.CancelReady);
+          const resetPendingReady =
+            nextOwnerId === state.playerId &&
+            (state.roomRequest === MsgType.Ready || state.roomRequest === MsgType.CancelReady);
           set({
             ownerId: nextOwnerId,
             ...(resetPendingReady ? { roomRequest: null } : {}),
             players: ownerChanged
-              ? remaining.map((player) => player.id === nextOwnerId ? { ...player, ready: false } : player)
+              ? remaining.map((player) => (player.id === nextOwnerId ? { ...player, ready: false } : player))
               : remaining
           });
         }
@@ -293,19 +414,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.PlayerReady: {
         const payload = message.payload as { player_id: string; ready: boolean };
-        const confirmed = payload.player_id === state.playerId && state.roomRequest === (payload.ready ? MsgType.Ready : MsgType.CancelReady);
-        set({ ...(confirmed ? { roomRequest: null } : {}), players: state.players.map((player) => player.id === payload.player_id ? { ...player, ready: payload.ready } : player) });
+        const confirmed =
+          payload.player_id === state.playerId &&
+          state.roomRequest === (payload.ready ? MsgType.Ready : MsgType.CancelReady);
+        set({
+          ...(confirmed ? { roomRequest: null } : {}),
+          players: state.players.map((player) =>
+            player.id === payload.player_id ? { ...player, ready: payload.ready } : player
+          )
+        });
         break;
       }
       case MsgType.MatchCanceled:
-        if (state.phase === 'matching') set({ phase: 'lobby', cancellingMatch: false });
+        if (state.phase === 'matching') {
+          set({ phase: 'lobby', cancellingMatch: false });
+        }
         break;
       case MsgType.MatchFound:
         set({ phase: 'waiting', cancellingMatch: false });
         break;
       case MsgType.GameStart: {
         const payload = message.payload as { players: PlayerInfo[] };
-        set({ ...initialTable, ownerId: '', roomRequest: null, players: normalizeGamePlayers(payload.players ?? [], state.playerId), phase: 'dealing', selectedCards: new Set() });
+        set({
+          ...INITIAL_TABLE,
+          ownerId: '',
+          roomRequest: null,
+          players: normalizeGamePlayers(payload.players ?? [], state.playerId),
+          phase: 'dealing',
+          selectedCards: new Set()
+        });
         break;
       }
       case MsgType.DealCards: {
@@ -314,7 +451,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         const deal = restoreDeal(payload);
         if (deal && state.deal?.id === deal.id) break;
         set({
-          ...(deal ? { ...initialTable, deal, phase: 'dealing' as const, selectedCards: new Set<string>(), tableMessage: '' } : {}),
+          ...(deal
+            ? { ...INITIAL_TABLE, deal, phase: 'dealing' as const, selectedCards: new Set<string>(), tableMessage: '' }
+            : {}),
           roundId: payload.deal_id ?? state.roundId,
           hand,
           bottomCards: payload.bottom_cards ?? [],
@@ -322,30 +461,71 @@ export const useAppStore = create<AppState>((set, get) => ({
           seatActions: {},
           selectedCards: new Set(),
           recentActions: hand.length === 17 ? [] : state.recentActions,
-          players: syncDealtCounts(deal ? state.players.map(player => ({ ...player, is_landlord: false, cards_count: 17 })) : state.players, state.playerId, hand.length),
+          players: syncDealtCounts(
+            deal
+              ? state.players.map((player) => ({ ...player, is_landlord: false, cards_count: 17 }))
+              : state.players,
+            state.playerId,
+            hand.length
+          ),
           cardCounter: initialCounter(hand)
         });
         break;
       }
       case MsgType.BidTurn: {
-        const payload = message.payload as { bid_token?: string; player_id: string; timeout: number; is_grab: boolean; multiplier: number };
-        set({ deal: null, bidToken: payload.bid_token ?? '', phase: 'bidding', currentTurn: payload.player_id, isGrabTurn: payload.is_grab, multiplier: payload.multiplier || 1, ...turnTiming(payload), tableMessage: '' });
+        const payload = message.payload as {
+          bid_token?: string;
+          player_id: string;
+          timeout: number;
+          is_grab: boolean;
+          multiplier: number;
+        };
+        set({
+          deal: null,
+          bidToken: payload.bid_token ?? '',
+          phase: 'bidding',
+          currentTurn: payload.player_id,
+          isGrabTurn: payload.is_grab,
+          multiplier: payload.multiplier || 1,
+          ...turnTiming(payload),
+          tableMessage: ''
+        });
         break;
       }
       case MsgType.BidResult: {
-        const payload = message.payload as { player_id: string; player_name: string; bid: boolean; is_grab: boolean; multiplier: number };
-        const seatAction = {
-          type: 'bid' as const,
+        const payload = message.payload as {
+          player_id: string;
+          player_name: string;
+          bid: boolean;
+          is_grab: boolean;
+          multiplier: number;
+        };
+        const label = payload.bid ? (payload.is_grab ? '抢地主' : '叫地主') : payload.is_grab ? '不抢' : '不叫';
+        const seatAction: SeatAction = {
+          type: 'bid',
           player_id: payload.player_id,
           player_name: payload.player_name,
-          label: payload.bid ? (payload.is_grab ? '抢地主' : '叫地主') : (payload.is_grab ? '不抢' : '不叫')
+          label
         };
         set({ seatActions: setSeatAction(state.seatActions, seatAction) });
-        set({ multiplier: payload.multiplier || state.multiplier, recentActions: pushAction(state.recentActions, { type: 'bid', player_id: payload.player_id, player_name: payload.player_name, label: payload.bid ? (payload.is_grab ? '抢地主' : '叫地主') : (payload.is_grab ? '不抢' : '不叫') }) });
+        set({
+          multiplier: payload.multiplier || state.multiplier,
+          recentActions: pushAction(state.recentActions, {
+            type: 'bid',
+            player_id: payload.player_id,
+            player_name: payload.player_name,
+            label
+          })
+        });
         break;
       }
       case MsgType.Landlord: {
-        const payload = message.payload as { player_id: string; player_name: string; bottom_cards: CardInfo[]; multiplier: number };
+        const payload = message.payload as {
+          player_id: string;
+          player_name: string;
+          bottom_cards: CardInfo[];
+          multiplier: number;
+        };
         const isMe = payload.player_id === state.playerId;
         const nextHand = isMe ? sortCards([...state.hand, ...(payload.bottom_cards ?? [])]) : state.hand;
         set({
@@ -355,21 +535,46 @@ export const useAppStore = create<AppState>((set, get) => ({
           multiplier: payload.multiplier || 1,
           hand: nextHand,
           seatActions: {},
-          recentActions: pushAction(state.recentActions, { type: 'system', label: `${payload.player_name} 成为地主` })
+          recentActions: pushAction(state.recentActions, {
+            type: 'system',
+            label: `${payload.player_name} 成为地主`
+          })
         });
         break;
       }
       case MsgType.PlayTurn: {
-        const payload = message.payload as { turn_token?: string; player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
-        set({ deal: null, bidToken: '', turnToken: payload.turn_token ?? '', phase: 'playing', currentTurn: payload.player_id, mustPlay: payload.must_play, canBeat: payload.can_beat, ...turnTiming(payload), tableMessage: '' });
+        const payload = message.payload as {
+          turn_token?: string;
+          player_id: string;
+          timeout: number;
+          must_play: boolean;
+          can_beat: boolean;
+        };
+        set({
+          deal: null,
+          bidToken: '',
+          turnToken: payload.turn_token ?? '',
+          phase: 'playing',
+          currentTurn: payload.player_id,
+          mustPlay: payload.must_play,
+          canBeat: payload.can_beat,
+          ...turnTiming(payload),
+          tableMessage: ''
+        });
         break;
       }
       case MsgType.CardPlayed: {
-        const payload = message.payload as { player_id: string; player_name: string; cards: CardInfo[]; cards_left: number; hand_type: string };
-        const playedKeys = new Set((payload.cards ?? []).map(cardKey));
+        const payload = message.payload as {
+          player_id: string;
+          player_name: string;
+          cards: CardInfo[];
+          cards_left: number;
+          hand_type: string;
+        };
+        const playedKeys = new Set((payload.cards ?? []).map((card) => cardKey(card)));
         const isMe = payload.player_id === state.playerId;
-        const action = {
-          type: 'play' as const,
+        const action: SeatAction = {
+          type: 'play',
           player_id: payload.player_id,
           player_name: payload.player_name,
           cards: payload.cards ?? [],
@@ -382,18 +587,32 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastPlayedName: payload.player_name,
           lastHandType: payload.hand_type,
           hand: isMe ? state.hand.filter((card) => !playedKeys.has(cardKey(card))) : state.hand,
-          players: state.players.map((player) => player.id === payload.player_id ? { ...player, cards_count: payload.cards_left } : player),
-          cardCounter: isMe || !Object.keys(state.cardCounter).length ? state.cardCounter : deductCounter(state.cardCounter, payload.cards ?? []),
+          players: state.players.map((player) =>
+            player.id === payload.player_id ? { ...player, cards_count: payload.cards_left } : player
+          ),
+          cardCounter:
+            isMe || !Object.keys(state.cardCounter).length
+              ? state.cardCounter
+              : deductCounter(state.cardCounter, payload.cards ?? []),
           recentActions: pushAction(state.recentActions, action),
           seatActions: setSeatAction(state.mustPlay ? {} : state.seatActions, action),
-          selectedCards: new Set(state.hand.filter(card => state.selectedCards.has(cardKey(card)) && (!isMe || !playedKeys.has(cardKey(card)))).map(cardKey)),
+          selectedCards: new Set(
+            state.hand
+              .filter((card) => state.selectedCards.has(cardKey(card)) && (!isMe || !playedKeys.has(cardKey(card))))
+              .map((card) => cardKey(card))
+          ),
           tableMessage: ''
         });
         break;
       }
       case MsgType.PlayerPass: {
         const payload = message.payload as { player_id: string; player_name: string };
-        const action = { type: 'pass' as const, player_id: payload.player_id, player_name: payload.player_name, label: '不出' };
+        const action: SeatAction = {
+          type: 'pass',
+          player_id: payload.player_id,
+          player_name: payload.player_name,
+          label: '不出'
+        };
         set({
           recentActions: pushAction(state.recentActions, action),
           seatActions: setSeatAction(state.seatActions, action)
@@ -402,12 +621,40 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       case MsgType.GameOver: {
         if (!['dealing', 'bidding', 'playing', 'game_over'].includes(state.phase)) break;
-        if (state.endSnapshot) break; // A replay must not restart the reveal or interrupt review.
-        const payload = message.payload as { winner_id: string; winner_name: string; is_landlord: boolean; multiplier: number; scores: PlayerScore[]; player_hands: PlayerHand[] };
+        // A replay must not restart the reveal or interrupt review.
+        if (state.endSnapshot) break;
+        const payload = message.payload as {
+          winner_id: string;
+          winner_name: string;
+          is_landlord: boolean;
+          multiplier: number;
+          scores: PlayerScore[];
+          player_hands: PlayerHand[];
+        };
         const endSnapshot = captureEndSnapshot(state, payload);
-        set({ deal: null, bidToken: '', turnToken: '', phase: 'game_over', winnerId: endSnapshot.winnerId, winnerName: endSnapshot.winnerName, winnerIsLandlord: endSnapshot.winnerIsLandlord, finalMultiplier: endSnapshot.finalMultiplier, scores: endSnapshot.scores, playerHands: endSnapshot.playerHands, drawer: 'none',
-          endSnapshot, endView: 'reveal', revealDeadline: Date.now() + END_REVEAL_DURATION_MS,
-          currentTurn: '', timeout: 0, timerStart: 0, mustPlay: false, canBeat: false, selectedCards: new Set(), tableMessage: '' });
+        set({
+          deal: null,
+          bidToken: '',
+          turnToken: '',
+          phase: 'game_over',
+          winnerId: endSnapshot.winnerId,
+          winnerName: endSnapshot.winnerName,
+          winnerIsLandlord: endSnapshot.winnerIsLandlord,
+          finalMultiplier: endSnapshot.finalMultiplier,
+          scores: endSnapshot.scores,
+          playerHands: endSnapshot.playerHands,
+          drawer: 'none',
+          endSnapshot,
+          endView: 'reveal',
+          revealDeadline: Date.now() + END_REVEAL_DURATION_MS,
+          currentTurn: '',
+          timeout: 0,
+          timerStart: 0,
+          mustPlay: false,
+          canBeat: false,
+          selectedCards: new Set(),
+          tableMessage: ''
+        });
         break;
       }
       case MsgType.StatsResult:
@@ -423,12 +670,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       case MsgType.PlayerOffline: {
         const payload = message.payload as { player_id: string };
-        set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, online: false } : player) });
+        set({
+          players: state.players.map((player) =>
+            player.id === payload.player_id ? { ...player, online: false } : player
+          )
+        });
         break;
       }
       case MsgType.PlayerOnline: {
         const payload = message.payload as { player_id: string };
-        set({ players: state.players.map((player) => player.id === payload.player_id ? { ...player, online: true } : player) });
+        set({
+          players: state.players.map((player) =>
+            player.id === payload.player_id ? { ...player, online: true } : player
+          )
+        });
         break;
       }
       case MsgType.Maintenance:
@@ -443,20 +698,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }));
 
+/** Loads the persisted match mode preference from sessionStorage. */
 export function loadMatchMode(): 'practice' | 'online' {
-  try { return sessionStorage.getItem('ddz_match_mode') === 'practice' ? 'practice' : 'online'; }
-  catch { return 'online'; }
+  try {
+    return sessionStorage.getItem(MATCH_MODE_STORAGE_KEY) === 'practice' ? 'practice' : 'online';
+  } catch {
+    // Storage may be disabled in restricted browsing contexts.
+    return 'online';
+  }
 }
 
 useAppStore.subscribe((state, previous) => {
   if (state.matchMode !== previous.matchMode) {
-    try { sessionStorage.setItem('ddz_match_mode', state.matchMode); } catch { /* Storage may be disabled. */ }
+    try {
+      sessionStorage.setItem(MATCH_MODE_STORAGE_KEY, state.matchMode);
+    } catch {
+      // Storage may be disabled.
+    }
   }
 });
 
 function mergePlayer(players: PlayerInfo[], next: PlayerInfo): PlayerInfo[] {
   return players.some((player) => player.id === next.id)
-    ? players.map((player) => player.id === next.id ? next : player)
+    ? players.map((player) => (player.id === next.id ? next : player))
     : [...players, next].sort((a, b) => a.seat - b.seat);
 }
 
@@ -465,7 +729,7 @@ function normalizeLobbyPlayer(player: PlayerInfo): PlayerInfo {
 }
 
 function normalizeLobbyPlayers(players: PlayerInfo[]): PlayerInfo[] {
-  return players.map(normalizeLobbyPlayer).sort((a, b) => a.seat - b.seat);
+  return players.map((player) => normalizeLobbyPlayer(player)).sort((a, b) => a.seat - b.seat);
 }
 
 function normalizeGamePlayers(players: PlayerInfo[], currentPlayerId: string, currentHandCount = 17): PlayerInfo[] {
@@ -481,11 +745,16 @@ function normalizeGamePlayers(players: PlayerInfo[], currentPlayerId: string, cu
 function syncDealtCounts(players: PlayerInfo[], currentPlayerId: string, handCount: number): PlayerInfo[] {
   return players.map((player) => ({
     ...player,
-    cards_count: player.id === currentPlayerId ? handCount : (player.cards_count || 17)
+    cards_count: player.id === currentPlayerId ? handCount : player.cards_count || 17
   }));
 }
 
-function syncLandlordCounts(players: PlayerInfo[], currentPlayerId: string, landlordId: string, currentHandCount: number): PlayerInfo[] {
+function syncLandlordCounts(
+  players: PlayerInfo[],
+  currentPlayerId: string,
+  landlordId: string,
+  currentHandCount: number
+): PlayerInfo[] {
   return players.map((player) => {
     const isLandlord = player.id === landlordId;
     const fallbackCount = isLandlord ? 20 : 17;
@@ -497,28 +766,43 @@ function syncLandlordCounts(players: PlayerInfo[], currentPlayerId: string, land
   });
 }
 
-function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
+function restoreSnapshot(dto: GameStateDto): Partial<AppState> {
   const isPlaying = dto.phase === 'playing' || dto.phase === 'ended';
   const hasLandlord = (dto.players ?? []).some((player) => player.is_landlord);
   const hand = sortCards(dto.hand ?? []);
-  let seatActions: Record<string, SeatAction> = dto.last_played?.length && dto.last_player_id
-    ? { [dto.last_player_id]: { type: 'play' as const, player_id: dto.last_player_id, cards: dto.last_played } }
-    : {};
+  let seatActions: Record<string, SeatAction> =
+    dto.last_played?.length && dto.last_player_id
+      ? { [dto.last_player_id]: { type: 'play', player_id: dto.last_player_id, cards: dto.last_played } }
+      : {};
   const plays = dto.public_plays ?? [];
   for (const play of plays) {
-    if (play.new_trick) seatActions = {};
+    if (play.new_trick) {
+      seatActions = {};
+    }
     seatActions = setSeatAction(seatActions, { ...play, label: play.type === 'pass' ? '不出' : undefined });
   }
   // Current hand + every public play reconstructs all cards no longer held by opponents.
-  const cardCounter = deductCounter(initialCounter(hand), plays.flatMap(play => play.cards ?? []));
+  const cardCounter = deductCounter(
+    initialCounter(hand),
+    plays.flatMap((play) => play.cards ?? [])
+  );
   return {
-    ...initialTable,
+    ...INITIAL_TABLE,
     roundId: dto.deal_id ?? '',
     multiplier: dto.multiplier || 1,
     ...turnTiming({ ...dto, timeout: 0, turn_deadline: dto.turn_paused ? 0 : dto.turn_deadline }),
     deal: dto.phase === 'dealing' ? restoreDeal(dto) : null,
     selectedCards: new Set(),
-    phase: dto.phase === 'dealing' ? 'dealing' : dto.phase === 'bidding' ? 'bidding' : dto.phase === 'playing' ? 'playing' : dto.phase === 'ended' ? 'game_over' : 'lobby',
+    phase:
+      dto.phase === 'dealing'
+        ? 'dealing'
+        : dto.phase === 'bidding'
+          ? 'bidding'
+          : dto.phase === 'playing'
+            ? 'playing'
+            : dto.phase === 'ended'
+              ? 'game_over'
+              : 'lobby',
     players: [...(dto.players ?? [])].sort((a, b) => a.seat - b.seat),
     hand,
     bottomCards: dto.bottom_cards ?? [],
@@ -528,20 +812,25 @@ function restoreSnapshot(dto: GameStateDTO): Partial<AppState> {
     lastPlayed: dto.last_played ?? [],
     lastPlayedBy: dto.last_player_id ?? '',
     lastPlayedName: dto.last_played?.length
-      ? dto.players?.find((player) => player.id === dto.last_player_id)?.name ?? ''
+      ? (dto.players?.find((player) => player.id === dto.last_player_id)?.name ?? '')
       : '',
     lastHandType: dto.last_hand_type ?? '',
     seatActions,
     mustPlay: dto.must_play,
     canBeat: dto.can_beat,
     cardCounter: dto.public_plays !== undefined || !isPlaying ? cardCounter : {},
-    recentActions: plays.slice(-10).map(play => ({ ...play, label: play.type === 'pass' ? '不出' : undefined }))
+    recentActions: plays.slice(-10).map((play) => ({ ...play, label: play.type === 'pass' ? '不出' : undefined }))
   };
 }
 
-// Translate server times once on receipt; wall-clock differences do not restart deals.
+/**
+ * Translates server deal timing to local timestamps once on receipt so
+ * wall-clock differences do not restart deals.
+ */
 export function restoreDeal(timing: DealTiming): DealStage | null {
-  if (!timing.deal_id || !timing.deal_start_at || !timing.deal_end_at || !timing.server_time) return null;
+  if (!timing.deal_id || !timing.deal_start_at || !timing.deal_end_at || !timing.server_time) {
+    return null;
+  }
   const offset = Date.now() - timing.server_time;
   return { id: timing.deal_id, startAt: timing.deal_start_at + offset, endAt: timing.deal_end_at + offset };
 }

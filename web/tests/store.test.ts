@@ -3,7 +3,9 @@ import { MsgType } from '../src/protocol/types';
 import { useAppStore } from '../src/stores/appStore';
 
 describe('reconnect preserves recoverable table state', () => {
-  beforeEach(() => useAppStore.getState().leaveLocalRoom());
+  beforeEach(() => {
+    useAppStore.getState().leaveLocalRoom();
+  });
 
   it.each([1, 4, 8])('restores authoritative x%i multiplier through a playing snapshot and turn replay', (multiplier) => {
     useAppStore.setState({ playerId: 'farmer', phase: 'playing', multiplier: 999 });
@@ -383,19 +385,36 @@ it('preserves offline flags and zero card counts in snapshots and subsequent dea
 it('restores the counter, public history, current trick and timer after a fresh page load', () => {
   useAppStore.getState().leaveLocalRoom();
   const card = (rank: number, suit = 0) => ({ rank, suit, color: suit % 2 });
-  const public_plays = [
+  const publicPlays = [
     { type: 'play', player_id: 'me', player_name: '我', cards: [card(3)], hand_type: '单张', new_trick: true },
     { type: 'pass', player_id: 'b', player_name: 'B', cards: [], hand_type: '', new_trick: false },
     { type: 'pass', player_id: 'c', player_name: 'C', cards: [], hand_type: '', new_trick: false },
     { type: 'play', player_id: 'me', player_name: '我', cards: [card(4)], hand_type: '单张', new_trick: true },
   ];
-  useAppStore.getState().handleMessage({ type: MsgType.Reconnected, payload: {
-    player_id: 'me', game_state: {
-      phase: 'playing', players: [], hand: [card(5)], multiplier: 8,
-      public_plays, last_played: [card(4)], last_player_id: 'me', last_hand_type: '单张',
-      server_time: 10000, turn_deadline: 17500,
-    }
-  } } as never);
+  useAppStore.getState().handleMessage({
+    type: MsgType.Reconnected,
+    payload: {
+      player_id: 'me',
+      player_name: '我',
+      room_code: '123456',
+      game_state: {
+        phase: 'playing',
+        players: [],
+        hand: [card(5)],
+        bottom_cards: [],
+        current_turn: 'me',
+        multiplier: 8,
+        public_plays: publicPlays,
+        last_played: [card(4)],
+        last_player_id: 'me',
+        last_hand_type: '单张',
+        must_play: false,
+        can_beat: true,
+        server_time: 10000,
+        turn_deadline: 17500,
+      },
+    },
+  });
   const state = useAppStore.getState();
   expect(state.multiplier).toBe(8);
   expect(state.timeout).toBe(7.5);
@@ -405,7 +424,7 @@ it('restores the counter, public history, current trick and timer after a fresh 
   expect(state.cardCounter[3]).toBe(3);
   expect(state.cardCounter[4]).toBe(3);
   expect(state.cardCounter[5]).toBe(3);
-  expect(Object.values(state.cardCounter).reduce((a,b) => a+b,0)).toBe(51);
+  expect(Object.values(state.cardCounter).reduce((a, b) => a + b, 0)).toBe(51);
 });
 
 it('cookie handshake keeps the practice replay preference during reload', () => {

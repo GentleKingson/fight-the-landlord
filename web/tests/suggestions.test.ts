@@ -4,7 +4,7 @@ import type { CardInfo } from '../src/protocol/types';
 
 function cards(ranks: number[]): CardInfo[] {
   const counts = new Map<number, number>();
-  return ranks.map(rank => {
+  return ranks.map((rank) => {
     const suit = rank >= 16 ? 4 : counts.get(rank) ?? 0;
     counts.set(rank, suit + 1);
     return { rank, suit, color: suit % 2 };
@@ -14,57 +14,75 @@ function cards(ranks: number[]): CardInfo[] {
 // Independent bounded oracle: enumerate every rank-count subset, then ask the rule parser.
 function legalSubsets(hand: CardInfo[]): CardInfo[][] {
   let subsets: CardInfo[][] = [[]];
-  for (const rank of new Set(hand.map(card => card.rank))) {
-    const group = hand.filter(card => card.rank === rank);
-    subsets = subsets.flatMap(subset => Array.from({ length: group.length + 1 }, (_, n) => [...subset, ...group.slice(0, n)]));
+  for (const rank of new Set(hand.map((card) => card.rank))) {
+    const group = hand.filter((card) => card.rank === rank);
+    subsets = subsets.flatMap((subset) =>
+      Array.from({ length: group.length + 1 }, (_, n) => [...subset, ...group.slice(0, n)])
+    );
   }
-  return subsets.filter(subset => parseHand(subset));
+  return subsets.filter((subset) => parseHand(subset));
 }
 
-it.each([
-  [3, 3, 4, 5, 6, 7, 8],
-  [3, 4, 5, 5, 5, 6, 6, 6],
-  [3, 3, 3, 3, 4, 4, 5, 5, 16, 17],
-  [3, 3, 3, 4, 4, 4, 5, 5, 6, 6],
-  [3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6],
-  [10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17],
-  [3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 16, 17]
-].map(ranks => ({ ranks })))('matches all legal rank combinations for $ranks', ({ ranks }) => {
+it.each(
+  [
+    [3, 3, 4, 5, 6, 7, 8],
+    [3, 4, 5, 5, 5, 6, 6, 6],
+    [3, 3, 3, 3, 4, 4, 5, 5, 16, 17],
+    [3, 3, 3, 4, 4, 4, 5, 5, 6, 6],
+    [3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6],
+    [10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17],
+    [3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 16, 17],
+  ].map((ranks) => ({ ranks }))
+)('matches all legal rank combinations for $ranks', ({ ranks }) => {
   const hand = cards(ranks);
   const original = JSON.stringify(hand);
   const all = legalSubsets(hand);
   const suggestions = suggestPlays(hand, [], true);
-  expect(new Set(suggestions.map(handSignature))).toEqual(new Set(all.map(handSignature)));
-  expect(suggestions).toHaveLength(new Set(suggestions.map(handSignature)).size);
+  expect(new Set(suggestions.map((play) => handSignature(play)))).toEqual(
+    new Set(all.map((play) => handSignature(play)))
+  );
+  expect(suggestions).toHaveLength(new Set(suggestions.map((play) => handSignature(play))).size);
   expect(suggestPlays([...hand].reverse(), [], true)).toEqual(suggestions);
   for (const suggestion of suggestions) {
     expect(new Set(suggestion).size).toBe(suggestion.length);
-    for (const card of suggestion) expect(hand).toContain(card);
+    for (const card of suggestion) {
+      expect(hand).toContain(card);
+    }
   }
   // Include a target for every supported shape, with multiple sequence lengths.
-  const targets = new Map(all.map(move => {
-    const parsed = parseHand(move)!;
-    return [`${parsed.type}:${parsed.length}`, move] as const;
-  }));
+  const targets = new Map(
+    all.map((move) => {
+      const parsed = parseHand(move);
+      if (!parsed) {
+        throw new Error('Expected legal subset to parse');
+      }
+      return [`${parsed.type}:${parsed.length}`, move] as const;
+    })
+  );
   for (const target of targets.values()) {
-    expect(new Set(suggestPlays(hand, target, false).map(handSignature))).toEqual(
-      new Set(all.filter(move => canBeat(parseHand(move), parseHand(target))).map(handSignature))
+    expect(new Set(suggestPlays(hand, target, false).map((play) => handSignature(play)))).toEqual(
+      new Set(all.filter((move) => canBeat(parseHand(move), parseHand(target))).map((play) => handSignature(play)))
     );
   }
   expect(JSON.stringify(hand)).toBe(original);
 });
 
 it('offers every attachment and preserves pairs and bombs before splitting them', () => {
-  expect(suggestPlays(cards([3, 4, 5, 5, 5]), cards([4, 4, 4, 6]), false).map(handSignature))
-    .toEqual(['3,5,5,5', '4,5,5,5']);
-  expect(suggestPlays(cards([5, 5, 6, 7, 7, 7, 7, 16, 17]), cards([4]), false).map(handSignature))
-    .toEqual(['6', '5', '16', '17', '7', '7,7,7,7', '16,17']);
+  expect(suggestPlays(cards([3, 4, 5, 5, 5]), cards([4, 4, 4, 6]), false).map((play) => handSignature(play))).toEqual([
+    '3,5,5,5',
+    '4,5,5,5',
+  ]);
+  expect(
+    suggestPlays(cards([5, 5, 6, 7, 7, 7, 7, 16, 17]), cards([4]), false).map((play) => handSignature(play))
+  ).toEqual(['6', '5', '16', '17', '7', '7,7,7,7', '16,17']);
 });
 
 it('covers long planes and their different wings on a 20-card hand', () => {
   const hand = cards([3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11]);
   const all = legalSubsets(hand);
-  expect(new Set(suggestPlays(hand, [], true).map(handSignature))).toEqual(new Set(all.map(handSignature)));
+  expect(new Set(suggestPlays(hand, [], true).map((play) => handSignature(play)))).toEqual(
+    new Set(all.map((play) => handSignature(play)))
+  );
 });
 
 it('does not offer replies to a rocket or invalid target, but can lead after a rocket', () => {

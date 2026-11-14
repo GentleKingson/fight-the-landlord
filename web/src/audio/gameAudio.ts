@@ -4,101 +4,153 @@ import { cardSoundNames, cardSoundUrls } from './cardSounds';
 const PREFERENCE_KEY = 'ddz_sound_enabled';
 const MAX_PENDING_PLAYS = 3;
 const MAX_AGE_MS = 3000;
+const RESULT_MAX_AGE_MS = 10_000;
+const MAX_CLIP_TIMEOUT_MS = 15_000;
 
 type AudioKind = 'deal' | 'event' | 'turn' | 'final-play' | 'result';
-interface Announcement { names: string[]; expiresAt: number; kind: AudioKind; volume: number; startAt?: number }
 
+interface Announcement {
+  names: string[];
+  expiresAt: number;
+  kind: AudioKind;
+  volume: number;
+  startAt?: number;
+}
+
+/** Web Audio queue and playback controller for voice and sound effects. */
 export class GameAudio {
   private enabled = this.loadPreference();
   private context: AudioContext | null = null;
-  private buffers = new Map<string, AudioBuffer>();
-  private listeners = new Set<() => void>();
+  private readonly buffers = new Map<string, AudioBuffer>();
+  private readonly listeners = new Set<() => void>();
   private queue: Announcement[] = [];
   private active: Announcement | null = null;
   private generation = 0;
   private draining = false;
   private cancelClip: (() => void) | null = null;
 
-  getEnabled = (): boolean => this.enabled;
-  subscribe = (listener: () => void): (() => void) => {
+  readonly getEnabled = (): boolean => this.enabled;
+
+  readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    return () => {
+      this.listeners.delete(listener);
+    };
   };
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    try { localStorage.setItem(PREFERENCE_KEY, String(enabled)); } catch { /* Storage is optional. */ }
-    if (enabled) this.unlock();
-    else this.stop();
-    this.listeners.forEach(listener => listener());
+    try {
+      localStorage.setItem(PREFERENCE_KEY, String(enabled));
+    } catch {
+      // Storage is optional.
+    }
+    if (enabled) {
+      this.unlock();
+    } else {
+      this.stop();
+    }
+    this.listeners.forEach((listener) => {
+      listener();
+    });
   }
 
   // Call synchronously from a user gesture, including the first gesture after
   // reload or iOS interruption. Never replay events received while locked.
-  unlock = (): void => {
+  readonly unlock = (): void => {
     if (!this.enabled || document.hidden) return;
     try {
       if (!this.context || this.context.state === 'closed') {
-        const AudioContextClass = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        const AudioContextClass =
+          window.AudioContext ??
+          (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!AudioContextClass) return;
         this.context = new AudioContextClass();
         this.context.onstatechange = () => {
-          if (this.context?.state !== 'running') this.stop();
+          if (this.context?.state !== 'running') {
+            this.stop();
+          }
         };
       }
       if (this.context.state === 'running') return;
-      void this.context.resume().catch(() => {});
+      void this.context.resume().catch(() => {
+        // Ignore resume failure; playing a silent buffer below unlocks Safari/iOS.
+      });
       const silent = this.context.createBufferSource();
       silent.buffer = this.context.createBuffer(1, 1, this.context.sampleRate);
       silent.connect(this.context.destination);
-      silent.onended = () => silent.disconnect();
+      silent.onended = () => {
+        silent.disconnect();
+      };
       silent.start();
-    } catch { /* Unsupported audio or autoplay policy must not affect the game. */ }
+    } catch {
+      // Unsupported audio or autoplay policy must not affect the game.
+    }
   };
 
   play(handType: string, cards: CardInfo[], cardsLeft?: number): void {
     const names = [...cardSoundNames(handType, cards)];
-    if (cardsLeft === 1 || cardsLeft === 2) names.push(`last${cardsLeft}`);
+    if (cardsLeft === 1 || cardsLeft === 2) {
+      names.push(`last${cardsLeft}`);
+    }
     this.enqueue(names, cardsLeft === 0 ? 'final-play' : 'event');
   }
 
   bid(bid: boolean, isGrab: boolean): void {
-    this.enqueue([isGrab ? (bid ? 'bid_grab' : 'bid_nograb') : (bid ? 'bid_call' : 'bid_nocall')]);
+    this.enqueue([isGrab ? (bid ? 'bid_grab' : 'bid_nograb') : bid ? 'bid_call' : 'bid_nocall']);
   }
 
-  pass(): void { this.enqueue(['pass_buyao']); }
+  pass(): void {
+    this.enqueue(['pass_buyao']);
+  }
+
   deal(startAt?: number, endAt?: number): void {
     // Redeals replace the preceding bid voice. Loading seeks to this timeline.
     this.stop();
     this.enqueue(['deal'], 'deal', 0.45, endAt ?? Date.now() + MAX_AGE_MS, startAt);
   }
+
   endDeal(): void {
-    this.queue = this.queue.filter(item => item.kind !== 'deal');
-    if (this.active?.kind === 'deal') this.interrupt();
+    this.queue = this.queue.filter((item) => item.kind !== 'deal');
+    if (this.active?.kind === 'deal') {
+      this.interrupt();
+    }
   }
+
   turn(warning = false, expiresAt = Date.now() + MAX_AGE_MS): void {
     // A turn remains relevant until the server deadline, even after a long deal.
     this.enqueue([warning ? 'warning' : 'turn'], 'turn', 0.3, expiresAt);
   }
 
   endTurn(): void {
-    this.queue = this.queue.filter(item => item.kind !== 'turn');
-    if (this.active?.kind === 'turn') this.interrupt();
+    this.queue = this.queue.filter((item) => item.kind !== 'turn');
+    if (this.active?.kind === 'turn') {
+      this.interrupt();
+    }
   }
 
   result(won: boolean): void {
     // Keep the winning hand, but discard older pending actions before settlement.
-    this.queue = this.queue.filter(item => item.kind === 'final-play');
-    if (this.active && this.active.kind !== 'final-play') this.interrupt();
+    this.queue = this.queue.filter((item) => item.kind === 'final-play');
+    if (this.active && this.active.kind !== 'final-play') {
+      this.interrupt();
+    }
     this.enqueue([won ? 'win' : 'lose'], 'result', 0.6);
   }
 
-  private enqueue(names: string[], kind: AudioKind = 'event', volume = 1,
-    expiresAt = Date.now() + (kind === 'result' ? 10000 : MAX_AGE_MS), startAt?: number): void {
+  private enqueue(
+    names: string[],
+    kind: AudioKind = 'event',
+    volume = 1,
+    expiresAt = Date.now() + (kind === 'result' ? RESULT_MAX_AGE_MS : MAX_AGE_MS),
+    startAt?: number
+  ): void {
     if (!this.enabled || document.hidden || this.context?.state !== 'running') return;
     this.queue.push({ names, kind, volume, expiresAt, startAt });
     this.queue = this.queue.slice(-MAX_PENDING_PLAYS);
-    if (!this.draining) void this.drain(this.generation);
+    if (!this.draining) {
+      void this.drain(this.generation);
+    }
   }
 
   private interrupt(): void {
@@ -107,10 +159,12 @@ export class GameAudio {
     this.active = null;
     this.cancelClip?.();
     this.cancelClip = null;
-    if (this.queue.length) void this.drain(this.generation);
+    if (this.queue.length) {
+      void this.drain(this.generation);
+    }
   }
 
-  stop = (): void => {
+  readonly stop = (): void => {
     this.generation++;
     this.queue = [];
     this.draining = false;
@@ -122,9 +176,9 @@ export class GameAudio {
   private async drain(generation: number): Promise<void> {
     this.draining = true;
     try {
-      while (generation === this.generation && this.queue.length) {
-        const next = this.queue.shift()!;
-        if (Date.now() > next.expiresAt) continue;
+      while (generation === this.generation && this.queue.length > 0) {
+        const next = this.queue.shift();
+        if (!next || Date.now() > next.expiresAt) continue;
         this.active = next;
         for (const [index, name] of next.names.entries()) {
           if (generation !== this.generation) break;
@@ -135,12 +189,22 @@ export class GameAudio {
         }
       }
     } finally {
-      if (generation === this.generation) { this.draining = false; this.active = null; }
+      if (generation === this.generation) {
+        this.draining = false;
+        this.active = null;
+      }
     }
   }
 
-  private async playClip(name: string, generation: number, expiresAt: number, volume: number, startAt?: number): Promise<boolean> {
-    const context = this.context!;
+  private async playClip(
+    name: string,
+    generation: number,
+    expiresAt: number,
+    volume: number,
+    startAt?: number
+  ): Promise<boolean> {
+    const context = this.context;
+    if (!context) return false;
     const abort = new AbortController();
     let source: AudioBufferSourceNode | null = null;
     let gain: GainNode | null = null;
@@ -149,7 +213,11 @@ export class GameAudio {
       abort.abort();
       if (source) {
         source.onended = null;
-        try { source.stop(); } catch { /* Already ended. */ }
+        try {
+          source.stop();
+        } catch {
+          // Already ended.
+        }
         source.disconnect();
       }
       finish?.();
@@ -157,7 +225,9 @@ export class GameAudio {
     this.cancelClip = cancel;
     // Also bound stalled downloads/decode/playback, so they cannot hold a queue.
     let timeout = window.setTimeout(() => {
-      if (this.cancelClip === cancel) this.stop();
+      if (this.cancelClip === cancel) {
+        this.stop();
+      }
     }, MAX_AGE_MS);
     try {
       let buffer = this.buffers.get(name);
@@ -168,42 +238,63 @@ export class GameAudio {
         if (abort.signal.aborted || generation !== this.generation) return false;
         this.buffers.set(name, buffer);
       }
-      if (abort.signal.aborted || generation !== this.generation || context.state !== 'running') return false;
+      if (abort.signal.aborted || generation !== this.generation || context.state !== 'running') {
+        return false;
+      }
       // Queueing, downloading and decoding all share this hand's deadline.
       if (Date.now() > expiresAt) return false;
       const offset = startAt === undefined ? 0 : Math.max(0, (Date.now() - startAt) / 1000);
       if (offset >= buffer.duration) return false;
-      source = context.createBufferSource();
-      source.buffer = buffer;
+      const clipSource = context.createBufferSource();
+      source = clipSource;
+      clipSource.buffer = buffer;
       gain = context.createGain();
       gain.gain.value = volume;
-      source.connect(gain);
+      clipSource.connect(gain);
       gain.connect(context.destination);
       // Loading is bounded separately; long deal/result clips must play to the end.
       window.clearTimeout(timeout);
-      timeout = window.setTimeout(() => {
-        if (this.cancelClip === cancel) this.stop();
-      }, Math.min(15000, buffer.duration * 1000 + 500));
+      timeout = window.setTimeout(
+        () => {
+          if (this.cancelClip === cancel) {
+            this.stop();
+          }
+        },
+        Math.min(MAX_CLIP_TIMEOUT_MS, buffer.duration * 1000 + 500)
+      );
       await new Promise<void>((resolve) => {
         finish = resolve;
-        source!.onended = () => resolve();
-        if (startAt === undefined) source!.start();
-        else source!.start(0, offset, Math.max(0, (expiresAt - Date.now()) / 1000));
+        clipSource.onended = () => {
+          resolve();
+        };
+        if (startAt === undefined) {
+          clipSource.start();
+        } else {
+          clipSource.start(0, offset, Math.max(0, (expiresAt - Date.now()) / 1000));
+        }
       });
       return true;
-    } catch { return false; /* Audio failures must never affect the game. */ }
-    finally {
+    } catch {
+      // Audio failures must never affect the game.
+      return false;
+    } finally {
       window.clearTimeout(timeout);
       source?.disconnect();
       gain?.disconnect();
-      if (this.cancelClip === cancel) this.cancelClip = null;
+      if (this.cancelClip === cancel) {
+        this.cancelClip = null;
+      }
     }
   }
 
   private loadPreference(): boolean {
-    try { return localStorage.getItem(PREFERENCE_KEY) !== 'false'; }
-    catch { return true; }
+    try {
+      return localStorage.getItem(PREFERENCE_KEY) !== 'false';
+    } catch {
+      return true;
+    }
   }
 }
 
+/** Shared singleton audio controller for the application. */
 export const gameAudio = new GameAudio();

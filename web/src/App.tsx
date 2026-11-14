@@ -1,29 +1,51 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Lobby } from './features/lobby/Lobby';
-import { GameTable } from './features/table/GameTable';
-import { GameResult } from './features/table/GameResult';
-import { GameEnd } from './features/table/GameEnd';
-import { createGameSocket, type GameSocket } from './transport/wsClient';
-import { useAppStore } from './stores/appStore';
 import { connectBackgroundMusic } from './audio/backgroundMusic';
 import { connectGameAudio } from './audio/connectGameAudio';
+import { Lobby } from './features/lobby/Lobby';
+import { GameEnd } from './features/table/GameEnd';
+import { GameResult } from './features/table/GameResult';
+import { GameTable } from './features/table/GameTable';
 import { resolveBackgroundScene } from './shared/ui/backgroundScene';
+import { useAppStore } from './stores/appStore';
+import { createGameSocket, type GameSocket } from './transport/wsClient';
 
 const ERROR_TOAST_DURATION_MS = 5000;
+const CONFIRMED_SUBMISSION_DURATION_MS = 3000;
 
-export function App({ demo = null }: { demo?: string | null }) {
+/** Props for the root application component. */
+export interface AppProps {
+  demo?: string | null;
+}
+
+interface ConfigResponse {
+  collect_training_data?: boolean;
+}
+
+interface ConnectionStateProps {
+  error: string;
+}
+
+/** Root application shell coordinating WebSocket lifecycle, audio, and active scene views. */
+export function App({ demo = null }: AppProps) {
   const [collecting, setCollecting] = useState(false);
   useEffect(() => {
-    fetch('/api/config').then(r => r.ok ? r.json() : null).then(c => setCollecting(c?.collect_training_data === true)).catch(() => {});
+    fetch('/api/config')
+      .then((response) => (response.ok ? (response.json() as Promise<ConfigResponse>) : null))
+      .then((config) => {
+        setCollecting(config?.collect_training_data === true);
+      })
+      .catch(() => {
+        // Optional config endpoint may be unavailable in demo or offline contexts.
+      });
   }, []);
   const socket = useMemo<GameSocket>(() => createGameSocket(), []);
   const phase = useAppStore((state) => state.phase);
   const endView = useAppStore((state) => state.endView);
   const connected = useAppStore((state) => state.connected);
-  const sessionReplaced = useAppStore(state => state.sessionReplaced);
+  const sessionReplaced = useAppStore((state) => state.sessionReplaced);
   const error = useAppStore((state) => state.error);
-  const submission = useAppStore(state => state.submission);
-  const submissionMessage = useAppStore(state => state.submissionMessage);
+  const submission = useAppStore((state) => state.submission);
+  const submissionMessage = useAppStore((state) => state.submissionMessage);
   const maintenance = useAppStore((state) => state.maintenance);
   const scene = resolveBackgroundScene(phase);
 
@@ -37,7 +59,10 @@ export function App({ demo = null }: { demo?: string | null }) {
     const update = () => {
       const root = document.documentElement;
       root.style.setProperty('--visible-height', `${viewport.height}px`);
-      root.style.setProperty('--keyboard-inset', `${Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)}px`);
+      root.style.setProperty(
+        '--keyboard-inset',
+        `${Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)}px`
+      );
     };
     update();
     viewport.addEventListener('resize', update);
@@ -54,10 +79,11 @@ export function App({ demo = null }: { demo?: string | null }) {
     if (submission !== 'confirmed') return;
     const timeout = window.setTimeout(() => {
       useAppStore.setState({ submission: 'idle', submissionMessage: '' });
-    }, 3000);
-    return () => window.clearTimeout(timeout);
+    }, CONFIRMED_SUBMISSION_DURATION_MS);
+    return () => {
+      window.clearTimeout(timeout);
+    };
   }, [submission, submissionMessage]);
-
 
   useEffect(() => {
     if (!connected || !error) return;
@@ -66,33 +92,72 @@ export function App({ demo = null }: { demo?: string | null }) {
       useAppStore.getState().setError('');
     }, ERROR_TOAST_DURATION_MS);
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+    };
   }, [connected, error]);
 
   useEffect(() => {
     if (demo) return;
     socket.connect();
-    return () => socket.close();
+    return () => {
+      socket.close();
+    };
   }, [demo, socket]);
 
   return (
     <div className="app-shell" data-scene={scene}>
-      {collecting ? <div className="collection-notice" role="status">本服务已启用训练数据采集：记录匿名牌局、操作及胜负；不记录昵称、聊天或重连令牌。</div> : null}
+      {collecting ? (
+        <div className="collection-notice" role="status">
+          本服务已启用训练数据采集：记录匿名牌局、操作及胜负；不记录昵称、聊天或重连令牌。
+        </div>
+      ) : null}
       {connected && !error && submissionMessage && !['bidding', 'playing'].includes(phase) ? (
-        <div className="submission-notice connection-toast" data-state={submission} role={submission === 'rejected' ? 'alert' : 'status'}>
+        <div
+          className="submission-notice connection-toast"
+          data-state={submission}
+          role={submission === 'rejected' ? 'alert' : 'status'}
+        >
           <span>{submissionMessage}</span>
           {submission !== 'pending' && submission !== 'unknown' ? (
-            <button onClick={() => useAppStore.setState({ submission: 'idle', submissionMessage: '' })}>关闭提示</button>
+            <button
+              onClick={() => {
+                useAppStore.setState({ submission: 'idle', submissionMessage: '' });
+              }}
+            >
+              关闭提示
+            </button>
           ) : null}
         </div>
       ) : null}
       {maintenance ? <div className="maintenance-banner">服务器维护中，暂时无法开始新对局</div> : null}
       {!connected && !demo ? (
-        <ConnectionState error={sessionReplaced ? '此账号已在另一个页面继续游戏，本页面已停止重连。如需在此继续，请重新加载页面。' : error} />
+        <ConnectionState
+          error={
+            sessionReplaced
+              ? '此账号已在另一个页面继续游戏，本页面已停止重连。如需在此继续，请重新加载页面。'
+              : error
+          }
+        />
       ) : null}
-      {connected && error ? <div className="connection-toast" role="alert"><span>{error}</span><button onClick={() => useAppStore.getState().setError('')}>关闭</button></div> : null}
+      {connected && error ? (
+        <div className="connection-toast" role="alert">
+          <span>{error}</span>
+          <button
+            onClick={() => {
+              useAppStore.getState().setError('');
+            }}
+          >
+            关闭
+          </button>
+        </div>
+      ) : null}
       {phase === 'game_over' ? (
-        endView === 'result' ? <GameResult socket={socket} /> : <GameEnd />
+        endView === 'result' ? (
+          <GameResult socket={socket} />
+        ) : (
+          <GameEnd />
+        )
       ) : phase === 'dealing' || phase === 'bidding' || phase === 'playing' ? (
         <GameTable socket={socket} />
       ) : (
@@ -102,7 +167,7 @@ export function App({ demo = null }: { demo?: string | null }) {
   );
 }
 
-function ConnectionState({ error }: { error: string }) {
+function ConnectionState({ error }: ConnectionStateProps) {
   return (
     <div className="connection-toast" role="status">
       {!error ? <span className="spinner" /> : null}

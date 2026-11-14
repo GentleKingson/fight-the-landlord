@@ -36,7 +36,9 @@ test('table controls stay compact inside the lower felt across phases and viewpo
       const timer = document.querySelector<HTMLElement>('.turn-banner time')?.getBoundingClientRect();
       const buttons = Array.from(document.querySelectorAll<HTMLElement>('.action-bar button')).map((btn) => btn.getBoundingClientRect());
       const heading = document.querySelector<HTMLElement>('.hand-heading')?.getBoundingClientRect();
-      if (!arena || !felt || !controls || !timer || buttons.length !== 4 || !heading) return null;
+      if (!arena || !felt || !controls || !timer || buttons.length !== 4 || !heading) {
+        return null;
+      }
       return {
         fitsViewport: doc.scrollHeight <= window.innerHeight && doc.scrollWidth <= window.innerWidth,
         controlsInsideArena: controls.top >= arena.top && controls.bottom <= arena.bottom && controls.left >= arena.left && controls.right <= arena.right,
@@ -50,11 +52,14 @@ test('table controls stay compact inside the lower felt across phases and viewpo
     });
 
     expect(playingLayout, `playing @ ${viewport.width}x${viewport.height}`).not.toBeNull();
-    expect(playingLayout?.fitsViewport).toBe(true);
-    expect(playingLayout?.controlsInsideArena).toBe(true);
-    expect(playingLayout?.feltAboveControls).toBe(true);
-    expect(playingLayout?.timerCompact).toBe(true);
-    expect(playingLayout?.buttonsCompactAndTappable).toBe(true);
+    if (!playingLayout) {
+      throw new Error(`Expected playing layout at ${viewport.width}x${viewport.height}`);
+    }
+    expect(playingLayout.fitsViewport).toBe(true);
+    expect(playingLayout.controlsInsideArena).toBe(true);
+    expect(playingLayout.feltAboveControls).toBe(true);
+    expect(playingLayout.timerCompact).toBe(true);
+    expect(playingLayout.buttonsCompactAndTappable).toBe(true);
 
     // Switching between dealing -> bidding (mine) -> bidding (opponent) keeps outer table bounds steady.
     for (const nextState of [
@@ -65,14 +70,17 @@ test('table controls stay compact inside the lower felt across phases and viewpo
     ]) {
       await page.evaluate(`import('/src/stores/appStore.ts').then(({ useAppStore }) => useAppStore.setState(${JSON.stringify(nextState)}))`);
       const bounds = await page.evaluate(() => {
-        const arena = document.querySelector<HTMLElement>('.table-arena')!.getBoundingClientRect();
-        const heading = document.querySelector<HTMLElement>('.hand-heading')!.getBoundingClientRect();
+        const arena = document.querySelector<HTMLElement>('.table-arena')?.getBoundingClientRect();
+        const heading = document.querySelector<HTMLElement>('.hand-heading')?.getBoundingClientRect();
+        if (!arena || !heading) {
+          throw new Error('Expected .table-arena and .hand-heading elements');
+        }
         return { arenaTop: Math.round(arena.top), arenaBottom: Math.round(arena.bottom), headingTop: Math.round(heading.top) };
       });
       expect(bounds, `${nextState.phase}/${nextState.currentTurn} @ ${viewport.width}x${viewport.height}`).toEqual({
-        arenaTop: playingLayout!.arenaTop,
-        arenaBottom: playingLayout!.arenaBottom,
-        headingTop: playingLayout!.headingTop
+        arenaTop: playingLayout.arenaTop,
+        arenaBottom: playingLayout.arenaBottom,
+        headingTop: playingLayout.headingTop
       });
     }
   }
@@ -118,7 +126,9 @@ test('waiting room fits room code, seats, and both action buttons without scroll
       const doc = document.documentElement;
       const waiting = document.querySelector<HTMLElement>('.room-waiting');
       const buttons = Array.from(document.querySelectorAll<HTMLElement>('.room-waiting .room-actions button'));
-      if (!waiting || buttons.length !== 2) return null;
+      if (!waiting || buttons.length !== 2) {
+        return null;
+      }
       const waitingRect = waiting.getBoundingClientRect();
       return {
         docFits: doc.scrollHeight <= window.innerHeight && doc.scrollWidth <= window.innerWidth,
@@ -148,7 +158,9 @@ test('waiting room fits room code, seats, and both action buttons without scroll
     await expect(dialog).toBeVisible();
     const dialogFits = await page.evaluate(() => {
       const el = document.querySelector<HTMLElement>('.room-confirm-dialog');
-      if (!el) return false;
+      if (!el) {
+        return false;
+      }
       const rect = el.getBoundingClientRect();
       return rect.top >= 0 && rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
     });
@@ -178,8 +190,10 @@ test('leaderboard and stats panels keep reload button compact with clean spacing
         const panel = document.querySelector<HTMLElement>('.sub-panel');
         const head = document.querySelector<HTMLElement>('.sub-panel__head');
         const reloadBtn = document.querySelector<HTMLElement>('.sub-panel__reload');
-        const body = head?.nextElementSibling as HTMLElement | null;
-        if (!panel || !head || !reloadBtn || !body) return null;
+        const body = head?.nextElementSibling;
+        if (!panel || !head || !reloadBtn || !(body instanceof HTMLElement)) {
+          return null;
+        }
 
         const pRect = panel.getBoundingClientRect();
         const hRect = head.getBoundingClientRect();
@@ -233,7 +247,9 @@ test('opening leaderboard locates the current player row inside the visible list
     const position = await page.evaluate(() => {
       const list = document.querySelector<HTMLElement>('.ranking-list');
       const meRow = document.querySelector<HTMLElement>('.ranking-row.is-me');
-      if (!list || !meRow) return null;
+      if (!list || !meRow) {
+        return null;
+      }
       const listRect = list.getBoundingClientRect();
       const meRect = meRow.getBoundingClientRect();
       return {

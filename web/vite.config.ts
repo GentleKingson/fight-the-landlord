@@ -40,15 +40,21 @@ function precompressAssets(): Plugin {
       outDir = resolve(config.root, config.build.outDir);
     },
     async closeBundle() {
-      if (!outDir) return;
+      if (!outDir) {
+        return;
+      }
       const files = await collectFiles(outDir);
       await Promise.all(
         files.map(async (filePath) => {
           const ext = extname(filePath).toLowerCase();
-          if (!COMPRESSIBLE_EXTENSIONS.has(ext)) return;
+          if (!COMPRESSIBLE_EXTENSIONS.has(ext)) {
+            return;
+          }
 
           const source = await readFile(filePath);
-          if (source.byteLength === 0) return;
+          if (source.byteLength === 0) {
+            return;
+          }
 
           const br = brotliCompressSync(source, {
             params: {
@@ -75,10 +81,14 @@ function lobbyPreloadDemoFilter(): Plugin {
     name: 'lobby-preload-demo-filter',
     apply: 'serve',
     transformIndexHtml(html, ctx) {
-      if (!ctx?.originalUrl) return html;
+      if (!ctx?.originalUrl) {
+        return html;
+      }
       const url = new URL(ctx.originalUrl, 'http://localhost');
       const demo = url.searchParams.get('demo');
-      if (!demo || demo === 'lobby' || demo === 'waiting') return html;
+      if (!demo || demo === 'lobby' || demo === 'waiting') {
+        return html;
+      }
       return html.replace(/\s*<link\b[^>]*rel="preload"[^>]*scene-lobby-[^>]*>/g, '');
     }
   };

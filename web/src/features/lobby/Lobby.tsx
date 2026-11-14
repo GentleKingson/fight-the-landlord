@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { MsgType } from '../../protocol/types';
+import { MsgType, type LobbyPanel, type PlayerInfo } from '../../protocol/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore } from '../../stores/appStore';
 import { SoundToggle } from '../../audio/SoundToggle';
@@ -10,13 +10,39 @@ import { RulesPanel } from '../../shared/ui/RulesPanel';
 import { useLobbyRequest } from './useLobbyRequest';
 import landlordLogo from '../../assets/landlord-logo-176.webp';
 
-interface LobbyProps {
+/** Props for lobby components that communicate over the game socket. */
+export interface LobbyProps {
   socket: GameSocket;
 }
 
-const navItems = [['home', '大厅'], ['leaderboard', '战绩榜'], ['stats', '我的战绩'], ['rules', '规则']] as const;
-const roomRequestLabels = { create_room: '创建房间', join_room: '加入房间', ready: '准备', cancel_ready: '取消准备', start_game: '开始游戏' } as const;
+interface RoomWaitingProps extends LobbyProps {
+  roomCode: string;
+  players: PlayerInfo[];
+}
 
+interface LobbySubPanelProps extends LobbyProps {
+  panel: LobbyPanel;
+}
+
+const NAV_ITEMS = [
+  ['home', '大厅'],
+  ['leaderboard', '战绩榜'],
+  ['stats', '我的战绩'],
+  ['rules', '规则'],
+] as const;
+
+const ROOM_REQUEST_LABELS = {
+  create_room: '创建房间',
+  join_room: '加入房间',
+  ready: '准备',
+  cancel_ready: '取消准备',
+  start_game: '开始游戏',
+} as const;
+
+const COPY_RESET_DELAY_MS = 2000;
+const LONG_MATCH_WAIT_SECONDS = 30;
+
+/** Renders the main lobby screen, matchmaking status, room waiting room, and sub-panels. */
 export function Lobby({ socket }: LobbyProps) {
   const phase = useAppStore((state) => state.phase);
   const panel = useAppStore((state) => state.lobbyPanel);
@@ -25,7 +51,7 @@ export function Lobby({ socket }: LobbyProps) {
   const onlineCount = useAppStore((state) => state.onlineCount);
   const playerName = useAppStore((state) => state.playerName);
   const setLobbyPanel = useAppStore((state) => state.setLobbyPanel);
-  const roomRequest = useAppStore(state => state.roomRequest);
+  const roomRequest = useAppStore((state) => state.roomRequest);
   const activeSession = phase === 'matching' || phase === 'waiting';
 
   return (
@@ -54,25 +80,44 @@ export function Lobby({ socket }: LobbyProps) {
       ) : null}
 
       <nav className={`bottom-nav${activeSession ? ' is-locked' : ''}`} aria-label="大厅导航">
-        {activeSession && <span className="nav-session" id="lobby-nav-reason">{phase === 'waiting'
-          ? '房间等待中 · 离开房间后可使用大厅导航'
-          : '匹配中 · 匹配结束后可使用大厅导航'}</span>}
-        {navItems.map(([key, label]) => (
-          <button key={key} disabled={activeSession || !!roomRequest} aria-current={!activeSession && panel === key ? 'page' : undefined}
+        {activeSession && (
+          <span className="nav-session" id="lobby-nav-reason">
+            {phase === 'waiting'
+              ? '房间等待中 · 离开房间后可使用大厅导航'
+              : '匹配中 · 匹配结束后可使用大厅导航'}
+          </span>
+        )}
+        {NAV_ITEMS.map(([key, label]) => (
+          <button
+            key={key}
+            disabled={activeSession || Boolean(roomRequest)}
+            aria-current={!activeSession && panel === key ? 'page' : undefined}
             aria-describedby={activeSession ? 'lobby-nav-reason' : undefined}
-            className={!activeSession && panel === key ? 'is-active' : ''} onClick={() => setLobbyPanel(key)}>{label}</button>
+            className={!activeSession && panel === key ? 'is-active' : ''}
+            onClick={() => {
+              setLobbyPanel(key);
+            }}
+          >
+            {label}
+          </button>
         ))}
       </nav>
     </main>
   );
 }
 
-function submitRoomRequest(socket: GameSocket, type: keyof typeof roomRequestLabels, roomCode?: string) {
+function submitRoomRequest(socket: GameSocket, type: keyof typeof ROOM_REQUEST_LABELS, roomCode?: string) {
   const state = useAppStore.getState();
-  if (state.roomRequest) return;
-  const label = roomRequestLabels[type];
+  if (state.roomRequest) {
+    return;
+  }
+  const label = ROOM_REQUEST_LABELS[type];
   if (socket.send(type, roomCode ? { room_code: roomCode } : undefined)) {
-    useAppStore.setState({ roomRequest: type, error: '', matchMode: type === MsgType.CreateRoom || type === MsgType.JoinRoom ? 'online' : state.matchMode });
+    useAppStore.setState({
+      roomRequest: type,
+      error: '',
+      matchMode: type === MsgType.CreateRoom || type === MsgType.JoinRoom ? 'online' : state.matchMode,
+    });
   } else {
     state.setError(`${label}请求未发送，请连接恢复后重试`);
   }
@@ -85,7 +130,7 @@ function LobbyHome({ socket }: LobbyProps) {
   const setRoomCodeInput = useAppStore((state) => state.setRoomCodeInput);
   const setError = useAppStore((state) => state.setError);
   const imeEnter = useImeSafeEnter();
-  const pending = useAppStore(state => state.roomRequest);
+  const pending = useAppStore((state) => state.roomRequest);
 
   function joinRoom() {
     const roomCode = roomCodeInput.trim();
@@ -97,7 +142,9 @@ function LobbyHome({ socket }: LobbyProps) {
   }
 
   function startMatch(mode: 'online' | 'practice') {
-    if (useAppStore.getState().phase === 'matching') return;
+    if (useAppStore.getState().phase === 'matching') {
+      return;
+    }
     if (socket.send(mode === 'online' ? MsgType.QuickMatch : MsgType.PracticeMatch)) {
       useAppStore.setState({ phase: 'matching', matchMode: mode, error: '' });
     } else {
@@ -126,31 +173,57 @@ function LobbyHome({ socket }: LobbyProps) {
           <h2>快速开局</h2>
           <p>匹配在线玩家，进入标准三人牌桌。</p>
         </div>
-        <button className="primary-action" disabled={!!pending} onClick={() => startMatch('online')}>
+        <button
+          className="primary-action"
+          disabled={Boolean(pending)}
+          onClick={() => {
+            startMatch('online');
+          }}
+        >
           <Icon name="play" /> 快速开局
         </button>
       </div>
 
       <div className="entry-grid">
-        <button className="entry-tile" disabled={!!pending} onClick={() => submitRoomRequest(socket, MsgType.CreateRoom)}>
+        <button
+          className="entry-tile"
+          disabled={Boolean(pending)}
+          onClick={() => {
+            submitRoomRequest(socket, MsgType.CreateRoom);
+          }}
+        >
           <Icon name="room" />
           <strong>{pending === MsgType.CreateRoom ? '正在创建…' : '创建房间'}</strong>
           <span>好友同玩</span>
         </button>
-        <button className="entry-tile" disabled={!!pending} onClick={() => startMatch('practice')}>
+        <button
+          className="entry-tile"
+          disabled={Boolean(pending)}
+          onClick={() => {
+            startMatch('practice');
+          }}
+        >
           <Icon name="bot" />
           <strong>人机练习</strong>
           <span>随时练手</span>
         </button>
       </div>
 
-      <form className="join-strip" onSubmit={(event) => { event.preventDefault(); joinRoom(); }}>
+      <form
+        className="join-strip"
+        onSubmit={(event) => {
+          event.preventDefault();
+          joinRoom();
+        }}
+      >
         <label htmlFor="room-code">加入房间</label>
         <input
           id="room-code"
           name="room_code"
           value={roomCodeInput}
-          onChange={(event) => setRoomCodeInput(event.target.value)}
+          onChange={(event) => {
+            setRoomCodeInput(event.target.value);
+          }}
           {...imeEnter}
           maxLength={8}
           placeholder="输入房间号"
@@ -161,21 +234,44 @@ function LobbyHome({ socket }: LobbyProps) {
           autoCapitalize="none"
           spellCheck={false}
         />
-        <button type="submit" disabled={!!pending}>{pending === MsgType.JoinRoom ? '正在加入…' : '加入'}</button>
+        <button type="submit" disabled={Boolean(pending)}>
+          {pending === MsgType.JoinRoom ? '正在加入…' : '加入'}
+        </button>
       </form>
 
       <section className="room-browser" aria-label="可加入房间">
         <div className="room-browser__head">
           <strong>可加入房间</strong>
-          <button className="secondary-action" disabled={!!pending} onClick={refreshRooms}>刷新</button>
+          <button className="secondary-action" disabled={Boolean(pending)} onClick={refreshRooms}>
+            刷新
+          </button>
         </div>
         <div className="room-browser__list">
-          {status ? <p role="status">{status}</p> : roomList.length ? roomList.map((room) => (
-            <button className="room-browser__row" disabled={!!pending} key={room.room_code} onClick={() => joinListedRoom(room.room_code)}>
-              <span>{room.room_code}</span>
-              <em>{room.player_count}/{room.max_players || 3}</em>
-            </button>
-          )) : <p className="empty-text">{requested ? '当前没有可加入的房间，可创建房间邀请好友或刷新重试。' : '点击刷新查看可加入房间，也可创建房间邀请好友。'}</p>}
+          {status ? (
+            <p role="status">{status}</p>
+          ) : roomList.length ? (
+            roomList.map((room) => (
+              <button
+                className="room-browser__row"
+                disabled={Boolean(pending)}
+                key={room.room_code}
+                onClick={() => {
+                  joinListedRoom(room.room_code);
+                }}
+              >
+                <span>{room.room_code}</span>
+                <em>
+                  {room.player_count}/{room.max_players || 3}
+                </em>
+              </button>
+            ))
+          ) : (
+            <p className="empty-text">
+              {requested
+                ? '当前没有可加入的房间，可创建房间邀请好友或刷新重试。'
+                : '点击刷新查看可加入房间，也可创建房间邀请好友。'}
+            </p>
+          )}
         </div>
       </section>
     </section>
@@ -183,25 +279,56 @@ function LobbyHome({ socket }: LobbyProps) {
 }
 
 function MatchingPanel({ socket }: LobbyProps) {
-  const mode = useAppStore(state => state.matchMode);
-  const cancelling = useAppStore(state => state.cancellingMatch);
-  const connected = useAppStore(state => state.connected);
-  const [started] = useState(Date.now);
+  const mode = useAppStore((state) => state.matchMode);
+  const cancelling = useAppStore((state) => state.cancellingMatch);
+  const connected = useAppStore((state) => state.connected);
+  const [started] = useState(() => Date.now());
   const [elapsed, setElapsed] = useState(0);
+
   useEffect(() => {
-    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - started) / 1000));
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
   }, [started]);
-  return <section className="state-panel">
-    <span className="spinner spinner--large" aria-hidden="true" />
-    <h2>{mode === 'practice' ? '正在准备人机对局' : '正在匹配在线玩家'}</h2>
-    <p>已等待 {elapsed} 秒</p>
-    <p role="status">{cancelling ? '正在确认取消，请稍候…' : elapsed >= 30 ? mode === 'online' ? '等待时间较长，可取消匹配后重试或选择人机练习。' : '准备时间较长，请刷新页面恢复服务器状态。' : mode === 'practice' ? '正在安排两位电脑牌友。' : '正在寻找牌友，请稍候。'}</p>
-    {mode === 'online' ? <button className="secondary-action" disabled={!connected || cancelling} onClick={() => {
-      if (socket.send(MsgType.CancelMatch)) useAppStore.setState({ cancellingMatch: true });
-      else useAppStore.getState().setError('取消请求未发送，请连接恢复后重试');
-    }}>取消匹配</button> : elapsed >= 30 ? <p>若始终未进入牌桌，请刷新页面恢复服务器状态。</p> : null}
-  </section>;
+
+  return (
+    <section className="state-panel">
+      <span className="spinner spinner--large" aria-hidden="true" />
+      <h2>{mode === 'practice' ? '正在准备人机对局' : '正在匹配在线玩家'}</h2>
+      <p>已等待 {elapsed} 秒</p>
+      <p role="status">
+        {cancelling
+          ? '正在确认取消，请稍候…'
+          : elapsed >= LONG_MATCH_WAIT_SECONDS
+            ? mode === 'online'
+              ? '等待时间较长，可取消匹配后重试或选择人机练习。'
+              : '准备时间较长，请刷新页面恢复服务器状态。'
+            : mode === 'practice'
+              ? '正在安排两位电脑牌友。'
+              : '正在寻找牌友，请稍候。'}
+      </p>
+      {mode === 'online' ? (
+        <button
+          className="secondary-action"
+          disabled={!connected || cancelling}
+          onClick={() => {
+            if (socket.send(MsgType.CancelMatch)) {
+              useAppStore.setState({ cancellingMatch: true });
+            } else {
+              useAppStore.getState().setError('取消请求未发送，请连接恢复后重试');
+            }
+          }}
+        >
+          取消匹配
+        </button>
+      ) : elapsed >= LONG_MATCH_WAIT_SECONDS ? (
+        <p>若始终未进入牌桌，请刷新页面恢复服务器状态。</p>
+      ) : null}
+    </section>
+  );
 }
 
 function legacyCopyText(text: string): boolean {
@@ -219,6 +346,7 @@ function legacyCopyText(text: string): boolean {
   try {
     return document.execCommand('copy');
   } catch {
+    // execCommand('copy') may throw in restricted clipboard contexts.
     return false;
   } finally {
     textarea.remove();
@@ -235,7 +363,7 @@ async function writeTextToClipboard(text: string): Promise<void> {
   }
 }
 
-function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: string; players: ReturnType<typeof useAppStore.getState>['players'] }) {
+function RoomWaiting({ socket, roomCode, players }: RoomWaitingProps) {
   const playerId = useAppStore((state) => state.playerId);
   const ownerId = useAppStore((state) => state.ownerId);
   const me = players.find((player) => player.id === playerId);
@@ -264,12 +392,13 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
       clearTimeout(resetTimerRef.current);
     }
     setCopyState(nextState);
+    // Append a non-breaking space (\u00A0) so repeated status strings still trigger aria-live announcements.
     setStatusMessage((prev) => (prev === message ? `${message}\u00A0` : message));
     resetTimerRef.current = setTimeout(() => {
       setCopyState('idle');
       setStatusMessage('');
       resetTimerRef.current = null;
-    }, 2000);
+    }, COPY_RESET_DELAY_MS);
   }, []);
 
   useEffect(() => {
@@ -281,7 +410,7 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
   }, []);
 
   useEffect(() => {
-    if (confirmOpen && (!canStart || !!pending)) {
+    if (confirmOpen && (!canStart || pending)) {
       setConfirmOpen(false);
     }
   }, [canStart, confirmOpen, pending]);
@@ -297,7 +426,9 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
   }, [socket]);
 
   useEffect(() => {
-    if (!confirmOpen) return;
+    if (!confirmOpen) {
+      return;
+    }
     confirmButtonRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -309,7 +440,9 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
         const focusable = [cancelButtonRef.current, confirmButtonRef.current].filter(
           (el): el is HTMLButtonElement => Boolean(el && !el.disabled)
         );
-        if (focusable.length === 0) return;
+        if (focusable.length === 0) {
+          return;
+        }
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
         if (event.shiftKey && document.activeElement === first) {
@@ -322,11 +455,15 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
       }
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, [closeConfirm, confirmOpen]);
 
   const handleCopyRoomCode = useCallback(async () => {
-    if (!roomCode) return;
+    if (!roomCode) {
+      return;
+    }
     try {
       await writeTextToClipboard(roomCode);
       announce('copied', `已复制房间号 ${roomCode}`);
@@ -336,10 +473,12 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
   }, [announce, roomCode]);
 
   const handleShareRoomCode = useCallback(async () => {
-    if (!roomCode || typeof navigator === 'undefined' || typeof navigator.share !== 'function') return;
+    if (!roomCode || typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
+      return;
+    }
     const shareData: ShareData = {
       title: '斗地主房间邀请',
-      text: `快来加入我的斗地主房间，房间号：${roomCode}`
+      text: `快来加入我的斗地主房间，房间号：${roomCode}`,
     };
     try {
       if (typeof navigator.canShare === 'function' && !navigator.canShare(shareData)) {
@@ -358,7 +497,9 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
 
   useEffect(() => {
     const codeElement = codeRef.current;
-    if (!supportsInvokerCommands || !codeElement) return;
+    if (!supportsInvokerCommands || !codeElement) {
+      return;
+    }
     const onCommand = (event: Event) => {
       if ((event as Event & { command?: string }).command === '--copy') {
         void handleCopyRoomCode();
@@ -385,7 +526,9 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
       <section className="room-waiting">
         <div className="room-code-panel">
           <span>房间号</span>
-          <strong id="waiting-room-code" ref={codeRef}>{roomCode || '...'}</strong>
+          <strong id="waiting-room-code" ref={codeRef}>
+            {roomCode || '...'}
+          </strong>
           <div className="room-code-tools">
             <button
               type="button"
@@ -395,7 +538,13 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
               disabled={!roomCode}
               data-copied={copyState === 'copied' ? '' : undefined}
               data-failed={copyState === 'failed' ? '' : undefined}
-              onClick={supportsInvokerCommands ? undefined : () => void handleCopyRoomCode()}
+              onClick={
+                supportsInvokerCommands
+                  ? undefined
+                  : () => {
+                      void handleCopyRoomCode();
+                    }
+              }
             >
               <Icon name={copyState === 'copied' ? 'check' : 'copy'} />
               <span>{copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制房间号'}</span>
@@ -405,7 +554,9 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
                 type="button"
                 className="room-share-button"
                 disabled={!roomCode}
-                onClick={() => void handleShareRoomCode()}
+                onClick={() => {
+                  void handleShareRoomCode();
+                }}
               >
                 <Icon name="share" />
                 <span>分享房间号</span>
@@ -413,9 +564,7 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
             ) : null}
           </div>
           <div className="room-code-footer">
-            <p className={copyState !== 'idle' ? 'is-muted-out' : ''}>
-              {waitingHint}
-            </p>
+            <p className={copyState !== 'idle' ? 'is-muted-out' : ''}>{waitingHint}</p>
             <div
               className={`room-copy-status ${copyState !== 'idle' ? 'is-visible' : ''} ${copyState === 'failed' ? 'is-error' : ''}`}
               role="status"
@@ -429,10 +578,23 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
           {Array.from({ length: 3 }, (_, index) => {
             const player = players.find((item) => item.seat === index);
             return (
-              <div className={`seat-row${player?.id === playerId ? ' is-me' : ''}${!player ? ' is-empty' : ''}`} key={index}>
+              <div
+                className={`seat-row${player?.id === playerId ? ' is-me' : ''}${!player ? ' is-empty' : ''}`}
+                key={index}
+              >
                 <span>{index + 1}</span>
                 <strong>{player?.name || '等待加入'}</strong>
-                {player ? <em>{!player.online ? '离线' : ownerId && player.id === ownerId ? '房主' : player.ready ? '已准备' : '未准备'}</em> : null}
+                {player ? (
+                  <em>
+                    {!player.online
+                      ? '离线'
+                      : ownerId && player.id === ownerId
+                        ? '房主'
+                        : player.ready
+                          ? '已准备'
+                          : '未准备'}
+                  </em>
+                ) : null}
               </div>
             );
           })}
@@ -443,27 +605,39 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
               ref={startButtonRef}
               type="button"
               className="primary-action"
-              disabled={!canStart || !!pending}
+              disabled={!canStart || Boolean(pending)}
               aria-haspopup="dialog"
               aria-expanded={confirmOpen}
-              onClick={() => setConfirmOpen(true)}
+              onClick={() => {
+                setConfirmOpen(true);
+              }}
             >
-              {pending ? `正在${roomRequestLabels[pending]}…` : '开始游戏'}
+              {pending ? `正在${ROOM_REQUEST_LABELS[pending]}…` : '开始游戏'}
             </button>
           ) : (
             <button
               type="button"
               className="primary-action"
-              disabled={!!pending}
-              onClick={() => submitRoomRequest(socket, me?.ready ? MsgType.CancelReady : MsgType.Ready)}
+              disabled={Boolean(pending)}
+              onClick={() => {
+                submitRoomRequest(socket, me?.ready ? MsgType.CancelReady : MsgType.Ready);
+              }}
             >
-              {pending ? `正在${roomRequestLabels[pending]}…` : me?.ready ? '取消准备' : '准备开始'}
+              {pending ? `正在${ROOM_REQUEST_LABELS[pending]}…` : me?.ready ? '取消准备' : '准备开始'}
             </button>
           )}
-          <button type="button" className="secondary-action" disabled={!!pending} onClick={() => {
-            if (socket.send(MsgType.LeaveRoom)) useAppStore.getState().leaveLocalRoom();
-            else useAppStore.getState().setError('离房请求未发送，请连接恢复后重试');
-          }}>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={Boolean(pending)}
+            onClick={() => {
+              if (socket.send(MsgType.LeaveRoom)) {
+                useAppStore.getState().leaveLocalRoom();
+              } else {
+                useAppStore.getState().setError('离房请求未发送，请连接恢复后重试');
+              }
+            }}
+          >
             离开房间
           </button>
         </div>
@@ -472,7 +646,9 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
         <div
           className="room-confirm-backdrop"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeConfirm();
+            if (event.target === event.currentTarget) {
+              closeConfirm();
+            }
           }}
         >
           <div
@@ -482,9 +658,7 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
             aria-labelledby="start-confirm-title"
             aria-describedby="start-confirm-desc"
           >
-            <span className="room-confirm-badge">
-              {botFillCount > 0 ? '人机补位局' : '三人真人局'}
-            </span>
+            <span className="room-confirm-badge">{botFillCount > 0 ? '人机补位局' : '三人真人局'}</span>
             <h2 id="start-confirm-title">确认开始游戏？</h2>
             <p id="start-confirm-desc">
               {botFillCount > 0
@@ -506,9 +680,13 @@ function RoomWaiting({ socket, roomCode, players }: LobbyProps & { roomCode: str
   );
 }
 
-function LobbySubPanel({ socket, panel }: LobbyProps & { panel: string }) {
-  if (panel === 'leaderboard') return <LeaderboardPanel socket={socket} />;
-  if (panel === 'stats') return <StatsPanel socket={socket} />;
+function LobbySubPanel({ socket, panel }: LobbySubPanelProps) {
+  if (panel === 'leaderboard') {
+    return <LeaderboardPanel socket={socket} />;
+  }
+  if (panel === 'stats') {
+    return <StatsPanel socket={socket} />;
+  }
   return (
     <section className="sub-panel">
       <header className="sub-panel__head">
@@ -536,9 +714,13 @@ function LeaderboardPanel({ socket }: LobbyProps) {
   }, [retry]);
 
   useLayoutEffect(() => {
-    if (status) return;
+    if (status) {
+      return;
+    }
     const listEl = listRef.current;
-    if (!listEl) return;
+    if (!listEl) {
+      return;
+    }
     const meRow = listEl.querySelector<HTMLElement>('.ranking-row.is-me');
     if (!meRow) {
       listEl.scrollTop = 0;
@@ -770,7 +952,13 @@ function StatsPanel({ socket }: LobbyProps) {
             </span>
             <strong>{displayName ? `${displayName}，尚未开启战绩档案` : '尚未开启战绩档案'}</strong>
             <p className="empty-text">你还没有对局记录，完成一局后再来查看</p>
-            <button type="button" className="primary-action" onClick={() => setLobbyPanel('home')}>
+            <button
+              type="button"
+              className="primary-action"
+              onClick={() => {
+                setLobbyPanel('home');
+              }}
+            >
               <Icon name="play" /> 前往大厅开局
             </button>
           </div>
@@ -794,7 +982,13 @@ function StatsPanel({ socket }: LobbyProps) {
   );
 }
 
-function Stat({ label, value, meta }: { label: string; value: string | number; meta: string }) {
+interface StatProps {
+  label: string;
+  value: string | number;
+  meta: string;
+}
+
+function Stat({ label, value, meta }: StatProps) {
   return (
     <div className="stat-tile">
       <span>{label}</span>
@@ -802,6 +996,17 @@ function Stat({ label, value, meta }: { label: string; value: string | number; m
       <small>{meta}</small>
     </div>
   );
+}
+
+interface RoleStatProps {
+  role: 'landlord' | 'farmer';
+  title: string;
+  tag: string;
+  games: number;
+  wins: number;
+  losses: number;
+  rate: number;
+  totalGames: number;
 }
 
 function RoleStat({
@@ -812,17 +1017,8 @@ function RoleStat({
   wins,
   losses,
   rate,
-  totalGames
-}: {
-  role: 'landlord' | 'farmer';
-  title: string;
-  tag: string;
-  games: number;
-  wins: number;
-  losses: number;
-  rate: number;
-  totalGames: number;
-}) {
+  totalGames,
+}: RoleStatProps) {
   const share = totalGames > 0 ? Math.round((games / totalGames) * 100) : 0;
   return (
     <div className={`role-stat role-stat--${role}`}>

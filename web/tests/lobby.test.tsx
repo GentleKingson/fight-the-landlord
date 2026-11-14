@@ -76,33 +76,54 @@ it.each(['waiting', 'matching'] as const)('explains why lobby navigation is unav
 it.each([
   [MsgType.CreateRoom, /创建房间/, '创建房间'],
   [MsgType.JoinRoom, /^加入$/, '加入房间'],
-  [MsgType.JoinRoom, /123456/, '加入房间']
-] as const)('reports failed %s from %s and waits for the response before allowing another request', (type, name, label) => {
-  useAppStore.setState({ phase: 'lobby', lobbyPanel: 'home', roomRequest: null, error: '', roomCodeInput: '123456',
-    roomList: [{ room_code: '123456', player_count: 1, max_players: 3 }] });
-  const send = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-  render(<Lobby socket={{ send } as unknown as GameSocket} />);
-  const button = screen.getByRole('button', { name });
-  fireEvent.click(button);
-  expect(useAppStore.getState().error).toContain(label + '请求未发送');
-  fireEvent.click(button);
-  expect(button).toBeDisabled();
-  fireEvent.click(button);
-  expect(send).toHaveBeenCalledTimes(2);
-  expect(send).toHaveBeenLastCalledWith(type, type === MsgType.JoinRoom ? { room_code: '123456' } : undefined);
-  for (const request_type of [MsgType.GetStats, undefined]) {
-    act(() => useAppStore.getState().handleMessage({ type: MsgType.Error, payload: { message: '其他请求或限流告警', request_type } }));
+  [MsgType.JoinRoom, /123456/, '加入房间'],
+] as const)(
+  'reports failed %s from %s and waits for the response before allowing another request',
+  (type, name, label) => {
+    useAppStore.setState({
+      phase: 'lobby',
+      lobbyPanel: 'home',
+      roomRequest: null,
+      error: '',
+      roomCodeInput: '123456',
+      roomList: [{ room_code: '123456', player_count: 1, max_players: 3 }],
+    });
+    const send = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    render(<Lobby socket={{ send } as unknown as GameSocket} />);
+    const button = screen.getByRole('button', { name });
+    fireEvent.click(button);
+    expect(useAppStore.getState().error).toContain(`${label}请求未发送`);
     fireEvent.click(button);
     expect(button).toBeDisabled();
+    fireEvent.click(button);
     expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith(type, type === MsgType.JoinRoom ? { room_code: '123456' } : undefined);
+    for (const requestType of [MsgType.GetStats, undefined]) {
+      act(() => {
+        useAppStore
+          .getState()
+          .handleMessage({ type: MsgType.Error, payload: { message: '其他请求或限流告警', request_type: requestType } });
+      });
+      fireEvent.click(button);
+      expect(button).toBeDisabled();
+      expect(send).toHaveBeenCalledTimes(2);
+    }
+    act(() => {
+      useAppStore
+        .getState()
+        .handleMessage({ type: MsgType.Error, payload: { message: '服务器拒绝请求', request_type: type } });
+    });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    act(() => {
+      useAppStore.getState().handleMessage({
+        type: type === MsgType.CreateRoom ? MsgType.RoomCreated : MsgType.RoomJoined,
+        payload: { room_code: '123456', player: { id: 'me', name: '我', seat: 0 }, players: [] },
+      });
+    });
+    expect(screen.getByRole('button', { name: '离开房间' })).toBeEnabled();
   }
-  act(() => useAppStore.getState().handleMessage({ type: MsgType.Error, payload: { message: '服务器拒绝请求', request_type: type } }));
-  expect(button).toBeEnabled();
-  fireEvent.click(button);
-  act(() => useAppStore.getState().handleMessage({ type: type === MsgType.CreateRoom ? MsgType.RoomCreated : MsgType.RoomJoined,
-    payload: { room_code: '123456', player: { id: 'me', name: '我', seat: 0 }, players: [] } }));
-  expect(screen.getByRole('button', { name: '离开房间' })).toBeEnabled();
-});
+);
 
 it('preserves the waiting room on failed leave and accepts a retry after reconnect', () => {
   useAppStore.setState({ phase: 'waiting', roomCode: '123456', roomRequest: null, connected: false });
@@ -110,32 +131,52 @@ it('preserves the waiting room on failed leave and accepts a retry after reconne
   render(<Lobby socket={{ send } as unknown as GameSocket} />);
   const leave = screen.getByRole('button', { name: '离开房间' });
   fireEvent.click(leave);
-  expect(useAppStore.getState()).toMatchObject({ phase: 'waiting', roomCode: '123456', error: expect.stringContaining('离房请求未发送') });
-  act(() => useAppStore.getState().setConnected(true));
+  expect(useAppStore.getState()).toMatchObject({
+    phase: 'waiting',
+    roomCode: '123456',
+    error: expect.stringContaining('离房请求未发送'),
+  });
+  act(() => {
+    useAppStore.getState().setConnected(true);
+  });
   fireEvent.click(leave);
   expect(useAppStore.getState()).toMatchObject({ phase: 'lobby', roomCode: '' });
 });
 
 it('waits for our own ready update and unlocks a pending cancel on disconnect', () => {
-  useAppStore.setState({ phase: 'waiting', playerId: 'me', ownerId: 'host', roomRequest: null, players: [
-    { id: 'host', name: '房主', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 },
-    { id: 'me', name: '我', seat: 1, ready: false, online: true, is_landlord: false, cards_count: 0 },
-  ] });
+  useAppStore.setState({
+    phase: 'waiting',
+    playerId: 'me',
+    ownerId: 'host',
+    roomRequest: null,
+    players: [
+      { id: 'host', name: '房主', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 },
+      { id: 'me', name: '我', seat: 1, ready: false, online: true, is_landlord: false, cards_count: 0 },
+    ],
+  });
   const send = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
   render(<Lobby socket={{ send } as unknown as GameSocket} />);
   const ready = screen.getByRole('button', { name: '准备开始' });
   fireEvent.click(ready);
   expect(useAppStore.getState().error).toContain('准备请求未发送');
   fireEvent.click(ready);
-  act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'peer', ready: true } }));
-  act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'me', ready: false } }));
+  act(() => {
+    useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'peer', ready: true } });
+  });
+  act(() => {
+    useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'me', ready: false } });
+  });
   expect(screen.getByRole('button', { name: '正在准备…' })).toBeDisabled();
-  act(() => useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'me', ready: true } }));
+  act(() => {
+    useAppStore.getState().handleMessage({ type: MsgType.PlayerReady, payload: { player_id: 'me', ready: true } });
+  });
   const cancel = screen.getByRole('button', { name: '取消准备' });
   fireEvent.click(cancel);
   expect(send).toHaveBeenLastCalledWith(MsgType.CancelReady, undefined);
   expect(cancel).toBeDisabled();
-  act(() => useAppStore.getState().setConnected(false));
+  act(() => {
+    useAppStore.getState().setConnected(false);
+  });
   expect(cancel).toBeEnabled();
 });
 
@@ -148,8 +189,8 @@ it('prompts secondary confirmation for bot-filled start when solo or partial roo
     roomRequest: null,
     error: '',
     players: [
-      { id: 'host', name: '青竹', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 }
-    ]
+      { id: 'host', name: '青竹', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 },
+    ],
   });
   const send = vi.fn().mockReturnValue(true);
   const { container } = render(<Lobby socket={{ send } as unknown as GameSocket} />);
@@ -178,21 +219,29 @@ it('prompts secondary confirmation for bot-filled start when solo or partial roo
   // Reopen, verify guest joining unready auto-closes modal and disables Start Game until guest readies
   fireEvent.click(startBtn);
   expect(screen.getByRole('dialog')).toBeInTheDocument();
-  act(() => useAppStore.getState().handleMessage({
-    type: MsgType.PlayerJoined,
-    payload: { player: { id: 'p2', name: '山月', seat: 1, ready: false, online: true, is_landlord: false, cards_count: 0 } }
-  }));
+  act(() => {
+    useAppStore.getState().handleMessage({
+      type: MsgType.PlayerJoined,
+      payload: {
+        player: { id: 'p2', name: '山月', seat: 1, ready: false, online: true, is_landlord: false, cards_count: 0 },
+      },
+    });
+  });
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(startBtn).toBeDisabled();
 
   // Guest readies -> 2/3 room shows 1-bot fill confirmation and sends start_game on confirm
-  act(() => useAppStore.getState().handleMessage({
-    type: MsgType.PlayerReady,
-    payload: { player_id: 'p2', ready: true }
-  }));
+  act(() => {
+    useAppStore.getState().handleMessage({
+      type: MsgType.PlayerReady,
+      payload: { player_id: 'p2', ready: true },
+    });
+  });
   expect(startBtn).toBeEnabled();
   fireEvent.click(startBtn);
-  expect(screen.getByRole('dialog')).toHaveTextContent('当前已有 2 名真人玩家入座，确认后将自动补齐 1 名人机玩家并立即开始游戏。');
+  expect(screen.getByRole('dialog')).toHaveTextContent(
+    '当前已有 2 名真人玩家入座，确认后将自动补齐 1 名人机玩家并立即开始游戏。'
+  );
 
   fireEvent.click(screen.getByRole('button', { name: '确认开始' }));
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -201,10 +250,12 @@ it('prompts secondary confirmation for bot-filled start when solo or partial roo
   expect(screen.getByRole('button', { name: '正在开始游戏…' })).toBeDisabled();
 
   // Error unlocks Start Game button
-  act(() => useAppStore.getState().handleMessage({
-    type: MsgType.Error,
-    payload: { message: '还有玩家未准备', request_type: MsgType.StartGame }
-  }));
+  act(() => {
+    useAppStore.getState().handleMessage({
+      type: MsgType.Error,
+      payload: { message: '还有玩家未准备', request_type: MsgType.StartGame },
+    });
+  });
   expect(screen.getByRole('button', { name: '开始游戏' })).toBeEnabled();
 });
 
@@ -218,8 +269,8 @@ it('prompts secondary confirmation for full 3-human game as well and transfers h
     players: [
       { id: 'host', name: '青竹', seat: 0, ready: false, online: true, is_landlord: false, cards_count: 0 },
       { id: 'p2', name: '山月', seat: 1, ready: true, online: true, is_landlord: false, cards_count: 0 },
-      { id: 'p3', name: '松风', seat: 2, ready: true, online: true, is_landlord: false, cards_count: 0 }
-    ]
+      { id: 'p3', name: '松风', seat: 2, ready: true, online: true, is_landlord: false, cards_count: 0 },
+    ],
   });
   const send = vi.fn().mockReturnValue(true);
   render(<Lobby socket={{ send } as unknown as GameSocket} />);
@@ -245,7 +296,7 @@ it('prompts secondary confirmation for full 3-human game as well and transfers h
     useAppStore.setState({ playerId: 'p2', roomRequest: null });
     useAppStore.getState().handleMessage({
       type: MsgType.PlayerLeft,
-      payload: { player_id: 'host', player_name: '青竹', owner_id: 'p2' }
+      payload: { player_id: 'host', player_name: '青竹', owner_id: 'p2' },
     });
   });
   expect(screen.getByRole('button', { name: '开始游戏' })).toBeEnabled();
@@ -259,7 +310,7 @@ it('renders leaderboard header, top-rank badges, win stats, and current-player m
     subscribe: (fn: typeof listener) => {
       listener = fn;
       return () => {};
-    }
+    },
   } as unknown as GameSocket;
 
   useAppStore.setState({
@@ -271,12 +322,14 @@ it('renders leaderboard header, top-rank badges, win stats, and current-player m
     leaderboard: [
       { rank: 1, player_id: 'p1', player_name: '云鹤', score: 268, wins: 42, win_rate: 67.74 },
       { rank: 2, player_id: 'me', player_name: '青竹', score: 186, wins: 29, win_rate: 60.41 },
-      { rank: 4, player_id: 'p4', player_name: '山月', score: 152, wins: 24, win_rate: 55.8 }
-    ]
+      { rank: 4, player_id: 'p4', player_name: '山月', score: 152, wins: 24, win_rate: 55.8 },
+    ],
   });
 
   const { container } = render(<Lobby socket={socket} />);
-  act(() => listener?.({ type: MsgType.LeaderboardResult }));
+  act(() => {
+    listener?.({ type: MsgType.LeaderboardResult });
+  });
 
   const head = container.querySelector('.sub-panel__head');
   const reload = screen.getByRole('button', { name: '重新加载' });
@@ -301,7 +354,7 @@ it('automatically scrolls the leaderboard to center the current player rank on o
     subscribe: (fn: typeof listener) => {
       listener = fn;
       return () => {};
-    }
+    },
   } as unknown as GameSocket;
 
   const entries = Array.from({ length: 30 }, (_, idx) => ({
@@ -310,7 +363,7 @@ it('automatically scrolls the leaderboard to center the current player rank on o
     player_name: `牌友${idx + 1}`,
     score: 300 - idx * 5,
     wins: 30 - idx,
-    win_rate: 55
+    win_rate: 55,
   }));
 
   const rowHeight = 52;
@@ -318,20 +371,30 @@ it('automatically scrolls the leaderboard to center the current player rank on o
   const rowStep = rowHeight + rowGap;
   const listViewportHeight = 300;
 
-  const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
-    return this.classList.contains('ranking-list') ? entries.length * rowStep - rowGap : 0;
-  });
-  const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
-    return this.classList.contains('ranking-list') ? listViewportHeight : 0;
-  });
-  const offsetHeightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
-    return this.classList.contains('ranking-row') ? rowHeight : 0;
-  });
-  const offsetTopSpy = vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
-    if (!this.classList.contains('ranking-row') || !this.parentElement) return 0;
-    const index = Array.from(this.parentElement.children).indexOf(this);
-    return index >= 0 ? index * rowStep : 0;
-  });
+  const scrollHeightSpy = vi
+    .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    .mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('ranking-list') ? entries.length * rowStep - rowGap : 0;
+    });
+  const clientHeightSpy = vi
+    .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    .mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('ranking-list') ? listViewportHeight : 0;
+    });
+  const offsetHeightSpy = vi
+    .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+    .mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('ranking-row') ? rowHeight : 0;
+    });
+  const offsetTopSpy = vi
+    .spyOn(HTMLElement.prototype, 'offsetTop', 'get')
+    .mockImplementation(function (this: HTMLElement) {
+      if (!this.classList.contains('ranking-row') || !this.parentElement) {
+        return 0;
+      }
+      const index = Array.from(this.parentElement.children).indexOf(this);
+      return index >= 0 ? index * rowStep : 0;
+    });
 
   try {
     useAppStore.setState({
@@ -340,31 +403,45 @@ it('automatically scrolls the leaderboard to center the current player rank on o
       connected: true,
       playerId: 'p18',
       playerName: '牌友18',
-      leaderboard: entries
+      leaderboard: entries,
     });
 
     const { container } = render(<Lobby socket={socket} />);
-    act(() => listener?.({ type: MsgType.LeaderboardResult }));
+    act(() => {
+      listener?.({ type: MsgType.LeaderboardResult });
+    });
 
-    const listEl = container.querySelector<HTMLElement>('.ranking-list')!;
-    expect(listEl).toBeTruthy();
+    const listEl = container.querySelector<HTMLElement>('.ranking-list');
+    if (!listEl) {
+      throw new Error('Expected .ranking-list element');
+    }
     expect(listEl.scrollTop).toBe(896);
 
-    act(() => useAppStore.setState({ playerId: 'p2' }));
+    act(() => {
+      useAppStore.setState({ playerId: 'p2' });
+    });
     expect(listEl.scrollTop).toBe(0);
 
-    act(() => useAppStore.setState({ playerId: 'p30' }));
+    act(() => {
+      useAppStore.setState({ playerId: 'p30' });
+    });
     expect(listEl.scrollTop).toBe(1492);
 
-    act(() => useAppStore.setState({ playerId: 'unranked' }));
+    act(() => {
+      useAppStore.setState({ playerId: 'unranked' });
+    });
     expect(listEl.scrollTop).toBe(0);
 
-    act(() => useAppStore.setState({ playerId: 'p18' }));
+    act(() => {
+      useAppStore.setState({ playerId: 'p18' });
+    });
     expect(listEl.scrollTop).toBe(896);
     listEl.scrollTop = 0;
     fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
-    act(() => listener?.({ type: MsgType.LeaderboardResult }));
-    expect(container.querySelector<HTMLElement>('.ranking-list')!.scrollTop).toBe(896);
+    act(() => {
+      listener?.({ type: MsgType.LeaderboardResult });
+    });
+    expect(container.querySelector<HTMLElement>('.ranking-list')?.scrollTop).toBe(896);
   } finally {
     scrollHeightSpy.mockRestore();
     clientHeightSpy.mockRestore();

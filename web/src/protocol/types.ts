@@ -94,23 +94,25 @@ export interface DealTiming {
 }
 
 export interface PublicPlay {
- type: 'play' | 'pass';
- player_id: string;
- player_name: string;
- cards: CardInfo[];
- hand_type: string;
- new_trick: boolean;
+  type: 'play' | 'pass';
+  player_id: string;
+  player_name: string;
+  cards: CardInfo[];
+  hand_type: string;
+  new_trick: boolean;
 }
 
-export interface GameStateDTO extends DealTiming {
+/** Authoritative table snapshot sent on reconnect. */
+export interface GameStateDto extends DealTiming {
   game_id?: string;
   state_version?: number;
   turn_token?: string;
- multiplier?: number;
- public_plays?: PublicPlay[];
- last_action_token?: string; turn_deadline?: number;
- turn_paused?: boolean;
- last_hand_type?: string;
+  multiplier?: number;
+  public_plays?: PublicPlay[];
+  last_action_token?: string;
+  turn_deadline?: number;
+  turn_paused?: boolean;
+  last_hand_type?: string;
   phase: 'bidding' | 'playing' | string;
   players: PlayerInfo[];
   hand: CardInfo[];
@@ -158,7 +160,7 @@ export interface ReconnectedPayload {
   player_id: string;
   player_name: string;
   room_code?: string;
-  game_state?: GameStateDTO;
+  game_state?: GameStateDto;
 }
 
 export interface IncomingPayloadMap {
@@ -171,6 +173,7 @@ export interface IncomingPayloadMap {
   player_joined: { player: PlayerInfo };
   player_left: { player_id: string; player_name: string; owner_id?: string };
   player_ready: { player_id: string; ready: boolean };
+  match_canceled: Record<string, never>;
   match_found: Record<string, never>;
   game_start: { players: PlayerInfo[] };
   deal_cards: DealTiming & { cards: CardInfo[]; bottom_cards: CardInfo[] };
@@ -193,8 +196,10 @@ export interface IncomingPayloadMap {
   error: { code: number; message: string; request_type?: MessageType };
 }
 
-export type IncomingMessage = {
-  [K in keyof IncomingPayloadMap]: { type: K; payload: IncomingPayloadMap[K] }
-}[keyof IncomingPayloadMap] | { type: string; payload: unknown };
+export type IncomingMessage =
+  | {
+      [K in keyof IncomingPayloadMap]: { type: K; payload: IncomingPayloadMap[K] };
+    }[keyof IncomingPayloadMap]
+  | { type: string; payload: unknown };
 
 export type OutgoingPayload = Record<string, unknown> | undefined;
