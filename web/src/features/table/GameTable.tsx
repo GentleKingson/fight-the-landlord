@@ -145,13 +145,11 @@ export function GameTable({ socket }: GameTableProps) {
             </>
           )}
         </div>
-        {!useTurnColumn && <TurnBanner />}
+        <div className={useTurnColumn ? 'table-controls table-controls--with-turn' : 'table-controls'}>
+          {(!useTurnColumn || phase === 'dealing' || isMyTurn) && <TurnBanner />}
+          <ActionBar socket={socket} isMyTurn={isMyTurn} phase={phase} />
+        </div>
       </section>
-
-      <div className={useTurnColumn ? 'table-controls table-controls--with-turn' : 'table-controls'}>
-        {useTurnColumn && (phase === 'dealing' || isMyTurn) && <TurnBanner />}
-        <ActionBar socket={socket} isMyTurn={isMyTurn} phase={phase} />
-      </div>
 
       <section className="hand-zone">
         <div className="hand-heading">
@@ -307,11 +305,11 @@ function TurnBanner() {
 
   return (
     <div className={`turn-banner ${isMe ? 'is-mine' : ''} ${isMe && remaining > 0 && remaining <= 5 ? 'is-urgent' : ''}`}>
+      {phase !== 'dealing' ? <time>{remaining || 0}</time> : null}
       <div className="turn-banner__copy" role="status" aria-atomic="true">
         <strong>{phase === 'dealing' ? '正在发牌' : title}</strong>
         <span className={phase === 'playing' ? 'turn-banner__play-hint' : undefined}>{phase === 'dealing' ? '发牌结束后开始叫地主' : subtitle}</span>
       </div>
-      {phase !== 'dealing' ? <time>{remaining || 0}</time> : null}
     </div>
   );
 }
