@@ -27,6 +27,8 @@ type OnlineModel struct {
 	playerName string
 
 	matchingStartTime time.Time
+	matchingSeq       uint64
+	matchingTicking   bool
 
 	// Network state
 	latency int64
@@ -147,10 +149,20 @@ func (m *OnlineModel) listenForMessages() tea.Cmd {
 
 // --- Model interface implementation ---
 
-func (m *OnlineModel) Phase() GamePhase         { return m.phase }
-func (m *OnlineModel) SetPhase(phase GamePhase) { m.phase = phase }
-func (m *OnlineModel) PlayerID() string         { return m.playerID }
-func (m *OnlineModel) PlayerName() string       { return m.playerName }
+func (m *OnlineModel) Phase() GamePhase { return m.phase }
+func (m *OnlineModel) SetPhase(phase GamePhase) {
+	if m.phase != phase {
+		if phase == PhaseMatching {
+			m.matchingSeq++
+			m.matchingTicking = false
+		} else if m.phase == PhaseMatching {
+			m.matchingTicking = false
+		}
+	}
+	m.phase = phase
+}
+func (m *OnlineModel) PlayerID() string   { return m.playerID }
+func (m *OnlineModel) PlayerName() string { return m.playerName }
 func (m *OnlineModel) SetPlayerInfo(id, name string) {
 	m.playerID = id
 	m.playerName = name
@@ -195,7 +207,7 @@ func (m *OnlineModel) GetCurrentNotification() *SystemNotification {
 }
 
 func (m *OnlineModel) EnterLobby() {
-	m.phase = PhaseLobby
+	m.SetPhase(PhaseLobby)
 	m.error = ""
 
 	// 大厅播放欢迎背景音乐（循环），覆盖上一局的对局 BGM
@@ -261,52 +273,79 @@ func (m *OnlineModel) ReconnectMaxTries() int { return m.reconnectMaxTries }
 // SetReconnectMaxTries sets the max reconnect tries.
 func (m *OnlineModel) SetReconnectMaxTries(t int) { m.reconnectMaxTries = t }
 
-// dispatchMessage 分发消息到对应的处理函数，返回命令和是否需要提前返回
-func (m *OnlineModel) dispatchMessage(msg tea.Msg) (cmds []tea.Cmd, earlyReturn bool, result tea.Cmd) {
+func (m *OnlineModel) dispatchUITimerMessage(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.handleWindowSize(msg)
-
-	case ConnectedMsg:
-		cmds = append(cmds, m.handleConnected())
-
-	case ConnectionErrorMsg:
-		m.handleConnectionError(msg)
-
-	case ReconnectingMsg:
-		cmds = append(cmds, m.handleReconnecting(msg))
-
-	case ReconnectSuccessMsg:
-		cmds = append(cmds, m.handleReconnectSuccess()...)
-
 	case ClearReconnectMsg:
 		m.handleClearReconnect()
-
 	case ClearErrorMsg:
 		m.error = ""
-
 	case ClearSystemNotificationMsg:
 		m.ClearNotification(NotifyError)
 		m.ClearNotification(NotifyRateLimit)
-
 	case GameOverDelayMsg:
-		m.phase = PhaseGameOver
+		m.SetPhase(PhaseGameOver)
 		m.input.Placeholder = "按回车返回大厅"
 		m.input.Focus()
-
+	case MatchingTickMsg:
+		if m.phase == PhaseMatching && msg.Seq == m.matchingSeq {
+			return scheduleMatchingTick(msg.Seq), true
+		}
 	case ClearInputErrorMsg:
 		m.handleClearInputError()
+	default:
+		return nil, false
+	}
+	return nil, true
+}
 
+func (m *OnlineModel) dispatchKeyMessage(msg tea.KeyMsg, cmds []tea.Cmd) (earlyReturn bool, result tea.Cmd) {
+	handled, keyCmd := m.processKeyMsg(msg)
+	if !handled {
+		return false, nil
+	}
+	if m.phase == PhaseMatching && !m.matchingTicking {
+		m.matchingTicking = true
+		cmds = append(cmds, keyCmd, scheduleMatchingTick(m.matchingSeq))
+		return true, tea.Batch(cmds...)
+	}
+	return true, keyCmd
+}
+
+// dispatchMessage 分发消息到对应的处理函数，返回命令和是否需要提前返回
+func (m *OnlineModel) dispatchMessage(msg tea.Msg) (cmds []tea.Cmd, earlyReturn bool, result tea.Cmd) {
+	if uiCmd, ok := m.dispatchUITimerMessage(msg); ok {
+		if uiCmd != nil {
+			cmds = append(cmds, uiCmd)
+		}
+		return cmds, false, nil
+	}
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.handleWindowSize(msg)
+	case ConnectedMsg:
+		cmds = append(cmds, m.handleConnected())
+	case ConnectionErrorMsg:
+		m.handleConnectionError(msg)
+	case ReconnectingMsg:
+		cmds = append(cmds, m.handleReconnecting(msg))
+	case ReconnectSuccessMsg:
+		cmds = append(cmds, m.handleReconnectSuccess()...)
 	case ServerMessage:
 		cmds = append(cmds, m.processServerMessage(msg)...)
-
 	case tea.KeyMsg:
-		if handled, keyCmd := m.processKeyMsg(msg); handled {
+		if stop, keyCmd := m.dispatchKeyMessage(msg, cmds); stop {
 			return nil, true, keyCmd
 		}
 	}
 
 	return cmds, false, nil
+}
+
+func scheduleMatchingTick(seq uint64) tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return MatchingTickMsg{Seq: seq}
+	})
 }
 
 // Update handles tea messages.
@@ -330,11 +369,10 @@ func (m *OnlineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	*m.input = newInput
 	cmds = append(cmds, cmd)
 
-	// Matching phase tick
-	if m.phase == PhaseMatching {
-		cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg {
-			return tea.WindowSizeMsg{Width: m.width, Height: m.height}
-		}))
+	// Start single-chain matching phase tick once per matching session
+	if m.phase == PhaseMatching && !m.matchingTicking {
+		m.matchingTicking = true
+		cmds = append(cmds, scheduleMatchingTick(m.matchingSeq))
 	}
 
 	return m, tea.Batch(cmds...)

@@ -50,7 +50,16 @@ message PublicPlay {
  bool new_trick = 6;
 }
 
+message PublicBid {
+ string player_id = 1;
+ string player_name = 2;
+ bool bid = 3;
+ bool is_grab = 4;
+ int64 multiplier = 5;
+}
+
 message GameStateDTO {
+ repeated PublicBid bid_history = 23;
  string last_action_token = 22;
  string game_id = 19;
  int64 state_version = 20;

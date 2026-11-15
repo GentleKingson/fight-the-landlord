@@ -37,28 +37,41 @@ func downloadURL(tag, asset string) string {
 
 // Apply 下载 res.LatestVersion 对应的二进制并原子替换当前可执行文件。
 //
-// 下载后会用 .sha256 校验文件完整性，校验失败或写入失败时返回 error 且不会破坏当前已安装的可执行文件（selfupdate 在失败时回滚）。
+// 下载后强制下载并校验 .sha256 文件完整性，校验文件缺失、格式非法、摘要不匹配或写入失败时均返回 error 且保留原可执行文件。
 func Apply(ctx context.Context, res *Result) error {
-	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
-	defer cancel()
-
+	if res == nil || strings.TrimSpace(res.LatestVersion) == "" {
+		return errors.New("无效的目标版本信息")
+	}
 	asset := AssetName(runtime.GOOS, runtime.GOARCH)
 	binURL := downloadURL(res.LatestVersion, asset)
+	return applyFromURL(ctx, binURL, "")
+}
+
+// applyFromURL 是 Apply 的内部实现，允许注入下载地址与目标路径以便测试。
+func applyFromURL(ctx context.Context, binURL, targetPath string) error {
+	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	defer cancel()
 
 	// 下载新二进制到内存
 	data, err := fetch(ctx, binURL)
 	if err != nil {
 		return fmt.Errorf("下载新版本失败: %w", err)
 	}
-
-	// 下载并校验 sha256（校验文件缺失时跳过，与安装脚本行为一致）
-	if sum, err := fetch(ctx, binURL+".sha256"); err == nil {
-		if err := verifyChecksum(data, sum); err != nil {
-			return err
-		}
+	if len(data) == 0 {
+		return errors.New("下载的新版本文件为空")
 	}
 
-	if err := selfupdate.Apply(bytes.NewReader(data), selfupdate.Options{}); err != nil {
+	// 强制下载并校验 sha256；获取失败或校验不通过时绝不覆盖本地可执行文件
+	sum, err := fetch(ctx, binURL+".sha256")
+	if err != nil {
+		return fmt.Errorf("下载校验文件失败: %w", err)
+	}
+	if err := verifyChecksum(data, sum); err != nil {
+		return err
+	}
+
+	opts := selfupdate.Options{TargetPath: targetPath}
+	if err := selfupdate.Apply(bytes.NewReader(data), opts); err != nil {
 		// 尝试回滚到替换前的可执行文件
 		if rerr := selfupdate.RollbackError(err); rerr != nil {
 			return fmt.Errorf("升级失败且回滚失败: %w", rerr)
@@ -117,13 +130,19 @@ func fetch(ctx context.Context, url string) ([]byte, error) {
 
 // verifyChecksum 用 .sha256 文件内容校验二进制数据完整性
 //
-// 校验文件格式为 `<hex>  <filename>`，仅取首段十六进制摘要比较
+// 校验文件格式为 `<hex>  <filename>`，要求首段为合法 64 位十六进制 SHA-256 摘要
 func verifyChecksum(data, checksumFile []byte) error {
 	fields := strings.Fields(string(checksumFile))
 	if len(fields) == 0 {
 		return fmt.Errorf("校验文件为空")
 	}
 	want := strings.ToLower(fields[0])
+	if len(want) != sha256.Size*2 {
+		return fmt.Errorf("校验文件格式非法: 摘要长度 %d", len(want))
+	}
+	if _, err := hex.DecodeString(want); err != nil {
+		return fmt.Errorf("校验文件格式非法: %w", err)
+	}
 
 	sum := sha256.Sum256(data)
 	got := hex.EncodeToString(sum[:])

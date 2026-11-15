@@ -248,10 +248,26 @@ func (lm *LeaderboardManager) UpdateLeaderboard(ctx context.Context, stats *Play
 	return nil
 }
 
-// GetLeaderboard 获取排行榜
-func (lm *LeaderboardManager) GetLeaderboard(ctx context.Context, limit int) ([]*LeaderboardEntry, error) {
-	leaderboardType := "total"
-	offset := 0
+// NormalizeLeaderboardType 归一化排行榜周期类型，未知或空值回退为 total。
+func NormalizeLeaderboardType(leaderboardType string) string {
+	switch leaderboardType {
+	case "daily", "weekly":
+		return leaderboardType
+	default:
+		return "total"
+	}
+}
+
+// GetLeaderboard 获取排行榜（支持 total/daily/weekly 周期与分页偏移）
+func (lm *LeaderboardManager) GetLeaderboard(ctx context.Context, leaderboardType string, offset, limit int) ([]*LeaderboardEntry, error) {
+	leaderboardType = NormalizeLeaderboardType(leaderboardType)
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		return []*LeaderboardEntry{}, nil
+	}
+
 	// 确定使用哪个排行榜
 	key := leaderboardKey
 	switch leaderboardType {

@@ -87,6 +87,7 @@ func ProtoToPlayerInfos(pbs []*pb.PlayerInfo) []protocol.PlayerInfo {
 
 func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 	return &pb.GameStateDTO{
+		BidHistory:      PublicBidsToProto(gs.BidHistory),
 		LastActionToken: gs.LastActionToken,
 		GameId:          gs.GameID, StateVersion: gs.StateVersion, TurnToken: gs.TurnToken,
 		Multiplier: int64(gs.Multiplier), PublicPlays: PublicPlaysToProto(gs.PublicPlays),
@@ -109,6 +110,7 @@ func GameStateDTOToProto(gs *protocol.GameStateDTO) *pb.GameStateDTO {
 
 func ProtoToGameStateDTO(pb *pb.GameStateDTO) *protocol.GameStateDTO {
 	return &protocol.GameStateDTO{
+		BidHistory:      ProtoToPublicBids(pb.BidHistory),
 		LastActionToken: pb.LastActionToken,
 		GameID:          pb.GameId, StateVersion: pb.StateVersion, TurnToken: pb.TurnToken,
 		Multiplier: int(pb.Multiplier), PublicPlays: ProtoToPublicPlays(pb.PublicPlays),
@@ -252,6 +254,34 @@ func ProtoToPublicPlays(plays []*pb.PublicPlay) []protocol.PublicPlay {
 	result := make([]protocol.PublicPlay, len(plays))
 	for i, p := range plays {
 		result[i] = protocol.PublicPlay{Type: p.Type, PlayerID: p.PlayerId, PlayerName: p.PlayerName, Cards: ProtoToCards(p.Cards), HandType: p.HandType, NewTrick: p.NewTrick}
+	}
+	return result
+}
+
+func PublicBidsToProto(bids []protocol.PublicBid) []*pb.PublicBid {
+	result := make([]*pb.PublicBid, len(bids))
+	for i, b := range bids {
+		result[i] = &pb.PublicBid{
+			PlayerId:   b.PlayerID,
+			PlayerName: b.PlayerName,
+			Bid:        b.Bid,
+			IsGrab:     b.IsGrab,
+			Multiplier: int64(b.Multiplier),
+		}
+	}
+	return result
+}
+
+func ProtoToPublicBids(bids []*pb.PublicBid) []protocol.PublicBid {
+	result := make([]protocol.PublicBid, len(bids))
+	for i, b := range bids {
+		result[i] = protocol.PublicBid{
+			PlayerID:   b.PlayerId,
+			PlayerName: b.PlayerName,
+			Bid:        b.Bid,
+			IsGrab:     b.IsGrab,
+			Multiplier: int(b.Multiplier),
+		}
 	}
 	return result
 }

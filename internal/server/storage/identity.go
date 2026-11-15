@@ -64,3 +64,10 @@ func (rs *RedisStore) VerifyIdentity(ctx context.Context, id, token string) (*Gu
 	}
 	return &identity, nil
 }
+
+func (rs *RedisStore) DeleteIdentity(ctx context.Context, id string) error {
+	if id == "" {
+		return nil
+	}
+	return rs.client.Del(ctx, "identity:"+id).Err()
+}

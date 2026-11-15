@@ -735,7 +735,7 @@ test.each([true, false])('reload waits for final recovery response, snapshot ava
   }
 });
 
-test('identity message alone does not unlock game submissions', () => {
+test('identity message alone does not unlock game or lobby state-mutating submissions', () => {
   const socket = new GameSocket('ws://localhost/ws');
   socket.connect();
   try {
@@ -744,7 +744,51 @@ test('identity message alone does not unlock game submissions', () => {
     transport.receive('connected', { player_id: 'me' });
     useAppStore.setState({ currentTurn: 'me', bidToken: 'bid-1', timerStart: Date.now(), timeout: 30 });
     expect(socket.send('bid', { bid: true, bid_token: 'bid-1' })).toBe(false);
+    expect(socket.send('quick_match')).toBe(false);
+    expect(socket.send('create_room')).toBe(false);
     expect(sentTypes(transport)).not.toContain('bid');
+    expect(sentTypes(transport)).not.toContain('quick_match');
+    expect(sentTypes(transport)).not.toContain('create_room');
+
+    transport.receive('reconnected', { player_id: 'me' });
+    expect(socket.send('quick_match')).toBe(true);
+    expect(sentTypes(transport)).toContain('quick_match');
+  } finally {
+    socket.close();
+  }
+});
+
+test('asymmetric RTT clock skew does not locally reject a valid turn submission before server deadline', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(6000);
+  const socket = new GameSocket('ws://localhost/ws');
+  socket.connect();
+  try {
+    const transport = FakeSocket.latest;
+    transport.send = (data) => {
+      transport.sent.push(data);
+    };
+    transport.onopen?.();
+    transport.receive('connected', { player_id: 'me' });
+    transport.receive('reconnected', { player_id: 'me' });
+
+    // True clocks match; ping sent at 6000ms, server answered at 9800ms, pong arrived at 10000ms -> +1800ms offset.
+    vi.setSystemTime(10000);
+    transport.receive('pong', { client_timestamp: 6000, server_timestamp: 9800 });
+    // Authoritative deadline is 11000ms (still 1000ms left), but asymmetric offset makes local timeout appear 0.
+    transport.receive('play_turn', {
+      player_id: 'me',
+      turn_token: 'turn-asym',
+      timeout: 1,
+      server_time: 10000,
+      turn_deadline: 11000,
+      must_play: true,
+      can_beat: true
+    });
+
+    expect(useAppStore.getState().timeout).toBe(0);
+    expect(socket.send('play_cards', { cards: [{ rank: 3, suit: 0, color: 0 }], turn_token: 'turn-asym' })).toBe(true);
+    expect(sentTypes(transport)).toContain('play_cards');
   } finally {
     socket.close();
   }

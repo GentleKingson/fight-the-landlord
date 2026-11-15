@@ -61,15 +61,25 @@ func WaitingView(m model.Model) string {
 		if p.Ready {
 			readyStr = "✅"
 		}
-		meStr := ""
-		if p.ID == m.PlayerID() {
-			meStr = " (你)"
-		} else if p.IsBot {
-			meStr = " (Bot)"
+		var tags []string
+		if p.ID == state.OwnerID && state.OwnerID != "" {
+			tags = append(tags, "房主")
 		}
-		fmt.Fprintf(&playerList, "  %s %s%s\n", readyStr, p.Name, meStr)
+		if p.ID == m.PlayerID() {
+			tags = append(tags, "你")
+		} else if p.IsBot {
+			tags = append(tags, "Bot")
+		}
+		tagStr := ""
+		if len(tags) > 0 {
+			tagStr = fmt.Sprintf(" (%s)", strings.Join(tags, "/"))
+		}
+		fmt.Fprintf(&playerList, "  %s %s%s\n", readyStr, p.Name, tagStr)
 	}
 	fmt.Fprintf(&playerList, "\n等待玩家: %d/3", len(state.Players))
+	if state.OwnerID != "" && state.OwnerID == m.PlayerID() {
+		playerList.WriteString("\n提示: 输入 S 开始游戏 (不足3人自动补Bot)")
+	}
 
 	playerBox := common.BoxStyle.Render(playerList.String())
 	sb.WriteString(lipgloss.PlaceHorizontal(width, lipgloss.Center, playerBox))
@@ -262,6 +272,19 @@ func renderCardCounter(counter *gameClient.CardCounter) string {
 	return common.BoxStyle.Render(sb.String())
 }
 
+func playerRoleIcon(isLandlord, isBot bool) string {
+	switch {
+	case isLandlord && isBot:
+		return common.LandlordIcon + "🤖"
+	case isLandlord:
+		return common.LandlordIcon
+	case isBot:
+		return "🤖"
+	default:
+		return common.FarmerIcon
+	}
+}
+
 func renderMiddleSection(state *gameClient.GameState, myPlayerID string) string {
 	parts := make([]string, 0, 3) // max 2 other players + 1 last play view
 	for _, p := range state.Players {
@@ -269,13 +292,7 @@ func renderMiddleSection(state *gameClient.GameState, myPlayerID string) string 
 			continue
 		}
 
-		icon := common.FarmerIcon
-		if p.IsLandlord {
-			icon = common.LandlordIcon
-		}
-		if p.IsBot {
-			icon = "🤖"
-		}
+		icon := playerRoleIcon(p.IsLandlord, p.IsBot)
 
 		nameStyle := lipgloss.NewStyle()
 		if state.CurrentTurn == p.ID {
@@ -359,12 +376,7 @@ func renderLastPlayed(state *gameClient.GameState) string {
 	icon := common.FarmerIcon
 	for _, p := range state.Players {
 		if p.ID == state.LastPlayedBy {
-			if p.IsLandlord {
-				icon = common.LandlordIcon
-			}
-			if p.IsBot {
-				icon = "🤖"
-			}
+			icon = playerRoleIcon(p.IsLandlord, p.IsBot)
 			break
 		}
 	}
@@ -398,6 +410,44 @@ func renderPlayerHand(hand []card.Card, isLandlord bool) string {
 	return common.BoxStyle.Render(content)
 }
 
+func renderBiddingPrompt(sb *strings.Builder, game model.GameAccessor, state *gameClient.GameState, myPlayerID, timerView string) {
+	action := "叫地主"
+	if state.IsGrabTurn {
+		action = fmt.Sprintf("抢地主 (当前倍数 ×%d)", state.Multiplier)
+	}
+	if game.BidTurn() == myPlayerID {
+		fmt.Fprintf(sb, "⏳ %s | 轮到你%s!\n", timerView, action)
+		return
+	}
+	for _, p := range state.Players {
+		if p.ID == game.BidTurn() {
+			fmt.Fprintf(sb, "等待 %s %s...\n", p.Name, action)
+			return
+		}
+	}
+}
+
+func renderPlayingPrompt(sb *strings.Builder, state *gameClient.GameState, myPlayerID, timerView string) {
+	multInfo := ""
+	if state.Multiplier > 0 {
+		multInfo = fmt.Sprintf(" | 💥×%d", state.Multiplier)
+	}
+	if state.CurrentTurn == myPlayerID {
+		icon := common.FarmerIcon
+		if state.IsLandlord {
+			icon = common.LandlordIcon
+		}
+		fmt.Fprintf(sb, "⏳ %s | 轮到你出牌! %s%s\n", timerView, icon, multInfo)
+		return
+	}
+	for _, p := range state.Players {
+		if p.ID == state.CurrentTurn {
+			fmt.Fprintf(sb, "⏳ %s | 等待 %s 出牌...%s\n", timerView, p.Name, multInfo)
+			return
+		}
+	}
+}
+
 func renderPrompt(m model.Model, game model.GameAccessor, state *gameClient.GameState, myPlayerID string) string {
 	var sb strings.Builder
 	phase := m.Phase()
@@ -416,39 +466,9 @@ func renderPrompt(m model.Model, game model.GameAccessor, state *gameClient.Game
 
 	switch phase {
 	case model.PhaseBidding:
-		action := "叫地主"
-		if state.IsGrabTurn {
-			action = fmt.Sprintf("抢地主 (当前倍数 ×%d)", state.Multiplier)
-		}
-		if game.BidTurn() == myPlayerID {
-			fmt.Fprintf(&sb, "⏳ %s | 轮到你%s!\n", timerView, action)
-		} else {
-			for _, p := range state.Players {
-				if p.ID == game.BidTurn() {
-					fmt.Fprintf(&sb, "等待 %s %s...\n", p.Name, action)
-					break
-				}
-			}
-		}
+		renderBiddingPrompt(&sb, game, state, myPlayerID, timerView)
 	case model.PhasePlaying:
-		multInfo := ""
-		if state.Multiplier > 0 {
-			multInfo = fmt.Sprintf(" | 💥×%d", state.Multiplier)
-		}
-		if state.CurrentTurn == myPlayerID {
-			icon := common.FarmerIcon
-			if state.IsLandlord {
-				icon = common.LandlordIcon
-			}
-			fmt.Fprintf(&sb, "⏳ %s | 轮到你出牌! %s%s\n", timerView, icon, multInfo)
-		} else {
-			for _, p := range state.Players {
-				if p.ID == state.CurrentTurn {
-					fmt.Fprintf(&sb, "⏳ %s | 等待 %s 出牌...%s\n", timerView, p.Name, multInfo)
-					break
-				}
-			}
-		}
+		renderPlayingPrompt(&sb, state, myPlayerID, timerView)
 	}
 
 	// Show input or quick message hint

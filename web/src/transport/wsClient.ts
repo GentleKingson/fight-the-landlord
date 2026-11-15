@@ -21,6 +21,18 @@ const MAX_RECONNECT_DELAY_MS = 15_000;
 const BASE_RECONNECT_DELAY_MS = 2500;
 const SESSION_REPLACED_CLOSE_CODE = 4001;
 const ABNORMAL_CLOSE_CODE = 1006;
+const GAME_ACTIONS = new Set<string>([MsgType.Bid, MsgType.PlayCards, MsgType.Pass]);
+const READY_GATED_LOBBY_ACTIONS = new Set<string>([
+  MsgType.CreateRoom,
+  MsgType.JoinRoom,
+  MsgType.LeaveRoom,
+  MsgType.QuickMatch,
+  MsgType.CancelMatch,
+  MsgType.PracticeMatch,
+  MsgType.Ready,
+  MsgType.CancelReady,
+  MsgType.StartGame
+]);
 
 /** Manages the game WebSocket connection, heartbeat, reconnects, and idempotent turn submissions. */
 export class GameSocket {
@@ -183,10 +195,11 @@ export class GameSocket {
   }
 
   send(type: MessageType | string, payload?: OutgoingPayload): boolean {
-    const action = ['bid', 'play_cards', 'pass'].includes(type);
+    const action = GAME_ACTIONS.has(type);
+    const requiresReady = action || READY_GATED_LOBBY_ACTIONS.has(type);
     const state = useAppStore.getState();
     if (action && this.pending) return false;
-    if (this.socket?.readyState !== WebSocket.OPEN || (action && !this.ready)) {
+    if (this.socket?.readyState !== WebSocket.OPEN || (requiresReady && !this.ready)) {
       if (action) {
         useAppStore.setState({ submission: 'rejected', submissionMessage: '操作未发送：连接尚未恢复，请稍后重新操作' });
       }
@@ -194,11 +207,7 @@ export class GameSocket {
     }
     if (action) {
       const token = type === 'bid' ? state.bidToken : state.turnToken;
-      if (
-        !token ||
-        state.currentTurn !== state.playerId ||
-        (state.timerStart > 0 && Date.now() >= state.timerStart + state.timeout * 1000)
-      ) {
+      if (!token || state.currentTurn !== state.playerId) {
         useAppStore.setState({ submission: 'rejected', submissionMessage: '操作未发送：回合已变化，请按当前状态操作' });
         return false;
       }

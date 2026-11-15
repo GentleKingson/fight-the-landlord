@@ -17,12 +17,14 @@ func handleMsgConnected(m model.Model, msg *protocol.Message) tea.Cmd {
 	_ = payloadconv.DecodePayload(msg.Type, msg.Payload, &payload)
 
 	m.SetPlayerInfo(payload.PlayerID, payload.PlayerName)
-	m.Client().ReconnectToken = payload.ReconnectToken
+	if m.Client() != nil {
+		m.Client().SetCredentials(payload.PlayerID, payload.PlayerName, payload.ReconnectToken)
 
-	_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetOnlineCount, nil))
-	_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetMaintenanceStatus, nil))
+		_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetOnlineCount, nil))
+		_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetMaintenanceStatus, nil))
+	}
 
-	m.Input().Placeholder = "输入选项 (1-5) 或房间号"
+	m.Input().Placeholder = "输入选项 (1-7) 或房间号"
 	m.Input().Focus()
 	m.PlaySound("login")
 	return nil
@@ -41,13 +43,15 @@ func handleMsgReconnected(m model.Model, msg *protocol.Message) tea.Cmd {
 	m.SetMaintenanceMode(false)
 
 	// 从服务器获取最新状态
-	_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetOnlineCount, nil))
-	_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetMaintenanceStatus, nil))
+	if m.Client() != nil {
+		_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetOnlineCount, nil))
+		_ = m.Client().SendMessage(codec.MustNewMessage(protocol.MsgGetMaintenanceStatus, nil))
+	}
 
 	// 不在房间内：回到大厅
 	if payload.RoomCode == "" {
 		m.SetPhase(model.PhaseLobby)
-		m.Input().Placeholder = "输入选项 (1-5) 或房间号"
+		m.Input().Placeholder = "输入选项 (1-7) 或房间号"
 		m.Input().Focus()
 		return nil
 	}
@@ -57,6 +61,7 @@ func handleMsgReconnected(m model.Model, msg *protocol.Message) tea.Cmd {
 	// 无游戏快照：仍在等待开局
 	if payload.GameState == nil {
 		m.SetPhase(model.PhaseWaiting)
+		updateWaitingInputPrompt(m)
 		return nil
 	}
 

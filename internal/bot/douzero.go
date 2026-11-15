@@ -113,9 +113,10 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 		return nil
 	}
 
+	target := targetHandForDecision(gctx)
 	if gctx.DouZeroPos == "" {
 		log.Printf("🎮 [DouZero] %s: 位置未知，回退规则出牌", botName)
-		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+		return rule.FindSmallestBeatingCards(gctx.Hand, target)
 	}
 
 	req := e.buildRequest(gctx)
@@ -125,13 +126,13 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 	}
 	if err != nil {
 		log.Printf("🎮 [DouZero] %s: 服务错误: %v，回退规则出牌", botName, err)
-		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+		return rule.FindSmallestBeatingCards(gctx.Hand, target)
 	}
 
 	if len(action) == 0 {
 		if gctx.MustPlay {
 			log.Printf("🎮 [DouZero] %s: 返回 pass 但必须出牌，回退规则出牌", botName)
-			return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+			return rule.FindSmallestBeatingCards(gctx.Hand, target)
 		}
 		log.Printf("🎮 [DouZero] %s: pass", botName)
 		return nil
@@ -140,12 +141,12 @@ func (e *DouZeroEngine) DecidePlay(ctx context.Context, botName string, gctx Gam
 	cards := e.douzeroToCards(action, gctx.Hand)
 	if cards == nil {
 		log.Printf("🎮 [DouZero] %s: 牌面转换失败，回退规则出牌", botName)
-		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+		return rule.FindSmallestBeatingCards(gctx.Hand, target)
 	}
 	parsed, parseErr := rule.ParseHand(cards)
-	if parseErr != nil || (!gctx.MustPlay && !gctx.RecentPlays[0].Played.IsEmpty() && !rule.CanBeat(parsed, gctx.RecentPlays[0].Played)) {
+	if parseErr != nil || (!target.IsEmpty() && !rule.CanBeat(parsed, target)) {
 		log.Printf("🎮 [DouZero] %s: 返回非法牌型或无法压过上家，回退规则出牌", botName)
-		return rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+		return rule.FindSmallestBeatingCards(gctx.Hand, target)
 	}
 
 	log.Printf("🎮 [DouZero] %s 出牌: %s", botName, cardsToStr(cards))

@@ -100,27 +100,55 @@ func checkForUpdate(serverURL string) {
 	forceUpgrade(req.MinClientVersion)
 }
 
+var (
+	checkLatestFunc = update.Check
+	applyUpdateFunc = update.Apply
+	relaunchFunc    = update.Relaunch
+	exitFunc        = os.Exit
+)
+
 // forceUpgrade 下载最新发布版本并替换当前可执行文件，随后以新版本重启。
 //
-// minVersion 仅用于失败时的提示信息。任何环节失败都会退出进程（强制升级语义下
-// 不能带着不兼容的旧版本继续运行），并打印手动升级指引。
+// 当远端最新发布版本仍低于服务端要求的 minVersion 时拒绝安装并退出。任何环节失败都会退出进程
+// （强制升级语义下不能带着不兼容的旧版本继续运行），并打印手动升级指引。
 func forceUpgrade(minVersion string) {
-	res, err := update.Check(context.Background(), version)
+	res, err := checkLatestFunc(context.Background(), version)
 	if err != nil {
 		failUpgrade(fmt.Sprintf("无法获取最新版本：%v", err), minVersion, "")
+		return
 	}
 
-	if err := update.Apply(context.Background(), res); err != nil {
+	req := &update.ServerRequirement{MinClientVersion: minVersion}
+	if req.RequiresUpgrade(res.LatestVersion) {
+		failUpgrade(
+			fmt.Sprintf("最新发布版本 %s 仍低于服务端要求的最低版本 %s", res.LatestVersion, minVersion),
+			minVersion,
+			res.ReleaseURL,
+		)
+		return
+	}
+	if update.CompareVersions(res.LatestVersion, version) <= 0 {
+		failUpgrade(
+			fmt.Sprintf("未找到比当前版本 %s 更新的发布版本（最新：%s）", version, res.LatestVersion),
+			minVersion,
+			res.ReleaseURL,
+		)
+		return
+	}
+
+	if err := applyUpdateFunc(context.Background(), res); err != nil {
 		logger.LogError("Self-update failed: %v", err)
 		failUpgrade(fmt.Sprintf("自动升级失败：%v", err), minVersion, res.ReleaseURL)
+		return
 	}
 
 	fmt.Printf("✅ 已升级到 %s，正在以新版本重新启动……\n\n", res.LatestVersion)
-	if err := update.Relaunch(); err != nil {
+	if err := relaunchFunc(); err != nil {
 		logger.LogError("Relaunch failed: %v", err)
 		fmt.Fprintf(os.Stderr, "❌ 重新启动失败：%v\n", err)
 		fmt.Fprintf(os.Stderr, "   升级已完成，请重新运行 ddz。\n")
-		os.Exit(1)
+		exitFunc(1)
+		return
 	}
 }
 
@@ -132,5 +160,5 @@ func failUpgrade(reason, minVersion, releaseURL string) {
 		fmt.Fprintf(os.Stderr, "   下载地址：%s\n", releaseURL)
 	}
 	fmt.Fprintln(os.Stderr)
-	os.Exit(1)
+	exitFunc(1)
 }

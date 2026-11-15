@@ -150,13 +150,16 @@ jobs:
   # dependency must never turn into a green aggregate check.
   test:
     if: ${{ always() }}
-    needs: [lint, go-test]
+    needs: [lint, go-test, web, inference]
     runs-on: ubuntu-latest
     steps:
-      - name: Require lint and Go tests
+      - name: Require all CI jobs
         env:
           LINT_RESULT: ${{ needs.lint.result }}
           TEST_RESULT: ${{ needs.go-test.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+          INFERENCE_RESULT: ${{ needs.inference.result }}
         run: |
-          printf 'lint=%s, go-test=%s\n' "$LINT_RESULT" "$TEST_RESULT"
-          [[ "$LINT_RESULT" == success && "$TEST_RESULT" == success ]]
+          printf 'lint=%s, go-test=%s, web=%s, inference=%s\n' \
+            "$LINT_RESULT" "$TEST_RESULT" "$WEB_RESULT" "$INFERENCE_RESULT"
+          [[ "$LINT_RESULT" == success && "$TEST_RESULT" == success && "$WEB_RESULT" == success && "$INFERENCE_RESULT" == success ]]

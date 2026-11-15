@@ -96,10 +96,8 @@ func (gs *GameSession) dealNewRound() {
 	for _, p := range gs.players {
 		p.Hand = nil
 		p.IsLandlord = false
-		if rp := gs.room.Players[p.ID]; rp != nil {
-			gs.effect(func() { rp.IsLandlord = false })
-		}
 	}
+	gs.effect(func() { gs.room.ResetLandlords() })
 
 	// 创建并洗牌
 	gs.deck = card.NewDeck()
@@ -142,9 +140,7 @@ func (gs *GameSession) deal() {
 
 	// 发送手牌给各玩家（先不显示底牌）
 	for _, p := range gs.players {
-		rp := gs.room.Players[p.ID]
-		client := rp.Client
-		gs.send(client, codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
+		gs.sendToPlayer(p.ID, codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
 			DealID:      gs.dealID,
 			DealStartAt: gs.dealStartAt.UnixMilli(),
 			DealEndAt:   gs.dealEndAt.UnixMilli(),
@@ -201,10 +197,12 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 
 	// 游戏结束，解散房间
 	for _, p := range gs.players {
-		rp := gs.room.Players[p.ID]
-		if rp != nil {
-			gs.effect(func() { rp.Client.SetRoom("") })
-		}
+		playerID := p.ID
+		gs.effect(func() {
+			if client := gs.room.GetClient(playerID); client != nil {
+				client.SetRoom("")
+			}
+		})
 	}
 }
 
@@ -273,8 +271,8 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 	landlordWins := winner.IsLandlord
 
 	for _, p := range gs.players {
-		rp := gs.room.Players[p.ID]
-		if rp != nil && rp.Client.IsBot() {
+		client := gs.room.GetClient(p.ID)
+		if client != nil && client.IsBot() {
 			continue // Bot 不计入排行榜
 		}
 
@@ -287,8 +285,8 @@ func (gs *GameSession) recordGameResults(winner *GamePlayer) {
 
 		// 获取玩家名称
 		playerName := p.Name
-		if rp != nil {
-			playerName = rp.Client.GetName()
+		if client != nil {
+			playerName = client.GetName()
 		}
 
 		leaderboard.QueueGameResult(storage.GameResult{

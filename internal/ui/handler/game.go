@@ -153,6 +153,10 @@ func handleMsgBidTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	}
 	m.Game().SetTimerDuration(time.Duration(payload.Timeout) * time.Second)
 	m.Game().SetTimerStartTime(time.Now())
+	if payload.Timeout <= 0 {
+		m.SetTimer(timer.Model{})
+		return nil
+	}
 	t := timer.New(m.Game().TimerDuration(), timer.WithInterval(time.Second))
 	m.SetTimer(t)
 	return t.Start()
@@ -243,6 +247,10 @@ func handleMsgPlayTurn(m model.Model, msg *protocol.Message) tea.Cmd {
 	}
 	m.Game().SetTimerDuration(time.Duration(payload.Timeout) * time.Second)
 	m.Game().SetTimerStartTime(time.Now())
+	if payload.Timeout <= 0 {
+		m.SetTimer(timer.Model{})
+		return nil
+	}
 	t := timer.New(m.Game().TimerDuration(), timer.WithInterval(time.Second))
 	m.SetTimer(t)
 	return t.Start()

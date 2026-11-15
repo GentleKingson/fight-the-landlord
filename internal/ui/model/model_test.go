@@ -439,3 +439,33 @@ func TestLobbyModel_Size(t *testing.T) {
 		})
 	}
 }
+
+func TestOnlineModel_MatchingTickSingleChain(t *testing.T) {
+	t.Parallel()
+
+	m := NewOnlineModel("ws://127.0.0.1:0/ws")
+	defer m.Client().Close()
+
+	m.SetPhase(PhaseMatching)
+	assert.Equal(t, uint64(1), m.matchingSeq)
+	assert.False(t, m.matchingTicking)
+
+	// First Update in PhaseMatching arms the single tick chain
+	_, cmd1 := m.Update(ClearErrorMsg{})
+	assert.NotNil(t, cmd1)
+	assert.True(t, m.matchingTicking)
+
+	// Unrelated events while already ticking must NOT arm duplicate matching ticks
+	_, cmd2 := m.Update(ClearErrorMsg{})
+	assert.Nil(t, cmd2)
+
+	// Valid MatchingTickMsg for current Seq re-arms next tick
+	_, cmd3 := m.Update(MatchingTickMsg{Seq: 1})
+	assert.NotNil(t, cmd3)
+
+	// Leaving PhaseMatching invalidates in-flight tick sequence
+	m.EnterLobby()
+	assert.False(t, m.matchingTicking)
+	_, staleCmd := m.Update(MatchingTickMsg{Seq: 1})
+	assert.Nil(t, staleCmd)
+}

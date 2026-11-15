@@ -477,11 +477,16 @@ func (b *BotClient) buildGameContext(mustPlay, canBeat bool) GameContext {
 		append([]card.Rank(nil), b.state.playedByPos[2]...),
 	}
 
+	recentPlays := b.state.recentPlays
+	if mustPlay {
+		recentPlays = [2]PlayRecord{}
+	}
+
 	return GameContext{
 		IsLandlord:     b.state.isLandlord,
 		Hand:           hand,
 		BottomCards:    b.state.bottomCards,
-		RecentPlays:    b.state.recentPlays,
+		RecentPlays:    recentPlays,
 		MustPlay:       mustPlay,
 		CanBeat:        canBeat,
 		PlayerCounts:   counts,

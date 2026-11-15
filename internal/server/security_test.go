@@ -216,52 +216,59 @@ func TestIPFilter(t *testing.T) {
 	}
 }
 
-func TestGetClientIP_ProxyHeaders(t *testing.T) {
+func TestGetClientIP_IgnoresUntrustedProxyHeaders(t *testing.T) {
 	t.Parallel()
+
+	req, _ := http.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.RemoteAddr = "10.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.1, 10.0.0.2")
+	req.Header.Set("X-Real-IP", "203.0.113.2")
+
+	assert.Equal(t, "10.0.0.1", GetClientIP(req))
+}
+
+func TestClientIPResolver_TrustedProxies(t *testing.T) {
+	t.Parallel()
+
+	resolver := NewClientIPResolver([]string{"127.0.0.1", "10.0.0.0/8"})
 
 	tests := []struct {
 		name       string
 		remoteAddr string
-		headers    map[string]string
+		xff        []string
+		realIP     string
 		expectedIP string
 	}{
 		{
-			name:       "Direct connection",
-			remoteAddr: "192.168.1.1:12345",
-			headers:    map[string]string{},
-			expectedIP: "192.168.1.1",
+			name:       "Direct untrusted peer ignores spoofed headers",
+			remoteAddr: "198.51.100.7:54321",
+			xff:        []string{"203.0.113.9"},
+			realIP:     "203.0.113.8",
+			expectedIP: "198.51.100.7",
 		},
 		{
-			name:       "X-Forwarded-For single IP",
-			remoteAddr: "10.0.0.1:12345",
-			headers: map[string]string{
-				"X-Forwarded-For": "203.0.113.1",
-			},
+			name:       "Trusted CIDR proxy extracts client IP from XFF",
+			remoteAddr: "10.1.2.3:12345",
+			xff:        []string{"203.0.113.1"},
 			expectedIP: "203.0.113.1",
 		},
 		{
-			name:       "X-Forwarded-For multiple IPs",
-			remoteAddr: "10.0.0.1:12345",
-			headers: map[string]string{
-				"X-Forwarded-For": "203.0.113.1, 10.0.0.2, 10.0.0.3",
-			},
-			expectedIP: "203.0.113.1", // First IP is the original client
+			name:       "Right-to-left scan defeats client-spoofed leftmost XFF",
+			remoteAddr: "127.0.0.1:8080",
+			xff:        []string{"1.2.3.4", "198.51.100.42, 10.0.0.2"},
+			expectedIP: "198.51.100.42",
 		},
 		{
-			name:       "X-Real-IP",
-			remoteAddr: "10.0.0.1:12345",
-			headers: map[string]string{
-				"X-Real-IP": "203.0.113.2",
-			},
+			name:       "X-Real-IP fallback when XFF absent",
+			remoteAddr: "10.0.0.5:12345",
+			realIP:     "203.0.113.2",
 			expectedIP: "203.0.113.2",
 		},
 		{
-			name:       "X-Forwarded-For takes precedence over X-Real-IP",
-			remoteAddr: "10.0.0.1:12345",
-			headers: map[string]string{
-				"X-Forwarded-For": "203.0.113.3",
-				"X-Real-IP":       "203.0.113.4",
-			},
+			name:       "XFF takes precedence over X-Real-IP for trusted proxy",
+			remoteAddr: "10.0.0.5:12345",
+			xff:        []string{"203.0.113.3"},
+			realIP:     "203.0.113.4",
 			expectedIP: "203.0.113.3",
 		},
 	}
@@ -272,14 +279,35 @@ func TestGetClientIP_ProxyHeaders(t *testing.T) {
 
 			req, _ := http.NewRequest(http.MethodGet, "/", http.NoBody)
 			req.RemoteAddr = tt.remoteAddr
-			for k, v := range tt.headers {
-				req.Header.Set(k, v)
+			for _, v := range tt.xff {
+				req.Header.Add("X-Forwarded-For", v)
+			}
+			if tt.realIP != "" {
+				req.Header.Set("X-Real-IP", tt.realIP)
 			}
 
-			ip := GetClientIP(req)
-			assert.Equal(t, tt.expectedIP, ip)
+			assert.Equal(t, tt.expectedIP, resolver.Resolve(req))
 		})
 	}
+}
+
+func TestRateLimiters_SweepIdleEntriesAndPreserveCooldown(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	ml := NewMessageRateLimiter(5)
+	ml.limits["stale"] = &messageRate{count: 1, lastReset: now.Add(-15 * time.Minute), lastActive: now.Add(-15 * time.Minute)}
+	ml.limits["active"] = &messageRate{count: 1, lastReset: now.Add(-1 * time.Minute), lastActive: now.Add(-1 * time.Minute)}
+	ml.sweepLocked(now)
+	assert.NotContains(t, ml.limits, "stale")
+	assert.Contains(t, ml.limits, "active")
+
+	cl := NewChatRateLimiter(2, 5, 30*time.Second)
+	cl.limits["stale"] = &chatRate{lastMinute: now.Add(-15 * time.Minute), cooldownUntil: now.Add(-1 * time.Minute)}
+	cl.limits["cooling"] = &chatRate{lastMinute: now.Add(-15 * time.Minute), cooldownUntil: now.Add(10 * time.Second)}
+	cl.sweepLocked(now)
+	assert.NotContains(t, cl.limits, "stale")
+	assert.Contains(t, cl.limits, "cooling")
 }
 
 func TestMessageRateLimiter(t *testing.T) {

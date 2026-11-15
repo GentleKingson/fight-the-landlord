@@ -5,6 +5,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	gameClient "github.com/palemoky/fight-the-landlord/internal/client"
+	"github.com/palemoky/fight-the-landlord/internal/game/card"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
+	"github.com/palemoky/fight-the-landlord/internal/ui/common"
 )
 
 func TestRenderGameRules(t *testing.T) {
@@ -94,4 +99,26 @@ func TestRulesView_ContainsTitle(t *testing.T) {
 	// Title should be present
 	assert.Contains(t, result, "📖")
 	assert.Contains(t, result, "游戏规则")
+}
+
+func TestRenderBotLandlordBadge(t *testing.T) {
+	t.Parallel()
+
+	state := gameClient.NewGameState()
+	state.Players = []protocol.PlayerInfo{
+		{ID: "me", Name: "Me", CardsCount: 17},
+		{ID: "bot-landlord", Name: "AlphaBot", IsBot: true, IsLandlord: true, CardsCount: 19},
+		{ID: "bot-farmer", Name: "BetaBot", IsBot: true, IsLandlord: false, CardsCount: 17},
+	}
+	state.LastPlayedBy = "bot-landlord"
+	state.LastPlayedName = "AlphaBot"
+	state.LastHandType = "单张"
+	state.LastPlayed = []card.Card{{Suit: card.Spade, Rank: card.Rank2, Color: card.Black}}
+
+	rendered := renderMiddleSection(state, "me")
+	assert.Contains(t, rendered, common.LandlordIcon+"🤖")
+	assert.Equal(t, common.LandlordIcon+"🤖", playerRoleIcon(true, true))
+	assert.Equal(t, common.LandlordIcon, playerRoleIcon(true, false))
+	assert.Equal(t, "🤖", playerRoleIcon(false, true))
+	assert.Equal(t, common.FarmerIcon, playerRoleIcon(false, false))
 }

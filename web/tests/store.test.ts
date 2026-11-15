@@ -485,3 +485,94 @@ it('tracks room owner on create/join, transfers ownership on host leave, and cle
   useAppStore.getState().leaveLocalRoom();
   expect(useAppStore.getState().ownerId).toBe('');
 });
+
+it('preserves active table view during same-identity Connected frame and converges on Reconnected', () => {
+  const receive = useAppStore.getState().handleMessage;
+  const hand = [{ rank: 14, suit: 0, color: 0 }];
+  useAppStore.setState({
+    playerId: 'me',
+    playerName: 'Me',
+    phase: 'playing',
+    roomCode: '654321',
+    hand,
+    drawer: 'counter'
+  });
+
+  const seenPhases: string[] = [];
+  const unsubscribe = useAppStore.subscribe((state) => {
+    seenPhases.push(state.phase);
+  });
+
+  receive({ type: MsgType.Connected, payload: { player_id: 'me', player_name: 'Me', reconnect_token: '' } });
+  expect(useAppStore.getState().phase).toBe('playing');
+  expect(useAppStore.getState().hand).toEqual(hand);
+  expect(useAppStore.getState().drawer).toBe('counter');
+
+  receive({
+    type: MsgType.Reconnected,
+    payload: {
+      player_id: 'me',
+      player_name: 'Me',
+      room_code: '654321',
+      game_state: {
+        phase: 'playing',
+        players: [{ id: 'me', name: 'Me', seat: 0, ready: true, is_landlord: true, cards_count: 1, online: true }],
+        hand,
+        bottom_cards: [],
+        current_turn: 'me',
+        last_played: [],
+        last_player_id: '',
+        must_play: true,
+        can_beat: true
+      }
+    }
+  });
+  expect(seenPhases).not.toContain('lobby');
+  expect(useAppStore.getState().phase).toBe('playing');
+
+  // If a subsequent reconnect finds the room expired, Reconnected converges cleanly to lobby.
+  receive({ type: MsgType.Connected, payload: { player_id: 'me', player_name: 'Me', reconnect_token: '' } });
+  expect(useAppStore.getState().phase).toBe('playing');
+  receive({ type: MsgType.Reconnected, payload: { player_id: 'me', player_name: 'Me' } });
+  expect(useAppStore.getState().phase).toBe('lobby');
+  expect(useAppStore.getState().roomCode).toBe('');
+  unsubscribe();
+});
+
+it('restores bid_history seat badges, history drawer, and grab state on bidding reconnect', () => {
+  const receive = useAppStore.getState().handleMessage;
+  receive({
+    type: MsgType.Reconnected,
+    payload: {
+      player_id: 'p3',
+      player_name: '松风',
+      room_code: '112233',
+      game_state: {
+        phase: 'bidding',
+        multiplier: 2,
+        bid_history: [
+          { player_id: 'p1', player_name: '青竹', bid: true, is_grab: false, multiplier: 1 },
+          { player_id: 'p2', player_name: '山月', bid: true, is_grab: true, multiplier: 2 }
+        ],
+        players: [
+          { id: 'p1', name: '青竹', seat: 0, ready: true, is_landlord: false, cards_count: 17, online: true },
+          { id: 'p2', name: '山月', seat: 1, ready: true, is_landlord: false, cards_count: 17, online: true },
+          { id: 'p3', name: '松风', seat: 2, ready: true, is_landlord: false, cards_count: 17, online: true }
+        ],
+        hand: [],
+        bottom_cards: [],
+        current_turn: 'p3',
+        last_played: [],
+        last_player_id: '',
+        must_play: false,
+        can_beat: false
+      }
+    }
+  });
+  const state = useAppStore.getState();
+  expect(state.phase).toBe('bidding');
+  expect(state.isGrabTurn).toBe(true);
+  expect(state.seatActions.p1?.label).toBe('叫地主');
+  expect(state.seatActions.p2?.label).toBe('抢地主');
+  expect(state.recentActions.map((a) => a.label)).toEqual(['叫地主', '抢地主']);
+});

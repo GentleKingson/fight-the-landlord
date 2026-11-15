@@ -64,7 +64,16 @@ type PublicPlay struct {
 	NewTrick   bool       `json:"new_trick"`
 }
 
+type PublicBid struct {
+	PlayerID   string `json:"player_id"`
+	PlayerName string `json:"player_name"`
+	Bid        bool   `json:"bid"`
+	IsGrab     bool   `json:"is_grab"`
+	Multiplier int    `json:"multiplier"`
+}
+
 type GameStateDTO struct {
+	BidHistory      []PublicBid  `json:"bid_history,omitempty"`
 	LastActionToken string       `json:"last_action_token"`
 	GameID          string       `json:"game_id"`
 	StateVersion    int64        `json:"state_version"`

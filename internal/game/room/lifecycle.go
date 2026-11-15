@@ -1,7 +1,6 @@
 package room
 
 import (
-	"context"
 	"log"
 	"math/rand/v2"
 	"time"
@@ -162,7 +161,7 @@ func (rm *RoomManager) cleanup() {
 		offlineExpired := r.State != RoomStateEnded && !r.AllOfflineAt.IsZero() && now.Sub(r.AllOfflineAt) > r.offlineRetentionDuration(rm.gameConfig.OfflineRoomRetentionDuration())
 		if waitingExpired || endedExpired || offlineExpired {
 			if waitingExpired {
-				r.Broadcast(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))
+				r.broadcastLocked(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "房间超时已关闭"))
 			}
 			for _, p := range r.Players {
 				// Players may already have joined another room after the result.
@@ -204,9 +203,6 @@ func (rm *RoomManager) finishRemoval(r *Room) {
 		}
 	}
 	r.mu.RUnlock()
-	if rm.redisStore != nil && rm.redisStore.IsReady() {
-		go func() { _ = rm.redisStore.DeleteRoom(context.Background(), r.Code) }()
-	}
 	log.Printf("🏠 房间 %s 已清理", r.Code)
 }
 

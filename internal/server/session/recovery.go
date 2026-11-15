@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
@@ -73,11 +74,26 @@ func (gs *GameSession) resumeBotTurn() {
 	case GameStatePlaying:
 		player := gs.players[gs.currentPlayer]
 		mustPlay := gs.lastPlayedHand.IsEmpty() || gs.lastPlayerIdx == gs.currentPlayer
-		gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
-			ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
-			TurnToken: gs.playToken,
-			PlayerID:  player.ID, Timeout: gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout), MustPlay: mustPlay, CanBeat: true,
-		}))
+		canBeat := mustPlay
+		if !mustPlay {
+			canBeat = rule.CanBeatWithHand(player.Hand, gs.lastPlayedHand)
+		}
+		actorPayload := protocol.PlayTurnPayload{
+			ServerTime:   time.Now().UnixMilli(),
+			TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
+			TurnToken:    gs.playToken,
+			PlayerID:     player.ID,
+			Timeout:      gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout),
+			MustPlay:     mustPlay,
+			CanBeat:      canBeat,
+		}
+		observerPayload := actorPayload
+		observerPayload.CanBeat = false
+		gs.broadcastBotTurnByRecipient(
+			player.ID,
+			codec.MustNewMessage(protocol.MsgPlayTurn, actorPayload),
+			codec.MustNewMessage(protocol.MsgPlayTurn, observerPayload),
+		)
 	}
 }
 
@@ -89,7 +105,7 @@ func (gs *GameSession) RestoreBot(client types.ClientInterface) {
 	players := make([]protocol.PlayerInfo, len(gs.players))
 	counts := make(map[string]int)
 	for i, p := range gs.players {
-		players[i] = protocol.PlayerInfo{ID: p.ID, Name: p.Name, Seat: p.Seat, IsBot: gs.room.Players[p.ID].Client.IsBot()}
+		players[i] = protocol.PlayerInfo{ID: p.ID, Name: p.Name, Seat: p.Seat, IsBot: gs.room.IsPlayerBot(p.ID)}
 		counts[p.ID] = 17
 	}
 	client.SendMessage(codec.MustNewMessage(protocol.MsgGameStart, protocol.GameStartPayload{Players: players}))

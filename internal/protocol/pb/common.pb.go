@@ -398,8 +398,85 @@ func (x *PublicPlay) GetNewTrick() bool {
 	return false
 }
 
+type PublicBid struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PlayerId      string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	PlayerName    string                 `protobuf:"bytes,2,opt,name=player_name,json=playerName,proto3" json:"player_name,omitempty"`
+	Bid           bool                   `protobuf:"varint,3,opt,name=bid,proto3" json:"bid,omitempty"`
+	IsGrab        bool                   `protobuf:"varint,4,opt,name=is_grab,json=isGrab,proto3" json:"is_grab,omitempty"`
+	Multiplier    int64                  `protobuf:"varint,5,opt,name=multiplier,proto3" json:"multiplier,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PublicBid) Reset() {
+	*x = PublicBid{}
+	mi := &file_internal_protocol_proto_common_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PublicBid) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PublicBid) ProtoMessage() {}
+
+func (x *PublicBid) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_proto_common_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PublicBid.ProtoReflect.Descriptor instead.
+func (*PublicBid) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_proto_common_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *PublicBid) GetPlayerId() string {
+	if x != nil {
+		return x.PlayerId
+	}
+	return ""
+}
+
+func (x *PublicBid) GetPlayerName() string {
+	if x != nil {
+		return x.PlayerName
+	}
+	return ""
+}
+
+func (x *PublicBid) GetBid() bool {
+	if x != nil {
+		return x.Bid
+	}
+	return false
+}
+
+func (x *PublicBid) GetIsGrab() bool {
+	if x != nil {
+		return x.IsGrab
+	}
+	return false
+}
+
+func (x *PublicBid) GetMultiplier() int64 {
+	if x != nil {
+		return x.Multiplier
+	}
+	return 0
+}
+
 type GameStateDTO struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
+	BidHistory      []*PublicBid           `protobuf:"bytes,23,rep,name=bid_history,json=bidHistory,proto3" json:"bid_history,omitempty"`
 	LastActionToken string                 `protobuf:"bytes,22,opt,name=last_action_token,json=lastActionToken,proto3" json:"last_action_token,omitempty"`
 	GameId          string                 `protobuf:"bytes,19,opt,name=game_id,json=gameId,proto3" json:"game_id,omitempty"`
 	StateVersion    int64                  `protobuf:"varint,20,opt,name=state_version,json=stateVersion,proto3" json:"state_version,omitempty"`
@@ -428,7 +505,7 @@ type GameStateDTO struct {
 
 func (x *GameStateDTO) Reset() {
 	*x = GameStateDTO{}
-	mi := &file_internal_protocol_proto_common_proto_msgTypes[5]
+	mi := &file_internal_protocol_proto_common_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -440,7 +517,7 @@ func (x *GameStateDTO) String() string {
 func (*GameStateDTO) ProtoMessage() {}
 
 func (x *GameStateDTO) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_proto_common_proto_msgTypes[5]
+	mi := &file_internal_protocol_proto_common_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -453,7 +530,14 @@ func (x *GameStateDTO) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GameStateDTO.ProtoReflect.Descriptor instead.
 func (*GameStateDTO) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_proto_common_proto_rawDescGZIP(), []int{5}
+	return file_internal_protocol_proto_common_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GameStateDTO) GetBidHistory() []*PublicBid {
+	if x != nil {
+		return x.BidHistory
+	}
+	return nil
 }
 
 func (x *GameStateDTO) GetLastActionToken() string {
@@ -625,7 +709,7 @@ type LeaderboardEntry struct {
 
 func (x *LeaderboardEntry) Reset() {
 	*x = LeaderboardEntry{}
-	mi := &file_internal_protocol_proto_common_proto_msgTypes[6]
+	mi := &file_internal_protocol_proto_common_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +721,7 @@ func (x *LeaderboardEntry) String() string {
 func (*LeaderboardEntry) ProtoMessage() {}
 
 func (x *LeaderboardEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_proto_common_proto_msgTypes[6]
+	mi := &file_internal_protocol_proto_common_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +734,7 @@ func (x *LeaderboardEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaderboardEntry.ProtoReflect.Descriptor instead.
 func (*LeaderboardEntry) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_proto_common_proto_rawDescGZIP(), []int{6}
+	return file_internal_protocol_proto_common_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *LeaderboardEntry) GetRank() int64 {
@@ -707,7 +791,7 @@ type RoomListItem struct {
 
 func (x *RoomListItem) Reset() {
 	*x = RoomListItem{}
-	mi := &file_internal_protocol_proto_common_proto_msgTypes[7]
+	mi := &file_internal_protocol_proto_common_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -719,7 +803,7 @@ func (x *RoomListItem) String() string {
 func (*RoomListItem) ProtoMessage() {}
 
 func (x *RoomListItem) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_proto_common_proto_msgTypes[7]
+	mi := &file_internal_protocol_proto_common_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -732,7 +816,7 @@ func (x *RoomListItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomListItem.ProtoReflect.Descriptor instead.
 func (*RoomListItem) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_proto_common_proto_rawDescGZIP(), []int{7}
+	return file_internal_protocol_proto_common_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RoomListItem) GetRoomCode() string {
@@ -798,8 +882,19 @@ const file_internal_protocol_proto_common_proto_rawDesc = "" +
 	"playerName\x12(\n" +
 	"\x05cards\x18\x04 \x03(\v2\x12.protocol.CardInfoR\x05cards\x12\x1b\n" +
 	"\thand_type\x18\x05 \x01(\tR\bhandType\x12\x1b\n" +
-	"\tnew_trick\x18\x06 \x01(\bR\bnewTrick\"\xb5\x06\n" +
-	"\fGameStateDTO\x12*\n" +
+	"\tnew_trick\x18\x06 \x01(\bR\bnewTrick\"\x94\x01\n" +
+	"\tPublicBid\x12\x1b\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1f\n" +
+	"\vplayer_name\x18\x02 \x01(\tR\n" +
+	"playerName\x12\x10\n" +
+	"\x03bid\x18\x03 \x01(\bR\x03bid\x12\x17\n" +
+	"\ais_grab\x18\x04 \x01(\bR\x06isGrab\x12\x1e\n" +
+	"\n" +
+	"multiplier\x18\x05 \x01(\x03R\n" +
+	"multiplier\"\xeb\x06\n" +
+	"\fGameStateDTO\x124\n" +
+	"\vbid_history\x18\x17 \x03(\v2\x13.protocol.PublicBidR\n" +
+	"bidHistory\x12*\n" +
 	"\x11last_action_token\x18\x16 \x01(\tR\x0flastActionToken\x12\x17\n" +
 	"\agame_id\x18\x13 \x01(\tR\x06gameId\x12#\n" +
 	"\rstate_version\x18\x14 \x01(\x03R\fstateVersion\x12\x1d\n" +
@@ -855,30 +950,32 @@ func file_internal_protocol_proto_common_proto_rawDescGZIP() []byte {
 	return file_internal_protocol_proto_common_proto_rawDescData
 }
 
-var file_internal_protocol_proto_common_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_internal_protocol_proto_common_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_internal_protocol_proto_common_proto_goTypes = []any{
 	(*CardInfo)(nil),         // 0: protocol.CardInfo
 	(*PlayerInfo)(nil),       // 1: protocol.PlayerInfo
 	(*PlayerHand)(nil),       // 2: protocol.PlayerHand
 	(*PlayerScore)(nil),      // 3: protocol.PlayerScore
 	(*PublicPlay)(nil),       // 4: protocol.PublicPlay
-	(*GameStateDTO)(nil),     // 5: protocol.GameStateDTO
-	(*LeaderboardEntry)(nil), // 6: protocol.LeaderboardEntry
-	(*RoomListItem)(nil),     // 7: protocol.RoomListItem
+	(*PublicBid)(nil),        // 5: protocol.PublicBid
+	(*GameStateDTO)(nil),     // 6: protocol.GameStateDTO
+	(*LeaderboardEntry)(nil), // 7: protocol.LeaderboardEntry
+	(*RoomListItem)(nil),     // 8: protocol.RoomListItem
 }
 var file_internal_protocol_proto_common_proto_depIdxs = []int32{
 	0, // 0: protocol.PlayerHand.cards:type_name -> protocol.CardInfo
 	0, // 1: protocol.PublicPlay.cards:type_name -> protocol.CardInfo
-	4, // 2: protocol.GameStateDTO.public_plays:type_name -> protocol.PublicPlay
-	1, // 3: protocol.GameStateDTO.players:type_name -> protocol.PlayerInfo
-	0, // 4: protocol.GameStateDTO.hand:type_name -> protocol.CardInfo
-	0, // 5: protocol.GameStateDTO.bottom_cards:type_name -> protocol.CardInfo
-	0, // 6: protocol.GameStateDTO.last_played:type_name -> protocol.CardInfo
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // 2: protocol.GameStateDTO.bid_history:type_name -> protocol.PublicBid
+	4, // 3: protocol.GameStateDTO.public_plays:type_name -> protocol.PublicPlay
+	1, // 4: protocol.GameStateDTO.players:type_name -> protocol.PlayerInfo
+	0, // 5: protocol.GameStateDTO.hand:type_name -> protocol.CardInfo
+	0, // 6: protocol.GameStateDTO.bottom_cards:type_name -> protocol.CardInfo
+	0, // 7: protocol.GameStateDTO.last_played:type_name -> protocol.CardInfo
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_internal_protocol_proto_common_proto_init() }
@@ -892,7 +989,7 @@ func file_internal_protocol_proto_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_protocol_proto_common_proto_rawDesc), len(file_internal_protocol_proto_common_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

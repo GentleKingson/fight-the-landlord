@@ -68,7 +68,7 @@ func (s *Server) restoreRecord(record *storage.GameRecord, snapshot session.Snap
 	}
 	for _, p := range snapshot.Players {
 		if p.IsBot {
-			b := r.Players[p.ID].Client.(*bot.BotClient)
+			b := r.GetClient(p.ID).(*bot.BotClient)
 			b.SetRoom(r.Code)
 			b.SetSession(gs)
 			gs.RestoreBot(b)
@@ -93,14 +93,20 @@ func (s *Server) restoreRecord(record *storage.GameRecord, snapshot session.Snap
 	return nil
 }
 
+const persistedGameCleanInterval = 30 * time.Second
+
 func (s *Server) settlementLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	var lastClean time.Time
 	for {
 		attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := s.redisStore.DrainSettlements(attempt, s.leaderboard)
-		if err == nil {
+		if err == nil && (lastClean.IsZero() || time.Since(lastClean) >= persistedGameCleanInterval) {
 			err = s.cleanPersistedGames(attempt)
+			if err == nil {
+				lastClean = time.Now()
+			}
 		}
 		cancel()
 		if err != nil && ctx.Err() == nil {

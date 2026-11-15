@@ -87,7 +87,18 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 		plays[i] = p
 		plays[i].Cards = append([]protocol.CardInfo{}, p.Cards...)
 	}
+	bids := make([]protocol.PublicBid, len(gs.bidHistory))
+	for i, b := range gs.bidHistory {
+		bids[i] = protocol.PublicBid{
+			PlayerID:   b.PlayerID,
+			PlayerName: b.PlayerName,
+			Bid:        b.Bid,
+			IsGrab:     b.IsGrab,
+			Multiplier: b.Multiplier,
+		}
+	}
 	return &protocol.GameStateDTO{
+		BidHistory:      bids,
 		LastActionToken: gs.actionReceipts[playerID],
 		GameID:          gs.gameID, StateVersion: gs.revision, TurnToken: gs.playToken,
 		Multiplier: max(gs.bidMultiplier, 1) << gs.bombCount, PublicPlays: plays,
@@ -112,7 +123,7 @@ func (gs *GameSession) buildGameStateDTOLocked(playerID string, sessionManager *
 func (gs *GameSession) snapshotPlayersLocked(sessionManager *SessionManager) []protocol.PlayerInfo {
 	players := make([]protocol.PlayerInfo, len(gs.players))
 	for i, p := range gs.players {
-		isBot := gs.room.Players[p.ID].Client.IsBot()
+		isBot := gs.room.IsPlayerBot(p.ID)
 		players[i] = protocol.PlayerInfo{
 			ID:         p.ID,
 			Name:       p.Name,
@@ -159,16 +170,18 @@ func (gs *GameSession) ResendTurnTo(client types.ClientInterface) {
 }
 
 func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
+	deadline, _ := gs.snapshotTurnTiming()
 	switch gs.state {
 	case GameStateBidding:
 		player := gs.players[gs.currentBidder]
 		client.SendMessage(codec.MustNewMessage(protocol.MsgBidTurn, protocol.BidTurnPayload{
-			ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
-			BidToken:   gs.bidToken,
-			PlayerID:   player.ID,
-			Timeout:    gs.remainingTurnSeconds(gs.gameConfig.BidTimeout),
-			IsGrab:     gs.landlordCaller != -1,
-			Multiplier: gs.bidMultiplier,
+			ServerTime:   time.Now().UnixMilli(),
+			TurnDeadline: deadline,
+			BidToken:     gs.bidToken,
+			PlayerID:     player.ID,
+			Timeout:      gs.remainingTurnSeconds(gs.gameConfig.BidTimeout),
+			IsGrab:       gs.landlordCaller != -1,
+			Multiplier:   gs.bidMultiplier,
 		}))
 	case GameStatePlaying:
 		player := gs.players[gs.currentPlayer]
@@ -178,12 +191,13 @@ func (gs *GameSession) resendTurnToLocked(client types.ClientInterface) {
 			canBeat = rule.CanBeatWithHand(player.Hand, gs.lastPlayedHand)
 		}
 		client.SendMessage(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
-			ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
-			TurnToken: gs.playToken,
-			PlayerID:  player.ID,
-			Timeout:   gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout),
-			MustPlay:  mustPlay,
-			CanBeat:   canBeat && client.GetID() == player.ID,
+			ServerTime:   time.Now().UnixMilli(),
+			TurnDeadline: deadline,
+			TurnToken:    gs.playToken,
+			PlayerID:     player.ID,
+			Timeout:      gs.remainingTurnSeconds(gs.gameConfig.TurnTimeout),
+			MustPlay:     mustPlay,
+			CanBeat:      canBeat && client.GetID() == player.ID,
 		}))
 	}
 }

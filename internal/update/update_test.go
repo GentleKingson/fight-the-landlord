@@ -1,13 +1,22 @@
 package update
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestRepoPointsToFork(t *testing.T) {
+	if Repo != "GentleKingson/fight-the-landlord" {
+		t.Fatalf("Repo = %q, want GentleKingson/fight-the-landlord", Repo)
+	}
+}
 
 func TestCompareVersions(t *testing.T) {
 	tests := []struct {
@@ -130,7 +139,73 @@ func TestVerifyChecksum(t *testing.T) {
 		t.Errorf("verifyChecksum with wrong sum should fail")
 	}
 
+	if err := verifyChecksum(data, []byte("not-a-valid-hex  x\n")); err == nil {
+		t.Errorf("verifyChecksum with malformed hex should fail")
+	}
+
 	if err := verifyChecksum(data, []byte("")); err == nil {
 		t.Errorf("verifyChecksum with empty file should fail")
 	}
+}
+
+func TestApplyFromURL_RequiresValidChecksumBeforeOverwriting(t *testing.T) {
+	oldBinary := []byte("existing-v1-binary")
+	newBinary := []byte("upgraded-v2-binary")
+	sum := sha256.Sum256(newBinary)
+	validChecksum := hex.EncodeToString(sum[:]) + "  ddz\n"
+
+	t.Run("checksum HTTP 404 aborts without modifying binary", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "ddz")
+		if err := os.WriteFile(target, oldBinary, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/ddz" {
+				_, _ = w.Write(newBinary)
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		if err := applyFromURL(context.Background(), srv.URL+"/ddz", target); err == nil {
+			t.Fatal("expected error when .sha256 returns 404")
+		}
+		got, err := os.ReadFile(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, oldBinary) {
+			t.Fatalf("target binary was modified despite missing checksum: got %q", got)
+		}
+	})
+
+	t.Run("valid checksum replaces binary", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "ddz")
+		if err := os.WriteFile(target, oldBinary, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/ddz":
+				_, _ = w.Write(newBinary)
+			case "/ddz.sha256":
+				_, _ = w.Write([]byte(validChecksum))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer srv.Close()
+
+		if err := applyFromURL(context.Background(), srv.URL+"/ddz", target); err != nil {
+			t.Fatalf("applyFromURL failed with valid checksum: %v", err)
+		}
+		got, err := os.ReadFile(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, newBinary) {
+			t.Fatalf("target binary = %q, want %q", got, newBinary)
+		}
+	})
 }

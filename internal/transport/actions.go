@@ -31,6 +31,11 @@ func (c *Client) QuickMatch() error {
 	return c.SendMessage(codec.MustNewMessage(protocol.MsgQuickMatch, nil))
 }
 
+// CancelMatch 取消匹配
+func (c *Client) CancelMatch() error {
+	return c.SendMessage(codec.MustNewMessage(protocol.MsgCancelMatch, nil))
+}
+
 // Ready 准备
 func (c *Client) Ready() error {
 	return c.SendMessage(codec.MustNewMessage(protocol.MsgReady, nil))
@@ -39,6 +44,11 @@ func (c *Client) Ready() error {
 // CancelReady 取消准备
 func (c *Client) CancelReady() error {
 	return c.SendMessage(codec.MustNewMessage(protocol.MsgCancelReady, nil))
+}
+
+// StartGame 房主开始游戏（不足3人自动补Bot）
+func (c *Client) StartGame() error {
+	return c.SendMessage(codec.MustNewMessage(protocol.MsgStartGame, nil))
 }
 
 // Bid 叫地主

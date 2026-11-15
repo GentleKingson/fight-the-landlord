@@ -33,8 +33,8 @@ func (m *MockLeaderboard) GetPlayerRank(ctx context.Context, playerID string) (i
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockLeaderboard) GetLeaderboard(ctx context.Context, limit int) ([]*storage.LeaderboardEntry, error) {
-	args := m.Called(ctx, limit)
+func (m *MockLeaderboard) GetLeaderboard(ctx context.Context, leaderboardType string, offset, limit int) ([]*storage.LeaderboardEntry, error) {
+	args := m.Called(ctx, leaderboardType, offset, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

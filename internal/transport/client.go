@@ -45,21 +45,24 @@ type Client struct {
 	OnReconnect     func()                      // 重连成功回调
 	OnLatencyUpdate func(int64)                 // 延迟更新回调
 
-	mu              sync.RWMutex
-	closed          bool
-	reconnecting    atomic.Bool
-	replaced        atomic.Bool
-	pendingIdentity *protocol.Message
-	reconnectCount  int
+	mu               sync.RWMutex
+	closeOnce        sync.Once
+	closed           bool
+	reconnecting     atomic.Bool
+	reconnectLoop    atomic.Bool
+	replaced         atomic.Bool
+	pendingIdentity  *protocol.Message
+	reconnectCount   int
+	reconnectBackoff time.Duration
 }
 
 // NewClient 创建客户端
 func NewClient(serverURL string) *Client {
 	return &Client{
-		ServerURL: serverURL,
-		send:      make(chan []byte, 256),
-		receive:   make(chan *protocol.Message, 256),
-		done:      make(chan struct{}),
+		ServerURL:        serverURL,
+		receive:          make(chan *protocol.Message, 256),
+		done:             make(chan struct{}),
+		reconnectBackoff: reconnectInterval,
 	}
 }
 
@@ -78,31 +81,45 @@ func (c *Client) Connect() error {
 		return err
 	}
 
-	c.conn = conn
+	send := make(chan []byte, 256)
+	connDone := make(chan struct{})
 
-	// 启动读写协程
-	go c.readPump()
-	go c.writePump()
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		_ = conn.Close()
+		return errors.New("connection closed")
+	}
+	c.conn = conn
+	c.send = send
+	c.mu.Unlock()
+
+	// 启动读写协程（按连接代次隔离）
+	go c.readPump(conn, connDone)
+	go c.writePump(conn, send, connDone)
 
 	return nil
 }
 
 // SendMessage 发送消息
 func (c *Client) SendMessage(msg *protocol.Message) error {
-	c.mu.RLock()
-	if c.closed {
-		c.mu.RUnlock()
-		return errors.New("connection closed")
-	}
-	c.mu.RUnlock()
-
 	data, err := codec.Encode(msg)
 	if err != nil {
 		return err
 	}
 
+	c.mu.RLock()
+	closed := c.closed
+	conn := c.conn
+	send := c.send
+	c.mu.RUnlock()
+
+	if closed || conn == nil || send == nil {
+		return errors.New("connection closed")
+	}
+
 	select {
-	case c.send <- data:
+	case send <- data:
 		return nil
 	default:
 		return errors.New("send buffer full")
@@ -121,27 +138,34 @@ func (c *Client) Receive() (*protocol.Message, error) {
 
 // ReceiveWithTimeout 带超时接收消息
 func (c *Client) ReceiveWithTimeout(timeout time.Duration) (*protocol.Message, error) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case msg := <-c.receive:
 		return msg, nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		return nil, errors.New("receive timeout")
 	case <-c.done:
 		return nil, errors.New("connection closed")
 	}
 }
 
-// Close 关闭连接
+// Close 关闭连接并终止重连/心跳协程
 func (c *Client) Close() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.closed = true
+	conn := c.conn
+	c.conn = nil
+	c.send = nil
+	c.mu.Unlock()
 
-	if !c.closed {
-		c.closed = true
+	c.reconnecting.Store(false)
+	c.closeOnce.Do(func() {
 		close(c.done)
-		if c.conn != nil {
-			_ = c.conn.Close()
-		}
+	})
+	if conn != nil {
+		_ = conn.Close()
 	}
 }
 
@@ -150,4 +174,27 @@ func (c *Client) IsConnected() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return !c.closed && c.conn != nil
+}
+
+// IsClosed 客户端是否已彻底关闭
+func (c *Client) IsClosed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.closed
+}
+
+// Credentials 并发安全地读取玩家身份和重连令牌
+func (c *Client) Credentials() (playerID, playerName, reconnectToken string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.PlayerID, c.PlayerName, c.ReconnectToken
+}
+
+// SetCredentials 并发安全地更新玩家身份和重连令牌
+func (c *Client) SetCredentials(playerID, playerName, reconnectToken string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.PlayerID = playerID
+	c.PlayerName = playerName
+	c.ReconnectToken = reconnectToken
 }

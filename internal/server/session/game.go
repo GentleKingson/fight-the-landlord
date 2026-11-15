@@ -110,13 +110,12 @@ type GameSession struct {
 
 // NewGameSession 创建游戏会话
 func NewGameSession(r *room.Room, lb *storage.LeaderboardManager, gameCfg config.GameConfig) *GameSession {
-	playerOrder := r.PlayerOrder
-	players := make([]*GamePlayer, len(playerOrder))
-	for i, id := range playerOrder {
-		rp := r.Players[id]
+	ordered := r.GetOrderedClients()
+	players := make([]*GamePlayer, len(ordered))
+	for i, pc := range ordered {
 		players[i] = &GamePlayer{
-			ID:   id,
-			Name: rp.Client.GetName(),
+			ID:   pc.ID,
+			Name: pc.Client.GetName(),
 			Seat: i,
 		}
 	}

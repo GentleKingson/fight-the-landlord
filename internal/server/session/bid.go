@@ -155,7 +155,8 @@ func (gs *GameSession) setLandlord(idx int) {
 	})
 
 	// 更新房间玩家状态
-	gs.effect(func() { gs.room.Players[landlord.ID].IsLandlord = true })
+	landlordID := landlord.ID
+	gs.effect(func() { gs.room.SetLandlord(landlordID, true) })
 
 	// 广播地主信息（含底倍）
 	gs.broadcast(codec.MustNewMessage(protocol.MsgLandlord, protocol.LandlordPayload{
@@ -166,9 +167,7 @@ func (gs *GameSession) setLandlord(idx int) {
 	}))
 
 	// 给地主发送更新后的手牌
-	rp := gs.room.Players[landlord.ID]
-	client := rp.Client
-	gs.send(client, codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
+	gs.sendToPlayer(landlord.ID, codec.MustNewMessage(protocol.MsgDealCards, protocol.DealCardsPayload{
 		Cards:       convert.CardsToInfos(landlord.Hand),
 		BottomCards: convert.CardsToInfos(gs.bottomCards),
 	}))

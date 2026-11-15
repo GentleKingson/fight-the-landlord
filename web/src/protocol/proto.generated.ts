@@ -268,7 +268,41 @@ export function decodePublicPlay(input: ProtoReader | Uint8Array, length?: numbe
   return out;
 }
 
+export function encodePublicBid(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
+  wStr(w, 10, msg.player_id);
+  wStr(w, 18, msg.player_name);
+  wBool(w, 24, msg.bid);
+  wBool(w, 32, msg.is_grab);
+  wI64(w, 40, msg.multiplier);
+  return w;
+}
+
+export function decodePublicBid(input: ProtoReader | Uint8Array, length?: number): MsgRecord {
+  const r = toReader(input);
+  const end = length === undefined ? r.len : r.pos + length;
+  const out: MsgRecord = {
+    player_id: '',
+    player_name: '',
+    bid: false,
+    is_grab: false,
+    multiplier: 0,
+  };
+  while (r.pos < end) {
+    const tag = r.uint32();
+    switch (tag) {
+      case 10: out.player_id = r.string(); break;
+      case 18: out.player_name = r.string(); break;
+      case 24: out.bid = r.bool(); break;
+      case 32: out.is_grab = r.bool(); break;
+      case 40: out.multiplier = rI64(r); break;
+      default: r.skipType(tag & 7); break;
+    }
+  }
+  return out;
+}
+
 export function encodeGameStateDTO(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
+  wRepMsg(w, 186, msg.bid_history, encodePublicBid);
   wStr(w, 178, msg.last_action_token);
   wStr(w, 154, msg.game_id);
   wI64(w, 160, msg.state_version);
@@ -298,6 +332,7 @@ export function decodeGameStateDTO(input: ProtoReader | Uint8Array, length?: num
   const r = toReader(input);
   const end = length === undefined ? r.len : r.pos + length;
   const out: MsgRecord = {
+    bid_history: [] as unknown[],
     last_action_token: '',
     game_id: '',
     state_version: 0,
@@ -324,6 +359,7 @@ export function decodeGameStateDTO(input: ProtoReader | Uint8Array, length?: num
   while (r.pos < end) {
     const tag = r.uint32();
     switch (tag) {
+      case 186: (out.bid_history as unknown[]).push(decodePublicBid(r, r.uint32())); break;
       case 178: out.last_action_token = r.string(); break;
       case 154: out.game_id = r.string(); break;
       case 160: out.state_version = rI64(r); break;
@@ -1319,6 +1355,7 @@ export const staticMessageCodecs: Record<string, StaticPayloadCodec> = {
   PlayerHand: { encode: (m) => encodePlayerHand(m).finish(), decode: (b) => decodePlayerHand(b) },
   PlayerScore: { encode: (m) => encodePlayerScore(m).finish(), decode: (b) => decodePlayerScore(b) },
   PublicPlay: { encode: (m) => encodePublicPlay(m).finish(), decode: (b) => decodePublicPlay(b) },
+  PublicBid: { encode: (m) => encodePublicBid(m).finish(), decode: (b) => decodePublicBid(b) },
   GameStateDTO: { encode: (m) => encodeGameStateDTO(m).finish(), decode: (b) => decodeGameStateDTO(b) },
   LeaderboardEntry: { encode: (m) => encodeLeaderboardEntry(m).finish(), decode: (b) => decodeLeaderboardEntry(b) },
   RoomListItem: { encode: (m) => encodeRoomListItem(m).finish(), decode: (b) => decodeRoomListItem(b) },

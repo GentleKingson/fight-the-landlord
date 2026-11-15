@@ -133,3 +133,99 @@ func TestHandler_HandleChat_Room(t *testing.T) {
 	mockClient.AssertExpectations(t)
 	mockLimiter.AssertExpectations(t)
 }
+
+func TestHandler_HandleChat_SanitizesAndRejectsInvalidPayloads(t *testing.T) {
+	t.Run("forces IsSystem=false and strips control chars", func(t *testing.T) {
+		mockServer := new(testutil.MockServer)
+		mockClient := new(testutil.MockClient)
+		mockLimiter := new(testutil.MockChatLimiter)
+
+		h := NewHandler(HandlerDeps{
+			Server:      mockServer,
+			ChatLimiter: mockLimiter,
+		})
+
+		mockClient.On("GetID").Return("p1")
+		mockClient.On("GetName").Return("Player1")
+		mockLimiter.On("AllowChat", "p1").Return(true, "")
+
+		var captured *protocol.ChatPayload
+		mockServer.On("BroadcastToLobby", mock.MatchedBy(func(msg *protocol.Message) bool {
+			if msg.Type != protocol.MsgChat {
+				return false
+			}
+			p, err := codec.ParsePayload[protocol.ChatPayload](msg)
+			if err != nil {
+				return false
+			}
+			captured = p
+			return true
+		})).Return()
+
+		msg := codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{
+			Content:  "  \x1b[31m服务器即将重启\x07\n  ",
+			Scope:    "lobby",
+			IsSystem: true,
+		})
+		h.handleChat(mockClient, msg)
+
+		mockServer.AssertExpectations(t)
+		if captured == nil {
+			t.Fatal("expected chat payload to be broadcast")
+		}
+		if captured.IsSystem {
+			t.Fatal("client must not be able to forge IsSystem=true")
+		}
+		if captured.Content != "[31m服务器即将重启" {
+			t.Fatalf("unexpected sanitized content: %q", captured.Content)
+		}
+	})
+
+	t.Run("drops whitespace or control-only content without broadcasting", func(t *testing.T) {
+		mockServer := new(testutil.MockServer)
+		mockClient := new(testutil.MockClient)
+		mockLimiter := new(testutil.MockChatLimiter)
+
+		h := NewHandler(HandlerDeps{
+			Server:      mockServer,
+			ChatLimiter: mockLimiter,
+		})
+
+		msg := codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{
+			Content: " \t\r\n\x00\x1b ",
+			Scope:   "lobby",
+		})
+		h.handleChat(mockClient, msg)
+
+		mockServer.AssertNotCalled(t, "BroadcastToLobby", mock.Anything)
+		mockLimiter.AssertNotCalled(t, "AllowChat", mock.Anything)
+	})
+
+	t.Run("rejects content exceeding 50 runes", func(t *testing.T) {
+		mockServer := new(testutil.MockServer)
+		mockClient := new(testutil.MockClient)
+		mockLimiter := new(testutil.MockChatLimiter)
+
+		h := NewHandler(HandlerDeps{
+			Server:      mockServer,
+			ChatLimiter: mockLimiter,
+		})
+
+		mockClient.On("SendMessage", mock.MatchedBy(func(msg *protocol.Message) bool {
+			return msg.Type == protocol.MsgError
+		})).Return()
+
+		longText := ""
+		for range 51 {
+			longText += "哈"
+		}
+		msg := codec.MustNewMessage(protocol.MsgChat, protocol.ChatPayload{
+			Content: longText,
+			Scope:   "lobby",
+		})
+		h.handleChat(mockClient, msg)
+
+		mockClient.AssertExpectations(t)
+		mockServer.AssertNotCalled(t, "BroadcastToLobby", mock.Anything)
+	})
+}
