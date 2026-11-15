@@ -14,12 +14,13 @@ import (
 
 // Reconnect 手动发送重连请求
 func (c *Client) Reconnect() error {
-	if c.ReconnectToken == "" || c.PlayerID == "" {
+	playerID, _, token := c.Credentials()
+	if token == "" || playerID == "" {
 		return errors.New("no reconnect token")
 	}
 	return c.SendMessage(codec.MustNewMessage(protocol.MsgReconnect, protocol.ReconnectPayload{
-		Token:    c.ReconnectToken,
-		PlayerID: c.PlayerID,
+		Token:    token,
+		PlayerID: playerID,
 	}))
 }
 
@@ -42,9 +43,96 @@ func (c *Client) StartHeartbeat() {
 	}()
 }
 
+func (c *Client) sleepOrDone(d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-c.done:
+		return false
+	}
+}
+
+func reconnectBackoffDelay(base time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		base = reconnectInterval
+	}
+	backoff := base
+	for i := 1; i < attempt; i++ {
+		backoff *= 2
+		if backoff > 30*time.Second {
+			return 30 * time.Second
+		}
+	}
+	return backoff
+}
+
+func (c *Client) nextReconnectAttempt() (attempt int, stop bool, exhausted bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return 0, true, false
+	}
+	if c.reconnectCount >= maxReconnectAttempts {
+		return 0, false, true
+	}
+	c.reconnectCount++
+	return c.reconnectCount, false, false
+}
+
+func (c *Client) dialReconnectAttempt() (done bool) {
+	dialer := websocket.Dialer{
+		HandshakeTimeout:  10 * time.Second,
+		EnableCompression: false,
+	}
+	conn, resp, err := dialer.Dial(c.ServerURL, nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		return false
+	}
+
+	send := make(chan []byte, 256)
+	connDone := make(chan struct{})
+
+	// 安装新连接代次（保留 c.receive 与 c.done 不变）
+	c.mu.Lock()
+	if c.closed || c.replaced.Load() {
+		c.mu.Unlock()
+		_ = conn.Close()
+		c.reconnecting.Store(false)
+		return true
+	}
+	c.conn = conn
+	c.send = send
+	c.mu.Unlock()
+
+	// 启动读写协程（绑定此代 conn）
+	go c.readPump(conn, connDone)
+	go c.writePump(conn, send, connDone)
+
+	// 发送重连请求
+	if !c.sleepOrDone(100 * time.Millisecond) {
+		_ = conn.Close()
+		c.reconnecting.Store(false)
+		return true
+	}
+	if err := c.Reconnect(); err != nil {
+		_ = conn.Close()
+		return false
+	}
+	return true
+}
+
 // tryReconnect 尝试重连
 func (c *Client) tryReconnect() {
+	if !c.reconnectLoop.CompareAndSwap(false, true) {
+		return
+	}
 	defer func() {
+		c.reconnectLoop.Store(false)
 		if r := recover(); r != nil {
 			logger.LogPanic(r)
 			log.Printf("[PANIC] tryReconnect panic recovered: %v", r)
@@ -52,69 +140,43 @@ func (c *Client) tryReconnect() {
 		}
 	}()
 
-	if c.reconnecting.Load() {
+	if c.IsClosed() {
 		return
 	}
 	c.reconnecting.Store(true)
 
-	// 指数退避重连策略
-	backoff := reconnectInterval
+	for {
+		attempt, stop, exhausted := c.nextReconnectAttempt()
+		if stop {
+			c.reconnecting.Store(false)
+			return
+		}
+		if exhausted {
+			break
+		}
 
-	for c.reconnectCount < maxReconnectAttempts {
-		c.reconnectCount++
-		// 通过回调通知 UI 正在重连
 		if c.OnReconnecting != nil {
-			c.OnReconnecting(c.reconnectCount, maxReconnectAttempts)
+			c.OnReconnecting(attempt, maxReconnectAttempts)
 		}
 
-		time.Sleep(backoff)
-
-		// 计算下一次退避时间 (最大 30 秒)
-		backoff *= 2
-		if backoff > 30*time.Second {
-			backoff = 30 * time.Second
+		if !c.sleepOrDone(reconnectBackoffDelay(c.reconnectBackoff, attempt)) {
+			c.reconnecting.Store(false)
+			return
 		}
-
-		// 创建新连接
-		dialer := websocket.Dialer{
-			HandshakeTimeout:  10 * time.Second,
-			EnableCompression: false,
+		if c.IsClosed() || c.replaced.Load() {
+			c.reconnecting.Store(false)
+			return
 		}
-
-		conn, resp, err := dialer.Dial(c.ServerURL, nil)
-		if resp != nil {
-			_ = resp.Body.Close()
+		if c.dialReconnectAttempt() {
+			return
 		}
-		if err != nil {
-			continue
-		}
-
-		// 重置状态
-		c.mu.Lock()
-		c.conn = conn
-		c.closed = false
-		c.send = make(chan []byte, 256)
-		c.receive = make(chan *protocol.Message, 256)
-		c.done = make(chan struct{})
-		c.mu.Unlock()
-
-		// 启动读写协程
-		go c.readPump()
-		go c.writePump()
-
-		// 发送重连请求
-		time.Sleep(100 * time.Millisecond)
-		if err := c.Reconnect(); err != nil {
-			_ = c.conn.Close()
-			continue
-		}
-
-		// 重连成功（通过 MsgReconnected 消息通知 UI）
-		return
 	}
 
 	// 重连失败
 	c.reconnecting.Store(false)
+	if c.IsClosed() {
+		return
+	}
 	c.Close()
 	if c.OnClose != nil {
 		c.OnClose()
@@ -123,6 +185,8 @@ func (c *Client) tryReconnect() {
 
 // GetLatency 获取当前延迟（毫秒）
 func (c *Client) GetLatency() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.Latency
 }
 

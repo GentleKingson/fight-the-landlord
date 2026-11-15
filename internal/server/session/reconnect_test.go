@@ -219,3 +219,107 @@ func TestSettlementRetriesStatisticsAfterRedisRecovers(t *testing.T) {
 		return true
 	}, 5*time.Second, 20*time.Millisecond)
 }
+
+func TestPausedTurnReconnectResendsZeroDeadlineToOtherSeat(t *testing.T) {
+	for _, phase := range []string{"bidding", "playing"} {
+		t.Run(phase, func(t *testing.T) {
+			gs := recordingGame(t)
+			gs.gameConfig.OfflineWaitTimeout = 600
+			if phase == "playing" {
+				gs.mu.Lock()
+				gs.stopTimer()
+				gs.setLandlord(0)
+				gs.mu.Unlock()
+			}
+			actorID := gs.players[gs.currentBidder].ID
+			if phase == "playing" {
+				actorID = gs.players[gs.currentPlayer].ID
+			}
+			var observer *GamePlayer
+			for _, p := range gs.players {
+				if p.ID != actorID {
+					observer = p
+					break
+				}
+			}
+			require.NotNil(t, observer)
+
+			sessions := NewSessionManager()
+			manager := room.NewRoomManager(nil, gs.gameConfig)
+			manager.AddRoomForTest(gs.room)
+			for _, p := range gs.players {
+				sessions.CreateSession(p.ID, p.Name)
+				gs.room.GetClient(p.ID).SetRoom(gs.room.Code)
+			}
+
+			sessions.SetOffline(actorID)
+			gs.PlayerOffline(actorID)
+			manager.NotifyPlayerOffline(gs.room.GetClient(actorID))
+
+			returning := testutil.NewSimpleClient(observer.ID, observer.Name)
+			returning.SetRoom(gs.room.Code)
+			sessions.SetOnline(observer.ID)
+			var reconnected protocol.ReconnectedPayload
+			require.NoError(t, gs.ReconnectClient(manager, returning, sessions, &reconnected))
+			require.NotNil(t, reconnected.GameState)
+			require.True(t, reconnected.GameState.TurnPaused)
+			require.Zero(t, reconnected.GameState.TurnDeadline)
+
+			msgs := returning.SentMessages()
+			require.Len(t, msgs, 2)
+			if phase == "bidding" {
+				require.Equal(t, protocol.MsgBidTurn, msgs[1].Type)
+				turn, err := codec.ParsePayload[protocol.BidTurnPayload](msgs[1])
+				require.NoError(t, err)
+				require.Zero(t, turn.TurnDeadline)
+				require.Zero(t, turn.Timeout)
+			} else {
+				require.Equal(t, protocol.MsgPlayTurn, msgs[1].Type)
+				turn, err := codec.ParsePayload[protocol.PlayTurnPayload](msgs[1])
+				require.NoError(t, err)
+				require.Zero(t, turn.TurnDeadline)
+				require.Zero(t, turn.Timeout)
+			}
+		})
+	}
+}
+
+func TestReconnectSnapshotIncludesBidHistoryRoundTrip(t *testing.T) {
+	gs := recordingGame(t)
+	sessions := NewSessionManager()
+	for _, p := range gs.players {
+		sessions.CreateSession(p.ID, p.Name)
+	}
+
+	first := gs.players[gs.currentBidder]
+	require.NoError(t, gs.HandleBid(first.ID, false))
+	second := gs.players[gs.currentBidder]
+	require.NoError(t, gs.HandleBid(second.ID, true))
+
+	dto := gs.BuildGameStateDTO(gs.players[gs.currentBidder].ID, sessions)
+	require.NotNil(t, dto)
+	require.Equal(t, "bidding", dto.Phase)
+	require.Len(t, dto.BidHistory, 2)
+	require.Equal(t, protocol.PublicBid{
+		PlayerID:   first.ID,
+		PlayerName: first.Name,
+		Bid:        false,
+		IsGrab:     false,
+		Multiplier: 1,
+	}, dto.BidHistory[0])
+	require.Equal(t, protocol.PublicBid{
+		PlayerID:   second.ID,
+		PlayerName: second.Name,
+		Bid:        true,
+		IsGrab:     false,
+		Multiplier: 1,
+	}, dto.BidHistory[1])
+
+	encoded, err := codec.Encode(codec.MustNewMessage(protocol.MsgReconnected, protocol.ReconnectedPayload{GameState: dto}))
+	require.NoError(t, err)
+	decodedMsg, err := codec.Decode(encoded)
+	require.NoError(t, err)
+	decoded, err := codec.ParsePayload[protocol.ReconnectedPayload](decodedMsg)
+	require.NoError(t, err)
+	require.Equal(t, dto.BidHistory, decoded.GameState.BidHistory)
+}

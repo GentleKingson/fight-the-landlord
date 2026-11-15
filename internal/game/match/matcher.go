@@ -1,7 +1,6 @@
 package match
 
 import (
-	"context"
 	"log"
 	"sync"
 	"time"
@@ -197,11 +196,6 @@ func (m *Matcher) createMatchRoomLocked(players []types.ClientInterface) {
 	}
 
 	gs.Start()
-
-	// 保存房间状态
-	if m.redisStore != nil && m.redisStore.IsReady() {
-		go func() { _ = m.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
-	}
 }
 
 // PracticeMatch 人机练习：立即为玩家创建含 2 个机器人的房间

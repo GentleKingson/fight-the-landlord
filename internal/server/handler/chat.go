@@ -1,17 +1,48 @@
 package handler
 
 import (
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
+const maxChatContentRunes = 50
+
+func sanitizeChatContent(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // handleChat 处理聊天消息
 func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message) {
 	payload, err := codec.ParsePayload[protocol.ChatPayload](msg)
 	if err != nil {
+		return
+	}
+
+	if !utf8.ValidString(payload.Content) {
+		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
+		return
+	}
+
+	content := sanitizeChatContent(payload.Content)
+	if content == "" {
+		return
+	}
+	if utf8.RuneCountInString(content) > maxChatContentRunes {
+		client.SendMessage(codec.NewErrorMessageWithText(
+			protocol.ErrCodeInvalidMsg, "聊天消息不能超过 50 个字符"))
 		return
 	}
 
@@ -25,7 +56,9 @@ func (h *Handler) handleChat(client types.ClientInterface, msg *protocol.Message
 		}
 	}
 
-	// 填充发送者信息
+	// 客户端上行聊天一律不可信为系统消息，覆盖发送者与内容字段
+	payload.Content = content
+	payload.IsSystem = false
 	payload.SenderID = client.GetID()
 	payload.SenderName = client.GetName()
 	payload.Time = time.Now().Unix()

@@ -53,7 +53,7 @@ func (gs *GameSession) snapshotLocked() Snapshot {
 	}
 	players := make([]SnapshotPlayer, len(gs.players))
 	for i, p := range gs.players {
-		players[i] = SnapshotPlayer{GamePlayer: *p, IsBot: gs.room.Players[p.ID].Client.IsBot()}
+		players[i] = SnapshotPlayer{GamePlayer: *p, IsBot: gs.room.IsPlayerBot(p.ID)}
 	}
 	return Snapshot{
 		ActionReceipts: gs.actionReceipts,

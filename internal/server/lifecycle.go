@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -24,7 +25,10 @@ func (s *Server) monitorStats() {
 	for range ticker.C {
 		onlineCount := s.GetOnlineCount()
 		goroutines := runtime.NumGoroutine()
-		activeConns := len(s.semaphore)
+		activeConns := onlineCount
+		if s.semaphore != nil {
+			activeConns = len(s.semaphore)
+		}
 
 		if onlineCount == lastOnline && goroutines == lastGoroutines && activeConns == lastActiveConns {
 			continue
@@ -156,6 +160,18 @@ func (s *Server) sendShutdownNotification() {
 // Shutdown 关闭服务器
 func (s *Server) Shutdown() {
 	time.Sleep(s.config.Game.RoomCleanupDelayDuration())
+
+	// 停止 HTTP 监听与空闲连接（不影响已劫持的 WebSocket 连接，随后由下方主动关闭）
+	s.httpMu.Lock()
+	httpSrv := s.httpServer
+	s.httpMu.Unlock()
+	if httpSrv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := httpSrv.Shutdown(ctx); err != nil {
+			log.Printf("HTTP 服务器关闭异常: %v", err)
+		}
+		cancel()
+	}
 
 	// 关闭所有客户端连接
 	s.clientsMu.Lock()

@@ -234,11 +234,20 @@ func handleEscKey(m model.Model) (bool, tea.Cmd) {
 	}
 
 	switch m.Phase() {
-	case model.PhaseRoomList, model.PhaseMatching, model.PhaseLeaderboard, model.PhaseStats, model.PhaseRules, model.PhaseGameOver:
+	case model.PhaseMatching:
+		if m.Client() != nil {
+			_ = m.Client().CancelMatch()
+		}
+		m.EnterLobby()
+		return true, nil
+	case model.PhaseRoomList, model.PhaseLeaderboard, model.PhaseStats, model.PhaseRules, model.PhaseGameOver:
 		m.EnterLobby()
 		return true, nil
 	case model.PhaseWaiting:
-		_ = m.Client().LeaveRoom()
+		if m.Client() != nil {
+			_ = m.Client().LeaveRoom()
+		}
+		m.Game().State().Reset()
 		m.EnterLobby()
 		return true, nil
 	case model.PhaseBidding, model.PhasePlaying:
@@ -407,8 +416,16 @@ func handleRoomListEnter(m model.Model, input string) tea.Cmd {
 }
 
 func handleWaitingEnter(m model.Model, input string) tea.Cmd {
-	if strings.EqualFold(input, "r") || strings.EqualFold(input, "ready") {
+	if m.Client() == nil {
+		return nil
+	}
+	switch strings.ToLower(input) {
+	case "r", "ready":
 		_ = m.Client().Ready()
+	case "c", "cancel":
+		_ = m.Client().CancelReady()
+	case "s", "start":
+		_ = m.Client().StartGame()
 	}
 	return nil
 }

@@ -37,3 +37,34 @@ func TestDouZeroUsesServerRulesBeforeReturningAction(t *testing.T) {
 		})
 	}
 }
+
+func TestDouZeroFallbackMustPlayIgnoresStaleHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Model returns pass on a MustPlay turn, triggering fallback.
+		_ = json.NewEncoder(w).Encode(douzeroResponse{Action: nil})
+	}))
+	defer server.Close()
+
+	engine := NewDouZeroEngine(server.URL)
+
+	// Fallback when DouZeroPos is unknown and history contains Rocket
+	got := engine.DecidePlay(context.Background(), "test", GameContext{
+		Hand:        cards("4 3"),
+		RecentPlays: [2]PlayRecord{play("R B", true), {}},
+		MustPlay:    true,
+		CanBeat:     true,
+	})
+	require.Len(t, got, 1)
+	require.Equal(t, "3", got[0].Rank.String())
+
+	// Fallback when service returns pass on MustPlay and history contains 22
+	got = engine.DecidePlay(context.Background(), "test", GameContext{
+		Hand:        cards("4 3 3 3 3"),
+		RecentPlays: [2]PlayRecord{play("2 2", true), {}},
+		MustPlay:    true,
+		CanBeat:     true,
+		DouZeroPos:  DouZeroPosLandlord,
+	})
+	require.Len(t, got, 1)
+	require.Equal(t, "3", got[0].Rank.String())
+}

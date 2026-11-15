@@ -20,7 +20,7 @@ var messageHandlers = map[protocol.MessageType]messageHandler{
 	protocol.MsgError:       handleMsgError,
 	protocol.MsgOnlineCount: handleMsgOnlineCount,
 
-	// Room
+	// Room & Match
 	protocol.MsgRoomCreated:    handleMsgRoomCreated,
 	protocol.MsgRoomJoined:     handleMsgRoomJoined,
 	protocol.MsgPlayerJoined:   handleMsgPlayerJoined,
@@ -29,6 +29,7 @@ var messageHandlers = map[protocol.MessageType]messageHandler{
 	protocol.MsgPlayerOffline:  handleMsgPlayerOffline,
 	protocol.MsgPlayerOnline:   handleMsgPlayerOnline,
 	protocol.MsgRoomListResult: handleMsgRoomListResult,
+	protocol.MsgMatchCanceled:  handleMsgMatchCanceled,
 
 	// Game
 	protocol.MsgGameStart:  handleMsgGameStart,

@@ -1,10 +1,14 @@
+import io
 import os
 from pathlib import Path
 import random
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import server as inference_server
 from server import build_infoset, get_legal_card_play_actions, _all_54_cards
 from src.marvel_backend import build_infoset_string, MarvelBackend, POSITIONS
 
@@ -52,6 +56,37 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(model.act(data), [])
         data.update(position="landlord_up", hand=cards[37:], card_play_action_seq=[[cards[0]], []])
         self.assertEqual(model.act(data), [])
+
+
+class ModelDownloadTests(unittest.TestCase):
+    def test_failed_or_empty_download_leaves_no_final_or_temp_files(self):
+        class BrokenStream:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, _size=-1):
+                if not hasattr(self, "sent"):
+                    self.sent = True
+                    return b"partial-onnx-bytes"
+                raise ConnectionResetError("connection dropped mid-stream")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(inference_server, "MODEL_DIR", tmpdir):
+                with mock.patch("urllib.request.urlopen", return_value=BrokenStream()):
+                    with self.assertRaises(ConnectionResetError):
+                        inference_server.download_models()
+                self.assertEqual(os.listdir(tmpdir), [])
+
+                # Empty payload also fails without leaving a 0-byte model file
+                with mock.patch("urllib.request.urlopen", side_effect=lambda _u: io.BytesIO(b"")):
+                    with self.assertRaises(RuntimeError):
+                        inference_server.download_models()
+                self.assertEqual(os.listdir(tmpdir), [])
+
+                # Valid download writes all position models atomically
+                with mock.patch("urllib.request.urlopen", side_effect=lambda _u: io.BytesIO(b"onnx-weights")):
+                    inference_server.download_models()
+                for pos in POSITIONS:
+                    self.assertEqual(Path(tmpdir, f"{pos}.onnx").read_bytes(), b"onnx-weights")
 
 
 @unittest.skipUnless(os.environ.get("MARVEL_INTEGRATION") == "1", "requires pinned source and role weights")

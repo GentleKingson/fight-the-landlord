@@ -267,9 +267,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     switch (message.type) {
       case MsgType.Connected: {
         const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
-        const keepResult = state.phase === 'game_over' && state.endSnapshot && state.playerId === payload.player_id;
+        const samePlayer = Boolean(state.playerId) && state.playerId === payload.player_id;
+        const keepResult = state.phase === 'game_over' && Boolean(state.endSnapshot) && samePlayer;
+        const keepActiveView =
+          samePlayer && (['waiting', 'dealing', 'bidding', 'playing'].includes(state.phase) || keepResult);
         set({
-          ...(!keepResult
+          ...(!keepActiveView
             ? { ...INITIAL_TABLE, players: [], roomCode: '', ownerId: '', selectedCards: new Set<string>() }
             : {}),
           connected: true,
@@ -279,7 +282,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           cancellingMatch: false,
           roomRequest: null,
           error: '',
-          phase: keepResult ? 'game_over' : 'lobby',
+          phase: keepActiveView ? state.phase : 'lobby',
           playerId: payload.player_id,
           playerName: payload.player_name,
           reconnectToken: payload.reconnect_token
@@ -319,9 +322,11 @@ export const useAppStore = create<AppState>((set, get) => ({
             ...restoreSnapshot(payload.game_state)
           });
         } else {
+          const keepWaitingPlayers = Boolean(samePlayer && payload.room_code && state.roomCode === payload.room_code);
           set({
             ...INITIAL_TABLE,
-            players: [],
+            players: keepWaitingPlayers ? state.players : [],
+            selectedCards: new Set(),
             ownerId: payload.room_code ? state.ownerId : '',
             playerId: payload.player_id,
             playerName: payload.player_name,
@@ -766,14 +771,29 @@ function syncLandlordCounts(
   });
 }
 
+function bidLabel(bid: boolean, isGrab: boolean): string {
+  return bid ? (isGrab ? '抢地主' : '叫地主') : isGrab ? '不抢' : '不叫';
+}
+
 function restoreSnapshot(dto: GameStateDto): Partial<AppState> {
   const isPlaying = dto.phase === 'playing' || dto.phase === 'ended';
   const hasLandlord = (dto.players ?? []).some((player) => player.is_landlord);
   const hand = sortCards(dto.hand ?? []);
+  const bids = dto.bid_history ?? [];
   let seatActions: Record<string, SeatAction> =
     dto.last_played?.length && dto.last_player_id
       ? { [dto.last_player_id]: { type: 'play', player_id: dto.last_player_id, cards: dto.last_played } }
       : {};
+  if (dto.phase === 'bidding') {
+    for (const entry of bids) {
+      seatActions = setSeatAction(seatActions, {
+        type: 'bid',
+        player_id: entry.player_id,
+        player_name: entry.player_name,
+        label: bidLabel(entry.bid, entry.is_grab)
+      });
+    }
+  }
   const plays = dto.public_plays ?? [];
   for (const play of plays) {
     if (play.new_trick) {
@@ -781,6 +801,16 @@ function restoreSnapshot(dto: GameStateDto): Partial<AppState> {
     }
     seatActions = setSeatAction(seatActions, { ...play, label: play.type === 'pass' ? '不出' : undefined });
   }
+  const bidActions: TableAction[] = bids.map((entry) => ({
+    type: 'bid',
+    player_id: entry.player_id,
+    player_name: entry.player_name,
+    label: bidLabel(entry.bid, entry.is_grab)
+  }));
+  const playActions: TableAction[] = plays.map((play) => ({
+    ...play,
+    label: play.type === 'pass' ? '不出' : undefined
+  }));
   // Current hand + every public play reconstructs all cards no longer held by opponents.
   const cardCounter = deductCounter(
     initialCounter(hand),
@@ -790,6 +820,7 @@ function restoreSnapshot(dto: GameStateDto): Partial<AppState> {
     ...INITIAL_TABLE,
     roundId: dto.deal_id ?? '',
     multiplier: dto.multiplier || 1,
+    isGrabTurn: dto.phase === 'bidding' && bids.some((entry) => entry.bid),
     ...turnTiming({ ...dto, timeout: 0, turn_deadline: dto.turn_paused ? 0 : dto.turn_deadline }),
     deal: dto.phase === 'dealing' ? restoreDeal(dto) : null,
     selectedCards: new Set(),
@@ -798,7 +829,7 @@ function restoreSnapshot(dto: GameStateDto): Partial<AppState> {
         ? 'dealing'
         : dto.phase === 'bidding'
           ? 'bidding'
-          : dto.phase === 'playing'
+            : dto.phase === 'playing'
             ? 'playing'
             : dto.phase === 'ended'
               ? 'game_over'
@@ -819,7 +850,7 @@ function restoreSnapshot(dto: GameStateDto): Partial<AppState> {
     mustPlay: dto.must_play,
     canBeat: dto.can_beat,
     cardCounter: dto.public_plays !== undefined || !isPlaying ? cardCounter : {},
-    recentActions: plays.slice(-10).map((play) => ({ ...play, label: play.type === 'pass' ? '不出' : undefined }))
+    recentActions: [...bidActions, ...playActions].slice(-10)
   };
 }
 

@@ -191,3 +191,39 @@ func TestRejectedTimeoutPlayFallsBackAndAdvances(t *testing.T) {
 		})
 	}
 }
+
+func TestNotifyPlayTurnIsolatesCanBeatToActivePlayer(t *testing.T) {
+	for _, actorCanBeat := range []bool{true, false} {
+		t.Run(map[bool]string{true: "actor_can_beat", false: "actor_cannot_beat"}[actorCanBeat], func(t *testing.T) {
+			gs := recordingGame(t)
+			gs.mu.Lock()
+			gs.stopTimer()
+			gs.gameConfig.CollectTrainingData = false
+			gs.setLandlord(0)
+			gs.lastPlayedHand, _ = rule.ParseHand(cardsForRanks(t, "88"))
+			gs.lastPlayerIdx = 1
+			if actorCanBeat {
+				gs.players[0].Hand = cardsForRanks(t, "99")
+			} else {
+				gs.players[0].Hand = cardsForRanks(t, "34")
+			}
+			gs.notifyPlayTurn()
+			gs.mu.Unlock()
+
+			for seat, p := range gs.players {
+				client := gs.room.GetClient(p.ID).(*testutil.SimpleClient)
+				messages := client.SentMessages()
+				msg := messages[len(messages)-1]
+				require.Equal(t, protocol.MsgPlayTurn, msg.Type)
+				payload, err := codec.ParsePayload[protocol.PlayTurnPayload](msg)
+				require.NoError(t, err)
+				require.Equal(t, gs.players[0].ID, payload.PlayerID)
+				if seat == 0 {
+					require.Equal(t, actorCanBeat, payload.CanBeat)
+				} else {
+					require.False(t, payload.CanBeat, "observer seat %d must not learn whether actor can beat", seat)
+				}
+			}
+		})
+	}
+}

@@ -228,30 +228,112 @@ func (f *IPFilter) IsAllowed(ip string) bool {
 
 // --- 辅助函数 ---
 
-// GetClientIP 获取客户端真实 IP
-func GetClientIP(r *http.Request) string {
-	// 检查代理头
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// 取第一个 IP（最原始的客户端）
-		parts := strings.Split(forwarded, ",")
-		return strings.TrimSpace(parts[0])
-	}
-
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
-	}
-
-	// 从连接中获取
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+func extractRemoteIP(remoteAddr string) string {
+	ip, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		return strings.TrimSpace(remoteAddr)
+	}
+	if parsed := net.ParseIP(ip); parsed != nil {
+		return parsed.String()
 	}
 	return ip
 }
 
+// ClientIPResolver 仅在直连对端属于可信反向代理时才解析转发头
+type ClientIPResolver struct {
+	trustedNets []*net.IPNet
+	trustedIPs  map[string]bool
+}
+
+// NewClientIPResolver 创建客户端 IP 解析器（支持单 IP 与 CIDR）
+func NewClientIPResolver(trustedProxies []string) *ClientIPResolver {
+	r := &ClientIPResolver{
+		trustedIPs: make(map[string]bool),
+	}
+	for _, entry := range trustedProxies {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if _, cidr, err := net.ParseCIDR(entry); err == nil {
+			r.trustedNets = append(r.trustedNets, cidr)
+			continue
+		}
+		if ip := net.ParseIP(entry); ip != nil {
+			r.trustedIPs[ip.String()] = true
+		}
+	}
+	return r
+}
+
+func (cr *ClientIPResolver) isTrusted(ipStr string) bool {
+	if cr == nil || (len(cr.trustedIPs) == 0 && len(cr.trustedNets) == 0) {
+		return false
+	}
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	if cr.trustedIPs[ip.String()] {
+		return true
+	}
+	for _, cidr := range cr.trustedNets {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// Resolve 获取真实客户端 IP；仅当 RemoteAddr 属于可信代理时才信任 X-Forwarded-For / X-Real-IP
+func (cr *ClientIPResolver) Resolve(r *http.Request) string {
+	remoteIP := extractRemoteIP(r.RemoteAddr)
+	if !cr.isTrusted(remoteIP) {
+		return remoteIP
+	}
+
+	if xffValues := r.Header.Values("X-Forwarded-For"); len(xffValues) > 0 {
+		combined := strings.Join(xffValues, ",")
+		parts := strings.Split(combined, ",")
+		var leftmostValid string
+		// 从右向左查找第一个非可信代理 IP，防止客户端伪造前置 X-Forwarded-For 项
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(parts[i])
+			parsed := net.ParseIP(candidate)
+			if parsed == nil {
+				continue
+			}
+			canonical := parsed.String()
+			leftmostValid = canonical
+			if !cr.isTrusted(canonical) {
+				return canonical
+			}
+		}
+		if leftmostValid != "" {
+			return leftmostValid
+		}
+	}
+
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		if parsed := net.ParseIP(realIP); parsed != nil {
+			return parsed.String()
+		}
+	}
+
+	return remoteIP
+}
+
+// GetClientIP 默认仅从连接对端 RemoteAddr 提取客户端 IP，不信任未经鉴权的代理头
+func GetClientIP(r *http.Request) string {
+	return extractRemoteIP(r.RemoteAddr)
+}
+
 // --- 消息速率限制 ---
+
+const (
+	limiterSweepInterval = 5 * time.Minute
+	limiterIdleTTL       = 10 * time.Minute
+)
 
 // MessageRateLimiter 消息速率限制器（针对已连接的客户端）
 type MessageRateLimiter struct {
@@ -260,12 +342,14 @@ type MessageRateLimiter struct {
 
 	maxMessagesPerSecond int
 	warningThreshold     int // 警告阈值
+	lastSweep            time.Time
 }
 
 type messageRate struct {
-	count     int
-	lastReset time.Time
-	warnings  int // 警告次数
+	count      int
+	lastReset  time.Time
+	lastActive time.Time
+	warnings   int // 警告次数
 }
 
 // NewMessageRateLimiter 创建消息速率限制器
@@ -274,6 +358,7 @@ func NewMessageRateLimiter(maxPerSecond int) *MessageRateLimiter {
 		limits:               make(map[string]*messageRate),
 		maxMessagesPerSecond: maxPerSecond,
 		warningThreshold:     maxPerSecond / 2,
+		lastSweep:            time.Now(),
 	}
 }
 
@@ -283,15 +368,22 @@ func (ml *MessageRateLimiter) AllowMessage(clientID string) (allowed, warning bo
 	defer ml.mu.Unlock()
 
 	now := time.Now()
+	if now.Sub(ml.lastSweep) >= limiterSweepInterval {
+		ml.sweepLocked(now)
+	}
+
 	rate, exists := ml.limits[clientID]
 
 	if !exists {
 		ml.limits[clientID] = &messageRate{
-			count:     1,
-			lastReset: now,
+			count:      1,
+			lastReset:  now,
+			lastActive: now,
 		}
 		return true, false
 	}
+
+	rate.lastActive = now
 
 	// 如果超过 1 秒，重置计数
 	if now.Sub(rate.lastReset) >= time.Second {
@@ -314,6 +406,15 @@ func (ml *MessageRateLimiter) AllowMessage(clientID string) (allowed, warning bo
 	}
 
 	return true, false
+}
+
+func (ml *MessageRateLimiter) sweepLocked(now time.Time) {
+	ml.lastSweep = now
+	for id, rate := range ml.limits {
+		if now.Sub(rate.lastActive) > limiterIdleTTL {
+			delete(ml.limits, id)
+		}
+	}
 }
 
 // GetWarningCount 获取警告次数
@@ -345,6 +446,7 @@ type ChatRateLimiter struct {
 	maxPerSecond int
 	maxPerMinute int
 	cooldown     time.Duration
+	lastSweep    time.Time
 }
 
 type chatRate struct {
@@ -362,6 +464,7 @@ func NewChatRateLimiter(maxPerSecond, maxPerMinute int, cooldown time.Duration) 
 		maxPerSecond: maxPerSecond,
 		maxPerMinute: maxPerMinute,
 		cooldown:     cooldown,
+		lastSweep:    time.Now(),
 	}
 }
 
@@ -371,6 +474,10 @@ func (cl *ChatRateLimiter) AllowChat(clientID string) (allowed bool, reason stri
 	defer cl.mu.Unlock()
 
 	now := time.Now()
+	if now.Sub(cl.lastSweep) >= limiterSweepInterval {
+		cl.sweepLocked(now)
+	}
+
 	rate, exists := cl.limits[clientID]
 
 	if !exists {
@@ -417,6 +524,15 @@ func (cl *ChatRateLimiter) AllowChat(clientID string) (allowed bool, reason stri
 	}
 
 	return true, ""
+}
+
+func (cl *ChatRateLimiter) sweepLocked(now time.Time) {
+	cl.lastSweep = now
+	for id, rate := range cl.limits {
+		if now.Sub(rate.lastMinute) > limiterIdleTTL && now.After(rate.cooldownUntil) {
+			delete(cl.limits, id)
+		}
+	}
 }
 
 // ClearRateLimit 清除速率限制

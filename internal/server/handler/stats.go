@@ -6,6 +6,7 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
+	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
@@ -68,7 +69,9 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 		}
 	}
 
-	// 限制请求数量
+	lbType := storage.NormalizeLeaderboardType(payload.Type)
+
+	// 限制请求数量与偏移
 	if payload.Limit <= 0 || payload.Limit > 50 {
 		payload.Limit = 10
 	}
@@ -78,7 +81,7 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	entries, err := h.leaderboard.GetLeaderboard(ctx, payload.Limit)
+	entries, err := h.leaderboard.GetLeaderboard(ctx, lbType, payload.Offset, payload.Limit)
 	if err != nil {
 		client.SendMessage(codec.NewErrorMessageWithText(protocol.ErrCodeUnknown, "获取排行榜失败"))
 		return
@@ -98,7 +101,7 @@ func (h *Handler) handleGetLeaderboard(client types.ClientInterface, msg *protoc
 	}
 
 	client.SendMessage(codec.MustNewMessage(protocol.MsgLeaderboardResult, protocol.LeaderboardResultPayload{
-		Type:    payload.Type,
+		Type:    lbType,
 		Entries: protocolEntries,
 	}))
 }

@@ -110,23 +110,55 @@ func TestLeaderboard_GetLeaderboard(t *testing.T) {
 	defer mr.Close()
 	ctx := context.Background()
 
-	// Create p1: Score 30
+	// Create p1: Score 30 (present in total/daily/weekly)
 	err := lm.RecordGameResult(ctx, "p1", "Player1", true, true)
 	assert.NoError(t, err)
-	// Create p2: Score 15
+	// Create p2: Score 15 (present in total/daily/weekly)
 	err = lm.RecordGameResult(ctx, "p2", "Player2", false, true)
 	assert.NoError(t, err)
 
-	entries, err := lm.GetLeaderboard(ctx, 10)
+	// Seed a historical player only on total leaderboard (not active today/this week)
+	err = lm.SavePlayerStats(ctx, &PlayerStats{
+		PlayerID:   "p0",
+		PlayerName: "Legend",
+		TotalGames: 10,
+		Wins:       10,
+		Score:      100,
+	})
 	assert.NoError(t, err)
-	assert.Len(t, entries, 2)
+	assert.NoError(t, lm.redis.ZAdd(ctx, leaderboardKey, redis.Z{Score: 100, Member: "p0"}).Err())
 
-	e1, e2 := entries[0], entries[1]
+	entries, err := lm.GetLeaderboard(ctx, "total", 0, 10)
+	assert.NoError(t, err)
+	assert.Len(t, entries, 3)
+	assert.Equal(t, "p0", entries[0].PlayerID)
+	assert.Equal(t, 1, entries[0].Rank)
+	assert.Equal(t, "p1", entries[1].PlayerID)
+	assert.Equal(t, 2, entries[1].Rank)
+	assert.Equal(t, "p2", entries[2].PlayerID)
+	assert.Equal(t, 3, entries[2].Rank)
 
-	assert.Equal(t, "p1", e1.PlayerID) // Rank 1
-	assert.Equal(t, 30, e1.Score)
-	assert.Equal(t, "p2", e2.PlayerID) // Rank 2
-	assert.Equal(t, 15, e2.Score)
+	// Offset pagination preserves global Rank (offset + i + 1)
+	paged, err := lm.GetLeaderboard(ctx, "total", 1, 2)
+	assert.NoError(t, err)
+	assert.Len(t, paged, 2)
+	assert.Equal(t, "p1", paged[0].PlayerID)
+	assert.Equal(t, 2, paged[0].Rank)
+	assert.Equal(t, "p2", paged[1].PlayerID)
+	assert.Equal(t, 3, paged[1].Rank)
+
+	// Daily & weekly leaderboards only include players updated in that period
+	daily, err := lm.GetLeaderboard(ctx, "daily", 0, 10)
+	assert.NoError(t, err)
+	assert.Len(t, daily, 2)
+	assert.Equal(t, "p1", daily[0].PlayerID)
+	assert.Equal(t, 1, daily[0].Rank)
+
+	weekly, err := lm.GetLeaderboard(ctx, "weekly", 1, 1)
+	assert.NoError(t, err)
+	assert.Len(t, weekly, 1)
+	assert.Equal(t, "p2", weekly[0].PlayerID)
+	assert.Equal(t, 2, weekly[0].Rank)
 }
 
 func TestLeaderboard_GetPlayerRank(t *testing.T) {

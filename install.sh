@@ -1,6 +1,6 @@
 #!/bin/bash
 # 斗地主客户端一键安装脚本
-# 使用方法: curl -fsSL https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/install.sh | bash
+# 使用方法: curl -fsSL https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.sh | bash
 
 set -e
 
@@ -59,7 +59,7 @@ detect_platform() {
 # 获取最新版本
 get_latest_version() {
     info "获取最新版本..."
-    LATEST_VERSION=$(curl -fsSL https://api.github.com/repos/palemoky/fight-the-landlord/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    LATEST_VERSION=$(curl -fsSL https://api.github.com/repos/GentleKingson/fight-the-landlord/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
     if [ -z "$LATEST_VERSION" ]; then
         error "无法获取最新版本"
@@ -71,7 +71,7 @@ get_latest_version() {
 # 下载二进制文件
 download_binary() {
     BINARY_NAME="fight-the-landlord-${OS}-${ARCH}"
-    DOWNLOAD_URL="https://github.com/palemoky/fight-the-landlord/releases/download/${LATEST_VERSION}/${BINARY_NAME}"
+    DOWNLOAD_URL="https://github.com/GentleKingson/fight-the-landlord/releases/download/${LATEST_VERSION}/${BINARY_NAME}"
     CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
     info "下载客户端..."
@@ -83,14 +83,22 @@ download_binary() {
         error "下载失败: $DOWNLOAD_URL"
     fi
 
-    # 下载校验和
+    # 强制下载并验证校验和
     if ! curl -fsSL -o "${BINARY_NAME}.sha256" "$CHECKSUM_URL"; then
-        warn "无法下载校验和文件，跳过校验"
-    else
-        info "验证文件完整性..."
+        error "无法下载校验和文件: $CHECKSUM_URL"
+    fi
+
+    info "验证文件完整性..."
+    if command -v sha256sum >/dev/null 2>&1; then
         if ! sha256sum -c "${BINARY_NAME}.sha256" 2>/dev/null; then
             error "文件校验失败"
         fi
+    elif command -v shasum >/dev/null 2>&1; then
+        if ! shasum -a 256 -c "${BINARY_NAME}.sha256" 2>/dev/null; then
+            error "文件校验失败"
+        fi
+    else
+        error "未找到 sha256sum 或 shasum 校验工具"
     fi
 
     info "下载完成"

@@ -188,3 +188,24 @@ func TestLoadFromEnv(t *testing.T) {
 	assert.Equal(t, 120, cfg.Game.TurnTimeout)
 	assert.Equal(t, []string{"http://a.com", "http://b.com"}, cfg.Security.AllowedOrigins)
 }
+
+func TestLoadFromEnv_DisablesBotsAndLoadsTrustedProxies(t *testing.T) {
+	t.Setenv("BOT_ENABLED", "false")
+	t.Setenv("DOUZERO_ENABLED", "0")
+	t.Setenv("SECURITY_TRUSTED_PROXIES", "127.0.0.1,10.0.0.0/8")
+
+	content := `
+bot:
+  enabled: true
+  douzero_enabled: true
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "bot_override.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(content), 0o600))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	assert.False(t, cfg.BOT.Enabled)
+	assert.False(t, cfg.BOT.DouZeroEnabled)
+	assert.Equal(t, []string{"127.0.0.1", "10.0.0.0/8"}, cfg.Security.TrustedProxies)
+}

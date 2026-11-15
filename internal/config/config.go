@@ -91,6 +91,7 @@ type GameConfig struct {
 // SecurityConfig 安全配置
 type SecurityConfig struct {
 	AllowedOrigins []string           `yaml:"allowed_origins"` // 允许的来源
+	TrustedProxies []string           `yaml:"trusted_proxies"` // 可信反向代理 IP 或 CIDR 列表
 	RateLimit      RateLimitConfig    `yaml:"rate_limit"`      // 连接速率限制
 	MessageLimit   MessageLimitConfig `yaml:"message_limit"`   // 消息速率限制
 	ChatLimit      ChatLimitConfig    `yaml:"chat_limit"`      // 聊天消息速率限制
@@ -250,17 +251,22 @@ func loadFromEnv(cfg *Config) {
 	getEnvInt("GAME_OFFLINE_ROOM_RETENTION", &cfg.Game.OfflineRoomRetention)
 	getEnvInt("GAME_RESULT_RETENTION", &cfg.Game.ResultRetention)
 	// BOT
-	if v := os.Getenv("BOT_ENABLED"); v == "true" || v == "1" {
-		cfg.BOT.Enabled = true
+	if v := os.Getenv("BOT_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.BOT.Enabled = b
+		}
 	}
 	getEnvInt("BOT_FILL_TIMEOUT", &cfg.BOT.BotFillTimeout)
-	if v := os.Getenv("DOUZERO_ENABLED"); v == "true" || v == "1" {
-		cfg.BOT.DouZeroEnabled = true
+	if v := os.Getenv("DOUZERO_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.BOT.DouZeroEnabled = b
+		}
 	}
 	getEnvStr("DOUZERO_URL", &cfg.BOT.DouZeroURL)
 
 	// Security
 	getEnvStrSlice("SECURITY_ALLOWED_ORIGINS", &cfg.Security.AllowedOrigins)
+	getEnvStrSlice("SECURITY_TRUSTED_PROXIES", &cfg.Security.TrustedProxies)
 	getEnvInt("SECURITY_RATE_LIMIT_PER_SECOND", &cfg.Security.RateLimit.MaxPerSecond)
 	getEnvInt("SECURITY_MESSAGE_LIMIT_PER_SECOND", &cfg.Security.MessageLimit.MaxPerSecond)
 }

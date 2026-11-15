@@ -114,3 +114,32 @@ func TestHeuristicEngine_DecidePlay_AlwaysLegal(t *testing.T) {
 		t.Errorf("跟牌 %s 无法压过上家 J", cardsToStr(got))
 	}
 }
+
+func TestHeuristicEngine_DecidePlay_MustPlayIgnoresStaleHistory(t *testing.T) {
+	t.Parallel()
+	e := NewHeuristicEngine()
+
+	// 上一轮自己出了王炸，另外两家 pass 后轮回自己自由领出（手牌降序为 4, 3）
+	rocketLead := GameContext{
+		Hand:        cards("4 3"),
+		RecentPlays: [2]PlayRecord{play("R B", true), {}},
+		MustPlay:    true,
+		CanBeat:     true,
+	}
+	got := e.DecidePlay(context.Background(), "bot", rocketLead)
+	if len(got) != 1 || got[0].Rank != card.Rank3 {
+		t.Fatalf("自由领出应出最小单张 3，实际为 %v", got)
+	}
+
+	// 上一轮自己出了 22，自由领出时不应为了压过历史 22 而拆出 3333 炸弹
+	pairLead := GameContext{
+		Hand:        cards("4 3 3 3 3"),
+		RecentPlays: [2]PlayRecord{play("2 2", true), {}},
+		MustPlay:    true,
+		CanBeat:     true,
+	}
+	got = e.DecidePlay(context.Background(), "bot", pairLead)
+	if len(got) != 1 || got[0].Rank != card.Rank3 {
+		t.Fatalf("自由领出不应误触发炸弹压历史牌，实际为 %v", got)
+	}
+}

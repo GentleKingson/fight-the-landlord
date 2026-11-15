@@ -116,7 +116,19 @@ func (gs *GameSession) broadcast(msg *protocol.Message) {
 }
 
 func (gs *GameSession) send(client types.ClientInterface, msg *protocol.Message) {
-	gs.effect(func() { client.SendMessage(msg) })
+	gs.effect(func() {
+		if client != nil {
+			client.SendMessage(msg)
+		}
+	})
+}
+
+func (gs *GameSession) sendToPlayer(playerID string, msg *protocol.Message) {
+	gs.effect(func() {
+		if client := gs.room.GetClient(playerID); client != nil {
+			client.SendMessage(msg)
+		}
+	})
 }
 
 func (gs *GameSession) setRoomState(state room.RoomState) {
@@ -164,7 +176,7 @@ func (gs *GameSession) settlementResults() []storage.GameResult {
 	}
 	var results []storage.GameResult
 	for _, p := range gs.players {
-		if !gs.room.Players[p.ID].Client.IsBot() {
+		if !gs.room.IsPlayerBot(p.ID) {
 			results = append(results, storage.GameResult{GameID: gs.gameID, PlayerID: p.ID,
 				PlayerName: p.Name, IsLandlord: p.IsLandlord, IsWinner: p.IsLandlord == result.IsLandlord})
 		}
@@ -186,7 +198,7 @@ func (gs *GameSession) Suspend() {
 
 func (gs *GameSession) updateAllOfflineLocked(observedAt time.Time) {
 	for _, p := range gs.players {
-		if !gs.room.Players[p.ID].Client.IsBot() && !p.IsOffline {
+		if !gs.room.IsPlayerBot(p.ID) && !p.IsOffline {
 			gs.allOfflineAt = time.Time{}
 			return
 		}

@@ -19,15 +19,16 @@ func (m *OnlineModel) handleWindowSize(msg tea.WindowSizeMsg) {
 
 func (m *OnlineModel) handleConnected() tea.Cmd {
 	m.EnterLobby()
-	m.playerID = m.client.PlayerID
-	m.playerName = m.client.PlayerName
+	playerID, playerName, _ := m.client.Credentials()
+	m.playerID = playerID
+	m.playerName = playerName
 	m.client.StartHeartbeat()
 	return m.listenForMessages()
 }
 
 func (m *OnlineModel) handleConnectionError(msg ConnectionErrorMsg) {
 	m.error = fmt.Sprintf("无法连接到服务器: %v\n\n按 ESC 退出", msg.Err)
-	m.phase = PhaseConnecting
+	m.SetPhase(PhaseConnecting)
 }
 
 func (m *OnlineModel) handleReconnecting(msg ReconnectingMsg) tea.Cmd {
@@ -45,15 +46,12 @@ func (m *OnlineModel) handleReconnectSuccess() []tea.Cmd {
 	m.ClearNotification(NotifyRateLimit)
 	m.SetNotification(NotifyReconnectSuccess, "✅ 重连成功！", true)
 
-	var cmds []tea.Cmd
-	cmds = append(cmds, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-		return ClearReconnectMsg{}
-	}), m.listenForReconnect())
-
-	if m.client.IsConnected() {
-		cmds = append(cmds, m.listenForMessages())
+	return []tea.Cmd{
+		tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return ClearReconnectMsg{}
+		}),
+		m.listenForReconnect(),
 	}
-	return cmds
 }
 
 func (m *OnlineModel) handleClearReconnect() {
@@ -93,7 +91,7 @@ func (m *OnlineModel) processServerMessage(msg ServerMessage) []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if m.client.IsConnected() {
+	if m.client != nil && !m.client.IsClosed() {
 		cmds = append(cmds, m.listenForMessages())
 	}
 	return cmds

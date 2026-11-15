@@ -2,7 +2,9 @@ package handler
 
 import (
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -11,21 +13,33 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/ui/model"
 )
 
+func stripControlChars(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func handleMsgChat(m model.Model, msg *protocol.Message) tea.Cmd {
 	var payload protocol.ChatPayload
 	if err := payloadconv.DecodePayload(msg.Type, msg.Payload, &payload); err != nil {
 		return nil
 	}
 
-	sender := payload.SenderName
+	sender := stripControlChars(payload.SenderName)
 	if sender == "" {
 		sender = "未知"
 	}
+	content := stripControlChars(payload.Content)
 
 	timeStr := time.Unix(payload.Time, 0).Format("15:04")
-	chatLine := fmt.Sprintf("[%s] %s: %s", timeStr, sender, payload.Content)
+	chatLine := fmt.Sprintf("[%s] %s: %s", timeStr, sender, content)
 	if payload.IsSystem {
-		chatLine = fmt.Sprintf("[%s] 系统: %s", timeStr, payload.Content)
+		chatLine = fmt.Sprintf("[%s] 系统: %s", timeStr, content)
 	}
 
 	// Route message to appropriate chat based on scope

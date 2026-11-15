@@ -24,21 +24,21 @@ func (s *Server) authenticateTerminal(id, token string) (string, error) {
 
 // resolveIdentity runs before upgrading. Redis failures never replace a valid cookie
 // or silently create a temporary in-memory identity.
-func (s *Server) resolveIdentity(r *http.Request) (*storage.GuestIdentity, string, http.Header, error) {
+func (s *Server) resolveIdentity(r *http.Request) (identity *storage.GuestIdentity, token string, headers http.Header, created bool, err error) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	browser := r.Header.Get("Origin") != ""
 	if browser {
 		identity, err := s.verifyCookieIdentity(ctx, r)
 		if err != nil || identity != nil {
-			return identity, "", nil, err
+			return identity, "", nil, false, err
 		}
 	}
-	identity, token, err := s.redisStore.CreateIdentity(ctx, GenerateNickname(), s.config.Server.IdentityTTLDuration())
+	identity, token, err = s.redisStore.CreateIdentity(ctx, GenerateNickname(), s.config.Server.IdentityTTLDuration())
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, false, err
 	}
-	headers := http.Header{}
+	headers = http.Header{}
 	if browser {
 		cookie := &http.Cookie{Name: identityCookie, Value: identity.ID + "." + token, Path: "/", HttpOnly: true,
 			SameSite: http.SameSiteStrictMode, Secure: s.config.Server.CookieSecure || r.TLS != nil,
@@ -46,7 +46,7 @@ func (s *Server) resolveIdentity(r *http.Request) (*storage.GuestIdentity, strin
 		headers.Add("Set-Cookie", cookie.String())
 		token = "" // Never expose a browser bearer credential to JavaScript.
 	}
-	return identity, token, headers, nil
+	return identity, token, headers, true, nil
 }
 
 // verifyCookieIdentity returns no identity and no error when a new guest is needed.

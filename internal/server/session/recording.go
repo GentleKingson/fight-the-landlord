@@ -28,7 +28,7 @@ func (gs *GameSession) startRecording() {
 	humans := 0
 	players := make([]map[string]any, len(gs.players))
 	for i, p := range gs.players {
-		isBot := gs.room.Players[p.ID].Client.IsBot()
+		isBot := gs.room.IsPlayerBot(p.ID)
 		if !isBot {
 			humans++
 		}
@@ -127,7 +127,7 @@ func (gs *GameSession) recordDecision(kind string, p *GamePlayer, cards []card.C
 	}
 	if source == "" {
 		source = "human"
-		if gs.room.Players[p.ID].Client.IsBot() {
+		if gs.room.IsPlayerBot(p.ID) {
 			source = "bot"
 		}
 	}

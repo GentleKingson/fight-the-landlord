@@ -2,7 +2,6 @@ package room
 
 import (
 	"cmp"
-	"context"
 	"log"
 	"slices"
 	"time"
@@ -45,11 +44,6 @@ func (rm *RoomManager) CreateRoom(client types.ClientInterface) (*Room, error) {
 	client.SetRoom(code)
 
 	rm.rooms[code] = room
-
-	// 保存到 Redis
-	if rm.redisStore != nil && rm.redisStore.IsReady() {
-		go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
-	}
 
 	log.Printf("🏠 房间 %s 已创建，玩家 %s", code, client.GetName())
 
@@ -105,14 +99,9 @@ func (rm *RoomManager) JoinRoom(client types.ClientInterface, code string) (*Roo
 	log.Printf("👤 玩家 %s 加入房间 %s", client.GetName(), code)
 
 	// 通知房间内其他玩家
-	room.BroadcastExcept(client.GetID(), codec.MustNewMessage(protocol.MsgPlayerJoined, protocol.PlayerJoinedPayload{
+	room.broadcastExceptLocked(client.GetID(), codec.MustNewMessage(protocol.MsgPlayerJoined, protocol.PlayerJoinedPayload{
 		Player: room.GetPlayerInfo(client.GetID()),
 	}))
-
-	// 保存到 Redis
-	if rm.redisStore != nil && rm.redisStore.IsReady() {
-		go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
-	}
 
 	return room, nil
 }
@@ -153,13 +142,13 @@ func (rm *RoomManager) leaveRoomLocked(client types.ClientInterface) (*Room, err
 		return r, nil
 	}
 	resetReadyPlayerID := r.transferOwnerLocked(client.GetID())
-	r.Broadcast(codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
+	r.broadcastLocked(codec.MustNewMessage(protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
 		PlayerID:   client.GetID(),
 		PlayerName: client.GetName(),
 		OwnerID:    r.OwnerID,
 	}))
 	if resetReadyPlayerID != "" {
-		r.Broadcast(codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
+		r.broadcastLocked(codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
 			PlayerID: resetReadyPlayerID,
 			Ready:    false,
 		}))
@@ -173,9 +162,6 @@ func (rm *RoomManager) leaveRoomLocked(client types.ClientInterface) (*Room, err
 	}
 	if allOffline && r.AllOfflineAt.IsZero() {
 		r.AllOfflineAt = time.Now()
-	}
-	if rm.redisStore != nil && rm.redisStore.IsReady() {
-		go func() { _ = rm.redisStore.SaveRoom(context.Background(), r.Code, r.ToRoomData()) }()
 	}
 	return nil, nil
 }
@@ -237,7 +223,7 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 	player.Ready = ready
 
 	// 广播准备状态
-	room.Broadcast(codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
+	room.broadcastLocked(codec.MustNewMessage(protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
 		PlayerID: client.GetID(),
 		Ready:    ready,
 	}))
@@ -254,11 +240,6 @@ func (rm *RoomManager) SetPlayerReady(client types.ClientInterface, ready bool) 
 		// 创建游戏会话并开始
 		if onGameStart != nil {
 			onGameStart(room)
-		}
-
-		// 保存房间状态
-		if rm.redisStore != nil && rm.redisStore.IsReady() {
-			go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
 		}
 	} else {
 		room.mu.Unlock()
@@ -324,10 +305,6 @@ func (rm *RoomManager) StartRoom(client types.ClientInterface) error {
 
 	if onGameStart != nil {
 		onGameStart(room)
-	}
-
-	if rm.redisStore != nil && rm.redisStore.IsReady() {
-		go func() { _ = rm.redisStore.SaveRoom(context.Background(), room.Code, room.ToRoomData()) }()
 	}
 
 	return nil

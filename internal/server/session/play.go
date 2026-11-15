@@ -229,12 +229,20 @@ func (gs *GameSession) notifyPlayTurn() {
 	}
 
 	gs.startPlayTimer()
-	gs.broadcastBotTurn(codec.MustNewMessage(protocol.MsgPlayTurn, protocol.PlayTurnPayload{
-		ServerTime: time.Now().UnixMilli(), TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
-		TurnToken: gs.playToken,
-		PlayerID:  player.ID,
-		Timeout:   gs.gameConfig.TurnTimeout,
-		MustPlay:  mustPlay,
-		CanBeat:   canBeat,
-	}))
+	actorPayload := protocol.PlayTurnPayload{
+		ServerTime:   time.Now().UnixMilli(),
+		TurnDeadline: gs.timerStartTime.Add(gs.remainingTime).UnixMilli(),
+		TurnToken:    gs.playToken,
+		PlayerID:     player.ID,
+		Timeout:      gs.gameConfig.TurnTimeout,
+		MustPlay:     mustPlay,
+		CanBeat:      canBeat,
+	}
+	observerPayload := actorPayload
+	observerPayload.CanBeat = false
+	gs.broadcastBotTurnByRecipient(
+		player.ID,
+		codec.MustNewMessage(protocol.MsgPlayTurn, actorPayload),
+		codec.MustNewMessage(protocol.MsgPlayTurn, observerPayload),
+	)
 }

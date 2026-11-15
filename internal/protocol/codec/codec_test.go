@@ -98,6 +98,16 @@ func TestEncodeDecode(t *testing.T) {
 			msgType: protocol.MsgError,
 			payload: protocol.ErrorPayload{Code: 1001, Message: "test error"},
 		},
+		{
+			name:    "MaintenancePushPayload",
+			msgType: protocol.MsgMaintenancePush,
+			payload: protocol.MaintenancePayload{Maintenance: true},
+		},
+		{
+			name:    "MaintenancePullPayload",
+			msgType: protocol.MsgMaintenancePull,
+			payload: protocol.MaintenanceStatusPayload{Maintenance: true},
+		},
 	}
 
 	for _, tt := range tests {
@@ -120,6 +130,17 @@ func TestEncodeDecode(t *testing.T) {
 
 			assert.Equal(t, original.Type, decoded.Type)
 			assert.NotNil(t, decoded.Payload)
+
+			switch tt.msgType {
+			case protocol.MsgMaintenancePush:
+				got, err := ParsePayload[protocol.MaintenancePayload](decoded)
+				require.NoError(t, err)
+				assert.True(t, got.Maintenance)
+			case protocol.MsgMaintenancePull:
+				got, err := ParsePayload[protocol.MaintenanceStatusPayload](decoded)
+				require.NoError(t, err)
+				assert.True(t, got.Maintenance)
+			}
 
 			PutMessage(original)
 			PutMessage(decoded)

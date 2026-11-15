@@ -18,6 +18,13 @@ func NewHeuristicEngine() *HeuristicEngine {
 	return &HeuristicEngine{}
 }
 
+func targetHandForDecision(gctx GameContext) rule.ParsedHand {
+	if gctx.MustPlay {
+		return rule.ParsedHand{}
+	}
+	return gctx.RecentPlays[0].Played
+}
+
 // DecidePlay 决定出什么牌，返回 nil 表示 pass
 func (e *HeuristicEngine) DecidePlay(_ context.Context, botName string, gctx GameContext) []card.Card {
 	// 无牌可打时直接 pass
@@ -25,7 +32,7 @@ func (e *HeuristicEngine) DecidePlay(_ context.Context, botName string, gctx Gam
 		return nil
 	}
 
-	cards := rule.FindSmallestBeatingCards(gctx.Hand, gctx.RecentPlays[0].Played)
+	cards := rule.FindSmallestBeatingCards(gctx.Hand, targetHandForDecision(gctx))
 	if cards == nil {
 		log.Printf("🤖 %s 选择 pass", botName)
 	} else {

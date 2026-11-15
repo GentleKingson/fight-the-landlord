@@ -20,6 +20,7 @@ type GameState struct {
 
 	// 游戏进程
 	RoomCode       string
+	OwnerID        string
 	CurrentTurn    string
 	LastPlayedBy   string
 	LastPlayedName string
@@ -63,6 +64,7 @@ func (gs *GameState) Reset() {
 	gs.BottomCards = nil
 	gs.Players = nil
 	gs.RoomCode = ""
+	gs.OwnerID = ""
 	gs.CurrentTurn = ""
 	gs.LastPlayedBy = ""
 	gs.LastPlayedName = ""
@@ -72,6 +74,7 @@ func (gs *GameState) Reset() {
 	gs.Multiplier = 0
 	gs.IsGrabTurn = false
 	gs.BidToken = ""
+	gs.TurnToken = ""
 	gs.DealID = ""
 	gs.Winner = ""
 	gs.WinnerIsLandlord = false

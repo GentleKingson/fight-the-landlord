@@ -90,6 +90,11 @@ type ClearSystemNotificationMsg struct{}
 // GameOverDelayMsg triggers the transition to PhaseGameOver after a delay.
 type GameOverDelayMsg struct{}
 
+// MatchingTickMsg drives a single-chain 1s refresh while in PhaseMatching.
+type MatchingTickMsg struct {
+	Seq uint64
+}
+
 // --- Model Interface ---
 
 // Model is the main interface for OnlineModel, used by handler/view/input packages.

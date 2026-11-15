@@ -1,75 +1,155 @@
 package server
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
-// handleWebSocket 处理 WebSocket 连接
-func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// 获取真实客户端IP
-	clientIP := GetClientIP(r)
+func (s *Server) resolveClientIP(r *http.Request) string {
+	if s.ipResolver != nil {
+		return s.ipResolver.Resolve(r)
+	}
+	return GetClientIP(r)
+}
 
-	// 维护模式检查（最优先）
+func headerContainsToken(h http.Header, name, token string) bool {
+	for _, v := range h.Values(name) {
+		for _, part := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasValidWebSocketHeaders(w http.ResponseWriter, r *http.Request) (gorillaHandled bool, valid bool) {
+	if r.Method != http.MethodGet ||
+		!headerContainsToken(r.Header, "Connection", "upgrade") ||
+		!headerContainsToken(r.Header, "Upgrade", "websocket") ||
+		!headerContainsToken(r.Header, "Sec-Websocket-Version", "13") {
+		return true, false
+	}
+	if _, ok := w.(http.Hijacker); !ok {
+		return true, false
+	}
+	rawKey := strings.TrimSpace(r.Header.Get("Sec-Websocket-Key"))
+	if rawKey == "" {
+		return true, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(rawKey)
+	if err != nil || len(decoded) != 16 {
+		return false, false
+	}
+	return false, true
+}
+
+func (s *Server) checkWebSocketAdmission(w http.ResponseWriter, r *http.Request, clientIP string) bool {
 	if s.IsMaintenanceMode() {
 		log.Printf("🔧 维护模式，拒绝新连接: %s", clientIP)
-		http.Error(w, "Server is under maintenance, please try again later",
-			http.StatusServiceUnavailable)
-		return
+		http.Error(w, "Server is under maintenance, please try again later", http.StatusServiceUnavailable)
+		return false
 	}
-
-	// 连接数限制检查
-	select {
-	case s.semaphore <- struct{}{}:
-		// 成功获取信号量，连接建立后释放
-		defer func() { <-s.semaphore }()
-	default:
-		log.Printf("🚫 达到最大连接数限制 (%d), IP: %s", s.maxConnections, clientIP)
-		http.Error(w, "Server Full", http.StatusServiceUnavailable)
-		return
-	}
-
-	// IP 过滤检查
 	if !s.ipFilter.IsAllowed(clientIP) {
 		log.Printf("🚫 IP %s 被过滤器拒绝", clientIP)
 		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
+		return false
 	}
-
-	// 来源验证
 	if !s.originChecker.Check(r) {
 		log.Printf("🚫 来源验证失败: %s (IP: %s)", r.Header.Get("Origin"), clientIP)
 		http.Error(w, "Origin not allowed", http.StatusForbidden)
-		return
+		return false
 	}
-
-	// 速率限制检查
 	if !s.rateLimiter.Allow(clientIP) {
 		log.Printf("🚫 IP %s 请求过于频繁", clientIP)
 		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		return false
+	}
+	return true
+}
+
+func (s *Server) acquireConnectionSlot(w http.ResponseWriter, clientIP string) (func(), bool) {
+	var releaseOnce sync.Once
+	releaseSlot := func() {
+		if s.semaphore != nil {
+			releaseOnce.Do(func() { <-s.semaphore })
+		}
+	}
+	if s.semaphore != nil {
+		select {
+		case s.semaphore <- struct{}{}:
+		default:
+			log.Printf("🚫 达到最大连接数限制 (%d), IP: %s", s.maxConnections, clientIP)
+			http.Error(w, "Server Full", http.StatusServiceUnavailable)
+			return nil, false
+		}
+	}
+	return releaseSlot, true
+}
+
+// handleWebSocket 处理 WebSocket 连接
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// 获取真实客户端IP（默认仅使用直连对端，仅信任已配置的可信代理）
+	clientIP := s.resolveClientIP(r)
+	if !s.checkWebSocketAdmission(w, r, clientIP) {
 		return
 	}
 
-	identity, token, headers, err := s.resolveIdentity(r)
+	upgrade := upgrader
+	upgrade.CheckOrigin = s.originChecker.Check
+
+	// 在创建持久身份前先校验合法 WebSocket 升级请求，防止普通 HTTP 请求污染 Redis
+	if gorillaHandled, valid := hasValidWebSocketHeaders(w, r); !valid {
+		if gorillaHandled {
+			_, _ = upgrade.Upgrade(w, r, nil)
+		} else {
+			http.Error(w, "websocket: invalid Sec-WebSocket-Key", http.StatusBadRequest)
+		}
+		return
+	}
+
+	// 连接数限制检查：槽位生命周期覆盖整个存活连接，而非仅限握手阶段
+	releaseSlot, ok := s.acquireConnectionSlot(w, clientIP)
+	if !ok {
+		return
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			releaseSlot()
+		}
+	}()
+
+	identity, token, headers, created, err := s.resolveIdentity(r)
 	if err != nil {
 		http.Error(w, "Identity service unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	upgrade := upgrader
-	upgrade.CheckOrigin = s.originChecker.Check
 	conn, err := upgrade.Upgrade(w, r, headers)
 	if err != nil {
+		if created && identity != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.redisStore.DeleteIdentity(cleanupCtx, identity.ID)
+			cancel()
+		}
 		log.Printf("WebSocket 升级失败: %v", err)
 		return
 	}
 
-	// 创建客户端
+	// 创建客户端并移交信号量槽位释放职责
 	client := NewClient(s, conn)
+	client.onConnClose = releaseSlot
+	handedOff = true
 	client.IP = clientIP // 记录客户端 IP
 	client.ID, client.Name = identity.ID, identity.Name
 	client.browser = r.Header.Get("Origin") != ""

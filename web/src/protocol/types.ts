@@ -102,8 +102,17 @@ export interface PublicPlay {
   new_trick: boolean;
 }
 
+export interface PublicBid {
+  player_id: string;
+  player_name: string;
+  bid: boolean;
+  is_grab: boolean;
+  multiplier: number;
+}
+
 /** Authoritative table snapshot sent on reconnect. */
 export interface GameStateDto extends DealTiming {
+  bid_history?: PublicBid[];
   game_id?: string;
   state_version?: number;
   turn_token?: string;

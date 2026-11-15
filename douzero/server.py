@@ -8,6 +8,8 @@ No torch required.
 
 import os
 import json
+import shutil
+import tempfile
 import traceback
 import urllib.request
 from collections import Counter
@@ -36,12 +38,27 @@ def download_models() -> None:
     os.makedirs(MODEL_DIR, exist_ok=True)
     for pos in POSITIONS:
         path = os.path.join(MODEL_DIR, f"{pos}.onnx")
-        if os.path.exists(path):
+        if os.path.exists(path) and os.path.getsize(path) > 0:
             print(f"  Found   {pos}.onnx")
             continue
         url = f"{HF_BASE}/{pos}.onnx"
         print(f"  Downloading {pos}.onnx ...")
-        urllib.request.urlretrieve(url, path)
+        fd, tmp_path = tempfile.mkstemp(dir=MODEL_DIR, prefix=f".{pos}.onnx.", suffix=".part")
+        try:
+            with os.fdopen(fd, "wb") as dst, urllib.request.urlopen(url) as resp:
+                shutil.copyfileobj(resp, dst)
+                dst.flush()
+                os.fsync(dst.fileno())
+            if os.path.getsize(tmp_path) <= 0:
+                raise RuntimeError(f"Downloaded empty ONNX model from {url}")
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         print(f"  Saved → {path}")
 
 

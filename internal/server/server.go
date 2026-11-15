@@ -56,17 +56,46 @@ type Server struct {
 	// 安全组件
 	rateLimiter    *RateLimiter
 	originChecker  *OriginChecker
+	ipResolver     *ClientIPResolver
 	messageLimiter *MessageRateLimiter
 	chatLimiter    *ChatRateLimiter
 	ipFilter       *IPFilter
 
-	// 连接控制
+	// 连接控制与 HTTP 服务
 	maxConnections int
-	semaphore      chan struct{} // 信号量控制并发连接数
+	semaphore      chan struct{} // 信号量控制并发连接数（nil 表示无限制）
+	httpMu         sync.Mutex
+	httpServer     *http.Server
 
 	// 维护模式
 	maintenanceMode bool
 	maintenanceMu   sync.RWMutex
+}
+
+func connectRedis(ctx context.Context, cfg config.RedisConfig) (*redis.Client, error) {
+	rdb := redis.NewClient(&redis.Options{
+		ContextTimeoutEnabled: true,
+		Addr:                  cfg.Addr,
+		Password:              cfg.Password,
+		DB:                    cfg.DB,
+	})
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		_ = rdb.Close()
+		return nil, fmt.Errorf("redis 连接失败: %w", err)
+	}
+	return rdb, nil
+}
+
+func newBotEngine(cfg config.BotConfig) bot.DecisionEngine {
+	if !cfg.Enabled {
+		return nil
+	}
+	if cfg.DouZeroEnabled {
+		log.Printf("🎮 DouZero 引擎已启用（服务地址: %s，等待超时: %ds）", cfg.DouZeroURL, cfg.BotFillTimeout)
+		return bot.NewDouZeroEngine(cfg.DouZeroURL)
+	}
+	log.Printf("🤖 规则启发式机器人已启用（等待超时: %ds）", cfg.BotFillTimeout)
+	return bot.NewHeuristicEngine()
 }
 
 // NewServer 创建服务器实例
@@ -77,19 +106,17 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	if err := validateWebConfig(cfg); err != nil {
 		return nil, err
 	}
-	// 初始化 Redis 客户端
-	rdb := redis.NewClient(&redis.Options{
-		ContextTimeoutEnabled: true,
-		Addr:                  cfg.Redis.Addr,
-		Password:              cfg.Redis.Password,
-		DB:                    cfg.Redis.DB,
-	})
 
-	// 测试 Redis 连接
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("redis 连接失败: %w", err)
+	rdb, err := connectRedis(ctx, cfg.Redis)
+	if err != nil {
+		return nil, err
+	}
+
+	var sem chan struct{}
+	if cfg.Server.MaxConnections > 0 {
+		sem = make(chan struct{}, cfg.Server.MaxConnections)
 	}
 
 	s := &Server{
@@ -99,41 +126,27 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		leaderboard:    storage.NewLeaderboardManager(rdb),
 		clients:        make(map[string]*Client),
 		sessionManager: session.NewSessionManager(cfg.Game.ResultRetentionDuration()),
-		// 初始化安全组件
 		rateLimiter: NewRateLimiter(
 			cfg.Security.RateLimit.MaxPerSecond,
 			cfg.Security.RateLimit.MaxPerMinute,
 			cfg.Security.RateLimit.BanDurationTime(),
 		),
 		originChecker:  NewOriginChecker(cfg.Security.AllowedOrigins),
+		ipResolver:     NewClientIPResolver(cfg.Security.TrustedProxies),
 		messageLimiter: NewMessageRateLimiter(cfg.Security.MessageLimit.MaxPerSecond),
 		chatLimiter: NewChatRateLimiter(
 			cfg.Security.ChatLimit.MaxPerSecond,
 			cfg.Security.ChatLimit.MaxPerMinute,
 			cfg.Security.ChatLimit.CooldownDuration(),
 		),
-		ipFilter: NewIPFilter(),
-		// 初始化连接控制
+		ipFilter:       NewIPFilter(),
 		maxConnections: cfg.Server.MaxConnections,
-		semaphore:      make(chan struct{}, cfg.Server.MaxConnections),
+		semaphore:      sem,
 	}
 
-	// 初始化房间管理器
 	s.roomManager = room.NewRoomManager(s.redisStore, cfg.Game)
+	botEngine := newBotEngine(cfg.BOT)
 
-	// 初始化机器人 (未启用时为 nil）
-	var botEngine bot.DecisionEngine
-	if cfg.BOT.Enabled {
-		if cfg.BOT.DouZeroEnabled {
-			botEngine = bot.NewDouZeroEngine(cfg.BOT.DouZeroURL)
-			log.Printf("🎮 DouZero 引擎已启用（服务地址: %s，等待超时: %ds）", cfg.BOT.DouZeroURL, cfg.BOT.BotFillTimeout)
-		} else {
-			botEngine = bot.NewHeuristicEngine()
-			log.Printf("🤖 规则启发式机器人已启用（等待超时: %ds）", cfg.BOT.BotFillTimeout)
-		}
-	}
-
-	// 初始化匹配器
 	s.matcher = match.NewMatcher(match.MatcherDeps{
 		RoomManager: s.roomManager,
 		WithClients: s.withActiveClients,
@@ -147,7 +160,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		},
 	})
 
-	// 初始化消息处理器
 	s.handler = handler.NewHandler(handler.HandlerDeps{
 		Server:         s,
 		RoomManager:    s.roomManager,
@@ -158,7 +170,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		Authenticate:   s.authenticateTerminal,
 	})
 
-	// 设置房间补位机器人工厂与游戏开始回调
 	if botEngine == nil {
 		botEngine = bot.NewHeuristicEngine()
 	}
@@ -208,5 +219,12 @@ func (s *Server) Start() error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	return server.ListenAndServe()
+	s.httpMu.Lock()
+	s.httpServer = server
+	s.httpMu.Unlock()
+
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
 }

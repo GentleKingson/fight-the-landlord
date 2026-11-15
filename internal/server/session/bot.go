@@ -11,20 +11,28 @@ import (
 // This is an in-process interface only; human clients receive the existing message.
 // The caller holds gs.mu. SendTurn must only capture state and launch work, not wait.
 func (gs *GameSession) broadcastBotTurn(msg *protocol.Message) {
+	gs.broadcastBotTurnByRecipient("", msg, msg)
+}
+
+func (gs *GameSession) broadcastBotTurnByRecipient(actorID string, actorMsg, observerMsg *protocol.Message) {
 	if gs.inTransition {
-		gs.effect(func() { gs.broadcastBotTurn(msg) })
+		gs.effect(func() { gs.broadcastBotTurnByRecipient(actorID, actorMsg, observerMsg) })
 		return
 	}
 	gs.cancelBotTurn()
 	ctx, cancel := context.WithCancel(context.Background())
 	gs.botTurnCancel = cancel
-	for _, player := range gs.room.Players {
-		if bot, ok := player.Client.(interface {
+	for _, pc := range gs.room.GetPlayerClients() {
+		msg := observerMsg
+		if actorID == "" || pc.ID == actorID {
+			msg = actorMsg
+		}
+		if bot, ok := pc.Client.(interface {
 			SendTurn(context.Context, uint64, *protocol.Message)
 		}); ok {
 			bot.SendTurn(ctx, gs.turnID, msg)
 		} else {
-			player.Client.SendMessage(msg)
+			pc.Client.SendMessage(msg)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 # 斗地主客户端一键安装脚本 (Windows)
-# 使用方法: irm https://raw.githubusercontent.com/palemoky/fight-the-landlord/main/install.ps1 | iex
+# 使用方法: irm https://raw.githubusercontent.com/GentleKingson/fight-the-landlord/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -24,7 +24,7 @@ function Write-Error-Custom {
 function Get-LatestVersion {
     Write-Info "获取最新版本..."
     try {
-        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/palemoky/fight-the-landlord/releases/latest"
+        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/GentleKingson/fight-the-landlord/releases/latest"
         $version = $response.tag_name
         Write-Info "最新版本: $version"
         return $version
@@ -39,7 +39,8 @@ function Download-Binary {
     param([string]$Version)
 
     $binaryName = "fight-the-landlord-windows-amd64.exe"
-    $downloadUrl = "https://github.com/palemoky/fight-the-landlord/releases/download/$Version/$binaryName"
+    $downloadUrl = "https://github.com/GentleKingson/fight-the-landlord/releases/download/$Version/$binaryName"
+    $checksumUrl = "$downloadUrl.sha256"
 
     Write-Info "下载客户端..."
 
@@ -47,14 +48,22 @@ function Download-Binary {
     New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
 
     $outputPath = Join-Path $tempDir $binaryName
+    $checksumPath = "$outputPath.sha256"
 
     try {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $outputPath -UseBasicParsing
+        Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing
+        Write-Info "验证文件完整性..."
+        $expectedHash = ((Get-Content -Path $checksumPath -Raw).Trim() -split '\s+')[0].ToLower()
+        $actualHash = (Get-FileHash -Path $outputPath -Algorithm SHA256).Hash.ToLower()
+        if ([string]::IsNullOrEmpty($expectedHash) -or $expectedHash -ne $actualHash) {
+            Write-Error-Custom "文件校验失败: 期望 $expectedHash, 实际 $actualHash"
+        }
         Write-Info "下载完成"
         return $outputPath
     }
     catch {
-        Write-Error-Custom "下载失败: $_"
+        Write-Error-Custom "下载或校验失败: $_"
     }
 }
 

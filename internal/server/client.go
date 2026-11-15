@@ -57,9 +57,11 @@ type Client struct {
 	conn   *websocket.Conn
 	send   chan []byte
 
-	mu        sync.RWMutex
-	closed    bool
-	closeCode int
+	mu          sync.RWMutex
+	closed      bool
+	closeCode   int
+	connOnce    sync.Once
+	onConnClose func()
 }
 
 // NewClient 创建新客户端
@@ -73,11 +75,36 @@ func NewClient(s *Server, conn *websocket.Conn) *Client {
 	}
 }
 
+func (c *Client) closeTransport() {
+	c.connOnce.Do(func() {
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
+		if c.onConnClose != nil {
+			c.onConnClose()
+		}
+	})
+}
+
+func isReadOnlyQuery(t protocol.MessageType) bool {
+	switch t {
+	case protocol.MsgPing,
+		protocol.MsgGetOnlineCount,
+		protocol.MsgGetMaintenanceStatus,
+		protocol.MsgGetRoomList,
+		protocol.MsgGetStats,
+		protocol.MsgGetLeaderboard:
+		return true
+	default:
+		return false
+	}
+}
+
 // ReadPump 从 WebSocket 读取消息
 func (c *Client) ReadPump() {
 	defer func() {
 		c.handleDisconnect()
-		_ = c.conn.Close()
+		c.closeTransport()
 	}()
 
 	c.conn.SetReadLimit(maxMessageSize)
@@ -144,7 +171,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 	// These queries do not change room, game, or identity state. Validate the
 	// socket under the lifecycle lock, but never keep that lock across Redis I/O.
 	// Replacement closes the old client's send channel, suppressing late replies.
-	if msg.Type == protocol.MsgGetStats || msg.Type == protocol.MsgGetLeaderboard {
+	if isReadOnlyQuery(msg.Type) {
 		c.server.connectionMu.Lock()
 		active := c.server.GetClientByID(c.GetID()) == c && !c.isClosed()
 		c.server.connectionMu.Unlock()
@@ -166,7 +193,7 @@ func (c *Client) WritePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		_ = c.conn.Close()
+		c.closeTransport()
 	}()
 
 	for {
