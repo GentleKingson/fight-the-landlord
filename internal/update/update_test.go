@@ -156,7 +156,7 @@ func TestApplyFromURL_RequiresValidChecksumBeforeOverwriting(t *testing.T) {
 
 	t.Run("checksum HTTP 404 aborts without modifying binary", func(t *testing.T) {
 		target := filepath.Join(t.TempDir(), "ddz")
-		if err := os.WriteFile(target, oldBinary, 0o755); err != nil {
+		if err := os.WriteFile(target, oldBinary, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +182,7 @@ func TestApplyFromURL_RequiresValidChecksumBeforeOverwriting(t *testing.T) {
 
 	t.Run("valid checksum replaces binary", func(t *testing.T) {
 		target := filepath.Join(t.TempDir(), "ddz")
-		if err := os.WriteFile(target, oldBinary, 0o755); err != nil {
+		if err := os.WriteFile(target, oldBinary, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

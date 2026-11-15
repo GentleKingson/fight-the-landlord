@@ -33,7 +33,7 @@ func headerContainsToken(h http.Header, name, token string) bool {
 	return false
 }
 
-func hasValidWebSocketHeaders(w http.ResponseWriter, r *http.Request) (gorillaHandled bool, valid bool) {
+func hasValidWebSocketHeaders(w http.ResponseWriter, r *http.Request) (gorillaHandled, valid bool) {
 	if r.Method != http.MethodGet ||
 		!headerContainsToken(r.Header, "Connection", "upgrade") ||
 		!headerContainsToken(r.Header, "Upgrade", "websocket") ||

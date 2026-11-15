@@ -27,7 +27,7 @@ func TestDouZeroUsesServerRulesBeforeReturningAction(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(douzeroResponse{Action: tc.action})
 			}))
 			defer server.Close()
-			gctx := GameContext{Hand: cards(tc.hand), RecentPlays: [2]PlayRecord{play(tc.target, true), {}}, CanBeat: true, DouZeroPos: DouZeroPosLandlordDn}
+			gctx := GameContext{Hand: cards(tc.hand), RecentPlays: [2]PlayRecord{play(tc.target), {}}, CanBeat: true, DouZeroPos: DouZeroPosLandlordDn}
 			action := NewDouZeroEngine(server.URL).DecidePlay(context.Background(), "test", gctx)
 			require.NotEmpty(t, action)
 			parsed, err := rule.ParseHand(action)
@@ -50,7 +50,7 @@ func TestDouZeroFallbackMustPlayIgnoresStaleHistory(t *testing.T) {
 	// Fallback when DouZeroPos is unknown and history contains Rocket
 	got := engine.DecidePlay(context.Background(), "test", GameContext{
 		Hand:        cards("4 3"),
-		RecentPlays: [2]PlayRecord{play("R B", true), {}},
+		RecentPlays: [2]PlayRecord{play("R B"), {}},
 		MustPlay:    true,
 		CanBeat:     true,
 	})
@@ -60,7 +60,7 @@ func TestDouZeroFallbackMustPlayIgnoresStaleHistory(t *testing.T) {
 	// Fallback when service returns pass on MustPlay and history contains 22
 	got = engine.DecidePlay(context.Background(), "test", GameContext{
 		Hand:        cards("4 3 3 3 3"),
-		RecentPlays: [2]PlayRecord{play("2 2", true), {}},
+		RecentPlays: [2]PlayRecord{play("2 2"), {}},
 		MustPlay:    true,
 		CanBeat:     true,
 		DouZeroPos:  DouZeroPosLandlord,

@@ -33,13 +33,13 @@ func cards(notation string) []card.Card {
 }
 
 // play 从牌面字符串构建 PlayRecord
-func play(notation string, isLandlord bool) PlayRecord {
+func play(notation string) PlayRecord {
 	c := cards(notation)
 	parsed, err := rule.ParseHand(c)
 	if err != nil || parsed.Type == rule.Invalid {
 		panic(fmt.Sprintf("无法解析出牌记录 %q: %v", notation, err))
 	}
-	return PlayRecord{Played: parsed, IsLandlord: isLandlord}
+	return PlayRecord{Played: parsed, IsLandlord: true}
 }
 
 func TestHeuristicEngine_DecideBid(t *testing.T) {
@@ -66,7 +66,7 @@ func TestHeuristicEngine_DecidePlay_PassWhenNoBeat(t *testing.T) {
 	// 既非必须出牌、也无法压过上家 → pass
 	gctx := GameContext{
 		Hand:        cards("3 4 5"),
-		RecentPlays: [2]PlayRecord{play("2", true), {}},
+		RecentPlays: [2]PlayRecord{play("2"), {}},
 		MustPlay:    false,
 		CanBeat:     false,
 	}
@@ -98,7 +98,7 @@ func TestHeuristicEngine_DecidePlay_AlwaysLegal(t *testing.T) {
 	// 跟牌：压过上家的单张，产出必须能压过且合法
 	follow := GameContext{
 		Hand:        cards("3 4 5 9 K 2"),
-		RecentPlays: [2]PlayRecord{play("J", true), {}},
+		RecentPlays: [2]PlayRecord{play("J"), {}},
 		MustPlay:    false,
 		CanBeat:     true,
 	}
@@ -122,7 +122,7 @@ func TestHeuristicEngine_DecidePlay_MustPlayIgnoresStaleHistory(t *testing.T) {
 	// 上一轮自己出了王炸，另外两家 pass 后轮回自己自由领出（手牌降序为 4, 3）
 	rocketLead := GameContext{
 		Hand:        cards("4 3"),
-		RecentPlays: [2]PlayRecord{play("R B", true), {}},
+		RecentPlays: [2]PlayRecord{play("R B"), {}},
 		MustPlay:    true,
 		CanBeat:     true,
 	}
@@ -134,7 +134,7 @@ func TestHeuristicEngine_DecidePlay_MustPlayIgnoresStaleHistory(t *testing.T) {
 	// 上一轮自己出了 22，自由领出时不应为了压过历史 22 而拆出 3333 炸弹
 	pairLead := GameContext{
 		Hand:        cards("4 3 3 3 3"),
-		RecentPlays: [2]PlayRecord{play("2 2", true), {}},
+		RecentPlays: [2]PlayRecord{play("2 2"), {}},
 		MustPlay:    true,
 		CanBeat:     true,
 	}

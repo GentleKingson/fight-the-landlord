@@ -68,7 +68,7 @@ func reconnectBackoffDelay(base time.Duration, attempt int) time.Duration {
 	return backoff
 }
 
-func (c *Client) nextReconnectAttempt() (attempt int, stop bool, exhausted bool) {
+func (c *Client) nextReconnectAttempt() (attempt int, stop, exhausted bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
