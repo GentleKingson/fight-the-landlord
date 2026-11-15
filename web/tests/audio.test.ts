@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { BGM_VOLUME, connectBackgroundMusic } from '../src/audio/backgroundMusic';
 import { cardSoundNames, cardSoundUrls } from '../src/audio/cardSounds';
-import { GameAudio } from '../src/audio/gameAudio';
+import { GameAudio, SFX_VOLUME } from '../src/audio/gameAudio';
+import type { Phase } from '../src/protocol/types';
+import { useAppStore } from '../src/stores/appStore';
 
 function cards(rank: number, count = 1) {
   return Array.from({ length: count }, (_, suit) => ({ rank, suit, color: 0 }));
@@ -522,3 +525,115 @@ it.each(['muted', 'locked', 'failed', 'expired'] as const)(
     expect(spoken()).toHaveLength(0);
   }
 );
+
+class FakeMusicElement {
+  static latest: FakeMusicElement;
+  loop = false;
+  volume = 1;
+  preload = 'auto';
+  src = '';
+  paused = true;
+  currentTime = 0;
+  readonly play = vi.fn(async () => {
+    this.paused = false;
+  });
+  readonly pause = vi.fn(() => {
+    this.paused = true;
+  });
+  readonly removeAttribute = vi.fn((attr: string) => {
+    if (attr === 'src') {
+      this.src = '';
+    }
+  });
+  readonly load = vi.fn();
+
+  constructor() {
+    FakeMusicElement.latest = this;
+  }
+}
+
+it('plays background music at 50% of SFX volume only in lobby phases and never during matches', async () => {
+  vi.stubGlobal('Audio', FakeMusicElement);
+  audio.setEnabled(true);
+  audio.play('单张', cards(3));
+  await flush();
+  const sfxGain = FakeContext.latest.createGain.mock.results[0].value.gain.value as number;
+  expect(sfxGain).toBe(SFX_VOLUME);
+  expect(BGM_VOLUME).toBe(sfxGain * 0.5);
+
+  useAppStore.setState({ connected: true, phase: 'connecting' });
+  const dispose = connectBackgroundMusic(audio);
+  const music = FakeMusicElement.latest;
+  expect(music.loop).toBe(true);
+  expect(music.volume).toBe(0.5);
+  expect(music.volume).toBe(sfxGain * 0.5);
+
+  // Gesture during handshake ('connecting') does not start music prematurely.
+  document.dispatchEvent(new Event('pointerup'));
+  expect(music.play).not.toHaveBeenCalled();
+
+  // Entering lobby phases starts and keeps bgm_welcome playing.
+  for (const lobbyPhase of ['lobby', 'matching', 'waiting'] as const) {
+    useAppStore.setState({ phase: lobbyPhase });
+    expect(music.paused).toBe(false);
+    expect(music.src).toContain('bgm_welcome.mp3');
+    expect(music.src).not.toContain('bgm_normal');
+  }
+  expect(music.play).toHaveBeenCalledOnce();
+  music.currentTime = 12.5;
+
+  // Entering any match or settlement phase stops BGM immediately and rewinds.
+  for (const matchPhase of ['dealing', 'bidding', 'playing', 'game_over'] as Phase[]) {
+    useAppStore.setState({ phase: matchPhase });
+    document.dispatchEvent(new Event('pointerup'));
+    expect(music.paused).toBe(true);
+    expect(music.currentTime).toBe(0);
+    expect(music.src).not.toContain('bgm_normal');
+  }
+  expect(music.play).toHaveBeenCalledOnce();
+
+  // Returning from settlement to lobby resumes lobby BGM.
+  useAppStore.setState({ phase: 'lobby' });
+  expect(music.paused).toBe(false);
+  expect(music.play).toHaveBeenCalledTimes(2);
+
+  dispose();
+  expect(music.paused).toBe(true);
+  expect(music.removeAttribute).toHaveBeenCalledWith('src');
+  expect(music.load).toHaveBeenCalledOnce();
+});
+
+it('never loads background music when starting directly in a match and respects mute/visibility in lobby', () => {
+  vi.stubGlobal('Audio', FakeMusicElement);
+  useAppStore.setState({ connected: true, phase: 'playing' });
+  const dispose = connectBackgroundMusic(audio);
+  const music = FakeMusicElement.latest;
+
+  document.dispatchEvent(new Event('keydown'));
+  expect(music.src).toBe('');
+  expect(music.play).not.toHaveBeenCalled();
+
+  // Mute -> enter lobby -> unmute via SoundToggle unlocks and plays in lobby.
+  audio.setEnabled(false);
+  useAppStore.setState({ phase: 'lobby' });
+  expect(music.play).not.toHaveBeenCalled();
+  audio.setEnabled(true);
+  expect(music.paused).toBe(false);
+  expect(music.play).toHaveBeenCalledOnce();
+
+  // Backgrounding and disconnection pause lobby music; restoring resumes it.
+  const hiddenSpy = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(music.paused).toBe(true);
+  hiddenSpy.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(music.paused).toBe(false);
+
+  useAppStore.setState({ connected: false });
+  expect(music.paused).toBe(true);
+  useAppStore.setState({ connected: true });
+  expect(music.paused).toBe(false);
+
+  dispose();
+  hiddenSpy.mockRestore();
+});

@@ -7,6 +7,9 @@ const MAX_AGE_MS = 3000;
 const RESULT_MAX_AGE_MS = 10_000;
 const MAX_CLIP_TIMEOUT_MS = 15_000;
 
+/** Baseline volume for standard game sound effects and voice announcements. */
+export const SFX_VOLUME = 1;
+
 type AudioKind = 'deal' | 'event' | 'turn' | 'final-play' | 'result';
 
 interface Announcement {
@@ -141,7 +144,7 @@ export class GameAudio {
   private enqueue(
     names: string[],
     kind: AudioKind = 'event',
-    volume = 1,
+    volume = SFX_VOLUME,
     expiresAt = Date.now() + (kind === 'result' ? RESULT_MAX_AGE_MS : MAX_AGE_MS),
     startAt?: number
   ): void {
