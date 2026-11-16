@@ -1,44 +1,59 @@
-import tableMusic from '../../../internal/sound/gaming/bgm/bgm_normal.mp3?url&no-inline';
 import lobbyMusic from '../../../internal/sound/lobby/bgm_welcome.mp3?url&no-inline';
+import type { Phase } from '../protocol/types';
 import { useAppStore } from '../stores/appStore';
-import { gameAudio } from './gameAudio';
+import { gameAudio, SFX_VOLUME, type GameAudio } from './gameAudio';
 
-const BGM_VOLUME = 0.18;
+/** Background music volume at 50% of standard sound-effect volume. */
+export const BGM_VOLUME = SFX_VOLUME * 0.5;
+
+const LOBBY_PHASES: ReadonlySet<Phase> = new Set<Phase>(['lobby', 'matching', 'waiting']);
 
 /**
- * Connects background music playback to lobby/table phase and audio settings.
- * A separate channel keeps turn announcements from cancelling the music loop.
+ * Connects lobby background music playback to application phase and audio settings.
+ * Background music plays only in the lobby and pauses during matches and settlement.
  */
-export function connectBackgroundMusic(): () => void {
+export function connectBackgroundMusic(audio: GameAudio = gameAudio): () => void {
   const music = new Audio();
   music.loop = true;
   music.volume = BGM_VOLUME;
   music.preload = 'none';
   let unlocked = false;
   let disposed = false;
-  let source = '';
+  let sourceLoaded = false;
+  const pause = () => {
+    if (!music.paused) {
+      music.pause();
+    }
+  };
   const sync = () => {
     const state = useAppStore.getState();
+    const inLobby = LOBBY_PHASES.has(state.phase);
     if (
       disposed ||
       !unlocked ||
       document.hidden ||
       !state.connected ||
-      !gameAudio.getEnabled() ||
-      state.phase === 'game_over'
+      !audio.getEnabled() ||
+      !inLobby
     ) {
-      music.pause();
+      pause();
+      if (!inLobby && music.currentTime > 0) {
+        music.currentTime = 0;
+      }
       return;
     }
-    const next = ['dealing', 'bidding', 'playing'].includes(state.phase) ? tableMusic : lobbyMusic;
-    if (source !== next) {
-      source = next;
-      music.src = next;
+    if (!sourceLoaded) {
+      sourceLoaded = true;
+      music.src = lobbyMusic;
     }
     if (music.paused) {
-      void music.play().catch(() => {
-        // Retry on the next gesture or foreground transition.
-      });
+      try {
+        void music.play()?.catch(() => {
+          // Retry on the next gesture or foreground transition.
+        });
+      } catch {
+        // Unsupported media playback must not affect the game.
+      }
     }
   };
   // Safari requires play() to be called synchronously from a user gesture.
@@ -46,15 +61,17 @@ export function connectBackgroundMusic(): () => void {
     unlocked = true;
     sync();
   };
-  const pause = () => {
-    music.pause();
-  };
   const unsubscribeStore = useAppStore.subscribe((state, previous) => {
     if (state.phase !== previous.phase || state.connected !== previous.connected) {
       sync();
     }
   });
-  const unsubscribeAudio = gameAudio.subscribe(sync);
+  const unsubscribeAudio = audio.subscribe(() => {
+    if (audio.getEnabled()) {
+      unlocked = true;
+    }
+    sync();
+  });
   document.addEventListener('pointerup', unlock);
   document.addEventListener('touchend', unlock);
   document.addEventListener('keydown', unlock);
@@ -71,8 +88,10 @@ export function connectBackgroundMusic(): () => void {
     document.removeEventListener('visibilitychange', sync);
     window.removeEventListener('pageshow', sync);
     window.removeEventListener('pagehide', pause);
-    music.pause();
-    music.removeAttribute('src');
-    music.load();
+    pause();
+    if (sourceLoaded) {
+      music.removeAttribute('src');
+      music.load();
+    }
   };
 }
