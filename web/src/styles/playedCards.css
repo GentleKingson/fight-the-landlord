@@ -160,7 +160,8 @@
 
 /* ---------- Responsive Played Cards ---------- */
 @media (max-width: 880px) {
-  .felt-table .played-cards { --played-card-w: 38px; --played-card-h: 54px; --played-min-step: 21px; --played-step: 24px; }
+  .felt-table .played-cards { --played-card-w: 46px; --played-card-h: 64px; --played-min-step: 23px; --played-step: 28px; }
+  .felt-table .card--played { --index-size: 12px; --index-suit-size: 10px; --pip-size: 17px; }
   .felt-table .played-cards__meta { min-height: 18px; font-size: 11px; }
   .felt-table .played-cards__meta span { max-width: 150px; }
 }
@@ -214,15 +215,15 @@
 
 /* Short screens must keep target, name and hand type on one metadata row. */
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
-  .felt-table .played-cards { --played-card-w: 28px; --played-card-h: 40px; --played-min-step: 21px; --played-step: 23px; padding-block: 3px; gap: 5px; }
-  .felt-table .card--played { --index-inset: 2px; --index-size: 9px; --index-suit-size: 7px; }
+  .felt-table .played-cards { --played-card-w: 36px; --played-card-h: 50px; --played-min-step: 21px; --played-step: 23px; padding-block: 3px; gap: 5px; }
+  .felt-table .card--played { --index-inset: 2px; --index-size: 11px; --index-suit-size: 9px; }
   .felt-table .card--played .card__pip { display: none; }
   .felt-table .played-cards__meta { flex-wrap: nowrap; padding: 2px 5px; gap: 3px; }
   .played-cards__target-label { padding: 2px 4px; font-size: 10px; }
 }
 
 @media (max-width: 600px) and (max-height: 600px) and (orientation: portrait) {
-  .felt-table .played-cards { --played-card-h: 32px; padding-block: 0; gap: 4px; }
+  .felt-table .played-cards { --played-card-h: 40px; padding-block: 0; gap: 4px; }
   .felt-table .played-cards__meta { min-height: 18px; padding-block: 1px; }
   .played-cards__target-label { padding-block: 1px; }
   .table-arena--has-opp-action .felt-table--seats.felt-table--has-me.felt-table--only-left > .played-seat--right,
@@ -247,8 +248,8 @@
     gap: 3px;
   }
   .played-seat--target .played-cards {
-    --played-card-w: 40px;
-    --played-card-h: 48px;
+    --played-card-w: 46px;
+    --played-card-h: 58px;
     --played-min-step: 28px;
   }
   /* Non-target seats collapse into a 24px single-row strip; target seats keep dual-corner cards. */
@@ -298,4 +299,8 @@
   .table-arena--has-opp-action .felt-table--has-focus > .played-seat--focus {
     align-self: end;
   }
+}
+
+@media (orientation: landscape) and (max-height: 360px) {
+  .played-seat--target .played-cards { --played-card-w: 40px; --played-card-h: 48px; }
 }

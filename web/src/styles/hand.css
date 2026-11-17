@@ -83,11 +83,11 @@
 }
 
 @media (max-width: 700px) and (orientation: portrait) {
-  .hand { height: 178px; }
+  .hand { height: 210px; }
   /* Leave complete symmetric rank/suit corners visible in dense overlapping hands. */
-  .hand .card { --h: 78px; --index-inset: 3px; --index-size: 13px; --index-suit-size: 11px; --pip-size: 19px; }
+  .hand .card { --h: 94px; --index-inset: 3px; --index-size: 14px; --index-suit-size: 12px; --pip-size: 22px; }
   .hand__slot { left: calc(50% + var(--row-x, 0px) - 29px); }
-  .hand__slot[data-row="0"] { bottom: 86px; }
+  .hand__slot[data-row="0"] { bottom: 102px; }
   .hand__slot[data-row="1"] { bottom: 6px; }
   .hand__slot.is-selected { transform: translateY(-6px); }
   .hand .card.is-selected::after {
@@ -105,23 +105,23 @@
 }
 
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
-  .hand { height: 128px; }
-  .hand .card { --h: 54px; --index-inset: 3px; --index-size: 11px; --index-suit-size: 9px; --pip-size: 14px; }
-  .hand__slot[data-row="0"] { bottom: 62px; }
+  .hand { height: 160px; }
+  .hand .card { --h: 70px; --index-inset: 3px; --index-size: 13px; --index-suit-size: 11px; --pip-size: 18px; }
+  .hand__slot[data-row="0"] { bottom: 78px; }
 }
 
 @media (orientation: landscape) and (max-height: 520px) {
   .hand-zone { gap: 1px; }
   .hand-heading { font-size: 10px; line-height: 1.2; }
-  .hand { height: 68px; }
-  .hand .card { --w: 58px; --h: 60px; --index-inset: 3px; --index-size: 11px; --index-suit-size: 9px; --pip-size: 15px; border-radius: 7px; }
+  .hand { height: 80px; }
+  .hand .card { --w: 58px; --h: 72px; --index-inset: 3px; --index-size: 13px; --index-suit-size: 11px; --pip-size: 18px; border-radius: 7px; }
   .hand__slot { left: calc(50% + var(--compact-x, 0px) - 29px); bottom: 4px; }
   .hand__slot.is-selected { transform: translateY(-2px); }
 }
 
 /* A small hand fits on one row; retain the same rank order as larger hands. */
 @media (max-width: 700px) and (orientation: portrait) {
-  .hand--short { height: 112px; }
+  .hand--short { height: 124px; }
   .hand--short .hand__slot {
     left: calc(50% + var(--compact-x, 0px) - 29px);
     bottom: 8px;
