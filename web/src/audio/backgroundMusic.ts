@@ -1,4 +1,4 @@
-import lobbyMusic from '../../../internal/sound/lobby/bgm_welcome.mp3?url&no-inline';
+import lobbyMusic from '../assets/audio/lobby/bgm_welcome.mp3?url&no-inline';
 import type { Phase } from '../protocol/types';
 import { useAppStore } from '../stores/appStore';
 import { gameAudio, SFX_VOLUME, type GameAudio } from './gameAudio';

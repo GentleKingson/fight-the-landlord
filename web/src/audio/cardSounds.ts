@@ -1,17 +1,11 @@
 import type { CardInfo } from '../protocol/types';
 
-// Reuse the CLI assets. no-inline keeps even small MP3s under /assets, which
-// is served by the Go server, without embedding audio in the JavaScript bundle.
-const SOUND_FILES = import.meta.glob<string>(
-  [
-    '../../../internal/sound/gaming/voices/male/{single,pair,trio,type}/*.mp3',
-    '../../../internal/sound/gaming/effects/{play,straight,plane,bomb,turn,warning,deal,win,lose}.mp3',
-    '../../../internal/sound/gaming/voices/male/bid/{bid_call,bid_nocall,bid_grab,bid_nograb}.mp3',
-    '../../../internal/sound/gaming/voices/male/pass/pass_buyao.mp3',
-    '../../../internal/sound/gaming/voices/male/alert/{last1,last2}.mp3'
-  ],
-  { eager: true, query: '?url&no-inline', import: 'default' }
-);
+// Keep even short clips as separate files so the browser can fetch them on demand.
+const SOUND_FILES = import.meta.glob<string>('../assets/audio/gaming/**/*.mp3', {
+  eager: true,
+  query: '?url&no-inline',
+  import: 'default'
+});
 
 /** Lookup table mapping logical clip names to static asset URLs. */
 export const cardSoundUrls: Record<string, string> = Object.fromEntries(

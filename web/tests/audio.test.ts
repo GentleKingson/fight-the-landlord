@@ -9,8 +9,11 @@ function cards(rank: number, count = 1) {
   return Array.from({ length: count }, (_, suit) => ({ rank, suit, color: 0 }));
 }
 
-it('includes exactly the 66 CLI assets and maps every single/pair/trio rank', () => {
+it('loads all 66 game clips from web assets and maps every single/pair/trio rank', () => {
   expect(Object.keys(cardSoundUrls)).toHaveLength(66);
+  for (const url of Object.values(cardSoundUrls)) {
+    expect(url).toMatch(/^\/src\/assets\/audio\/gaming\//);
+  }
   const tokens = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2', 'joker_small', 'joker_big'];
   for (const [type, prefix, count] of [['单张', 'single', 1], ['对子', 'pair', 2], ['三张', 'trio', 3]] as const) {
     for (let rank = 3; rank <= (count === 1 ? 17 : 15); rank++) {
@@ -576,7 +579,7 @@ it('plays background music at 50% of SFX volume only in lobby phases and never d
   for (const lobbyPhase of ['lobby', 'matching', 'waiting'] as const) {
     useAppStore.setState({ phase: lobbyPhase });
     expect(music.paused).toBe(false);
-    expect(music.src).toContain('bgm_welcome.mp3');
+    expect(music.src).toContain('/src/assets/audio/lobby/bgm_welcome.mp3');
     expect(music.src).not.toContain('bgm_normal');
   }
   expect(music.play).toHaveBeenCalledOnce();
