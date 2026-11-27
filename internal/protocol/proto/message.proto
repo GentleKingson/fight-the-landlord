@@ -12,7 +12,8 @@ enum MessageType {
   MSG_UNKNOWN = 0;
 
   // 客户端 -> 服务端
-  MSG_RECONNECT = 1;
+  reserved 1;
+  reserved "MSG_RECONNECT";
   MSG_PING = 2;
   MSG_CREATE_ROOM = 3;
   MSG_JOIN_ROOM = 4;
@@ -28,7 +29,8 @@ enum MessageType {
   MSG_GET_ROOM_LIST = 14;
   MSG_GET_ONLINE_COUNT = 15;
   MSG_GET_MAINTENANCE_STATUS = 17;
-  MSG_CHAT = 16;
+  reserved 16;
+  reserved "MSG_CHAT";
 
   // 服务端 -> 客户端
   MSG_CONNECTED = 100;

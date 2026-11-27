@@ -9,7 +9,6 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/session"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
@@ -25,44 +24,6 @@ func (h *Handler) handlePing(client types.ClientInterface, msg *protocol.Message
 		ClientTimestamp: payload.Timestamp,
 		ServerTimestamp: time.Now().UnixMilli(),
 	}))
-}
-
-// handleReconnect 处理断线重连
-func (h *Handler) handleReconnect(client types.ClientInterface, msg *protocol.Message) {
-	payload, err := codec.ParsePayload[protocol.ReconnectPayload](msg)
-	if err != nil {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeInvalidMsg))
-		return
-	}
-
-	// Do not abandon an existing game by changing identity on this socket.
-	if client.GetRoom() != "" && client.GetID() != payload.PlayerID {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeGameStarted))
-		return
-	}
-	valid := false
-	if h.authenticate != nil {
-		name, err := h.authenticate(payload.PlayerID, payload.Token)
-		if err != nil && !errors.Is(err, storage.ErrInvalidIdentity) {
-			client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeIdentityUnavailable))
-			client.Close()
-			return
-		}
-		if err == nil {
-			h.sessionManager.EnsureSession(payload.PlayerID, name)
-			valid = true
-		}
-	} else {
-		valid = h.sessionManager.CanReconnect(payload.Token, payload.PlayerID)
-	}
-	if !valid {
-		client.SendMessage(codec.NewErrorMessage(protocol.ErrCodeIdentityInvalid))
-		return
-	}
-
-	h.server.RestoreClient(payload.PlayerID, client, func() {
-		h.RestoreConnection(client, payload.PlayerID)
-	})
 }
 
 // RestoreConnection runs inside the server connection lifecycle lock.

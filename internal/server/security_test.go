@@ -91,60 +91,6 @@ func TestRateLimiter_Concurrency(t *testing.T) {
 	assert.LessOrEqual(t, successCount, 50)
 }
 
-func TestChatRateLimiter_CooldownPeriod(t *testing.T) {
-	t.Parallel()
-
-	// 2/sec, 5/min, 3s cooldown
-	cl := NewChatRateLimiter(2, 5, 3*time.Second)
-	clientID := "chatter1"
-
-	// First 2 messages allowed
-	allowed, reason := cl.AllowChat(clientID)
-	assert.True(t, allowed)
-	assert.Empty(t, reason)
-
-	allowed, reason = cl.AllowChat(clientID)
-	assert.True(t, allowed)
-	assert.Empty(t, reason)
-
-	// 3rd message triggers cooldown
-	allowed, reason = cl.AllowChat(clientID)
-	assert.False(t, allowed)
-	assert.Contains(t, reason, "派大星")
-
-	// During cooldown, messages blocked
-	allowed, reason = cl.AllowChat(clientID)
-	assert.False(t, allowed)
-	assert.Contains(t, reason, "章鱼哥")
-
-	// Wait for cooldown to expire
-	time.Sleep(3100 * time.Millisecond)
-
-	// Should be allowed again
-	allowed, reason = cl.AllowChat(clientID)
-	assert.True(t, allowed)
-	assert.Empty(t, reason)
-}
-
-func TestChatRateLimiter_MinuteLimit(t *testing.T) {
-	t.Parallel()
-
-	// 10/sec, 3/min, 2s cooldown
-	cl := NewChatRateLimiter(10, 3, 2*time.Second)
-	clientID := "spammer"
-
-	// First 3 messages allowed
-	for i := 0; i < 3; i++ {
-		allowed, _ := cl.AllowChat(clientID)
-		assert.True(t, allowed, "Message %d should be allowed", i)
-	}
-
-	// 4th message blocked by minute limit
-	allowed, reason := cl.AllowChat(clientID)
-	assert.False(t, allowed)
-	assert.Contains(t, reason, "休息")
-}
-
 func TestIPFilter(t *testing.T) {
 	t.Parallel()
 
@@ -291,7 +237,7 @@ func TestClientIPResolver_TrustedProxies(t *testing.T) {
 	}
 }
 
-func TestRateLimiters_SweepIdleEntriesAndPreserveCooldown(t *testing.T) {
+func TestMessageRateLimiter_SweepIdleEntries(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
@@ -301,13 +247,6 @@ func TestRateLimiters_SweepIdleEntriesAndPreserveCooldown(t *testing.T) {
 	ml.sweepLocked(now)
 	assert.NotContains(t, ml.limits, "stale")
 	assert.Contains(t, ml.limits, "active")
-
-	cl := NewChatRateLimiter(2, 5, 30*time.Second)
-	cl.limits["stale"] = &chatRate{lastMinute: now.Add(-15 * time.Minute), cooldownUntil: now.Add(-1 * time.Minute)}
-	cl.limits["cooling"] = &chatRate{lastMinute: now.Add(-15 * time.Minute), cooldownUntil: now.Add(10 * time.Second)}
-	cl.sweepLocked(now)
-	assert.NotContains(t, cl.limits, "stale")
-	assert.Contains(t, cl.limits, "cooling")
 }
 
 func TestMessageRateLimiter(t *testing.T) {
@@ -393,7 +332,7 @@ func TestOriginChecker_SpecificOrigins(t *testing.T) {
 		{"https://app.example.com", true},
 		{"https://evil.com", false},
 		{"http://example.com", false}, // Different scheme
-		{"", true},                    // No origin header (same-origin or local)
+		{"", false},                   // Browser handshakes require Origin
 	}
 
 	for _, tt := range tests {

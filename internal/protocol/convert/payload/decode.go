@@ -34,16 +34,6 @@ func DecodePayload(msgType protocol.MessageType, data []byte, target any) error 
 // 返回 (是否处理了该消息类型, 错误)
 func decodeClientPayload(msgType protocol.MessageType, data []byte, target any) (bool, error) {
 	switch msgType {
-	case protocol.MsgReconnect:
-		var pbMsg pb.ReconnectPayload
-		if err := proto.Unmarshal(data, &pbMsg); err != nil {
-			return true, err
-		}
-		*target.(*protocol.ReconnectPayload) = protocol.ReconnectPayload{
-			Token:    pbMsg.Token,
-			PlayerID: pbMsg.PlayerId,
-		}
-		return true, nil
 	case protocol.MsgPing:
 		var pbMsg pb.PingPayload
 		if err := proto.Unmarshal(data, &pbMsg); err != nil {
@@ -127,9 +117,8 @@ func decodeConnectionMessages(msgType protocol.MessageType, data []byte, target 
 			return true, err
 		}
 		*target.(*protocol.ConnectedPayload) = protocol.ConnectedPayload{
-			PlayerID:       pbMsg.PlayerId,
-			PlayerName:     pbMsg.PlayerName,
-			ReconnectToken: pbMsg.ReconnectToken,
+			PlayerID:   pbMsg.PlayerId,
+			PlayerName: pbMsg.PlayerName,
 		}
 		return true, nil
 	case protocol.MsgPong:

@@ -10,9 +10,6 @@ server:
   port: 1780
   # 最大并发连接数（0 表示无限制）
   max_connections: 10000
-  # 要求的最低客户端版本（如 "v1.2.0"），留空表示不限制。
-  # 低于此版本的客户端启动时会被强制自动升级，用于发布不兼容变更时保证版本一致。
-  min_client_version: "v0.5.3"
 
 redis:
   addr: "localhost:6379"
@@ -40,7 +37,7 @@ game:
   room_cleanup_delay: 30
 
 security:
-  # 默认仅允许同源浏览器和无 Origin 的终端；代理部署显式填写公网 HTTPS Origin。
+  # 默认仅允许携带 Origin 的同源浏览器；代理部署显式填写公网 HTTPS Origin。
   # 不支持通配符。例如 ["https://cards.example.com"]
   allowed_origins: []
   # 连接速率限制
@@ -55,15 +52,6 @@ security:
   message_limit:
     # 每秒最大消息数
     max_per_second: 20
-
-  # 聊天消息速率限制（per client）
-  chat_limit:
-    # 每秒最大聊天消息数
-    max_per_second: 1
-    # 每分钟最大聊天消息数
-    max_per_minute: 30
-    # 触发限流后的冷却时间（秒）
-    cooldown: 5
 
 bot:
   # 是否启用机器人（冷启动填充）

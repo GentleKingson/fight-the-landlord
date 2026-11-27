@@ -22,7 +22,6 @@ enumToType.set(ProtoMessageType.MSG_MAINTENANCE_STATUS, 'maintenance_pull');
 enumToType.set(ProtoMessageType.MSG_MAINTENANCE, 'maintenance_push');
 
 const PAYLOAD_NAMES: Record<string, string> = {
-  reconnect: 'ReconnectPayload',
   ping: 'PingPayload',
   join_room: 'JoinRoomPayload',
   bid: 'BidPayload',

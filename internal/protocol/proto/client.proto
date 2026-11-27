@@ -8,12 +8,6 @@ import "internal/protocol/proto/common.proto";
 
 // ========== 客户端请求消息 ==========
 
-// ReconnectPayload 断线重连请求
-message ReconnectPayload {
-  string token = 1;
-  string player_id = 2;
-}
-
 // PingPayload 心跳请求
 message PingPayload {
   int64 timestamp = 1;

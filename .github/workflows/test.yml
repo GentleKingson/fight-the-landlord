@@ -126,7 +126,7 @@ jobs:
 
       - name: Run tests
         # Keep compiled packages cached, but actually exercise Redis crash/recovery every run.
-        run: go test -tags=ci -race -count=1 -p 4 -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -race -count=1 -p 4 -coverprofile=coverage.out -covermode=atomic ./...
         env:
           DDZ_REDIS_INTEGRATION: "1"
 

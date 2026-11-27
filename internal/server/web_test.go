@@ -246,7 +246,7 @@ func TestWebPageWebSocketAudioAndImageIntegration(t *testing.T) {
 		}
 	}
 
-	wsConn, _ := dialIdentity(t, httpServer.URL, nil, true)
+	wsConn, _ := dialIdentity(t, httpServer.URL, nil)
 	defer func() { _ = wsConn.Close() }()
 	_, rawMsg, err := wsConn.ReadMessage()
 	require.NoError(t, err)

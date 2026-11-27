@@ -33,11 +33,10 @@ func TestNewMessage(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:    "with ChatPayload",
-			msgType: protocol.MsgChat,
-			payload: protocol.ChatPayload{
-				Content: "hello",
-				Scope:   "lobby",
+			name:    "with JoinRoomPayload",
+			msgType: protocol.MsgJoinRoom,
+			payload: protocol.JoinRoomPayload{
+				RoomCode: "123456",
 			},
 			expectError: false,
 		},

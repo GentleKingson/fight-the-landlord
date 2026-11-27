@@ -43,10 +43,6 @@ security:
     ban_duration: 120
   message_limit:
     max_per_second: 50
-  chat_limit:
-    max_per_second: 2
-    max_per_minute: 60
-    cooldown: 10
 `
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
@@ -151,13 +147,6 @@ func TestRateLimitConfig_BanDurationTime(t *testing.T) {
 
 	cfg := &RateLimitConfig{BanDuration: 120}
 	assert.Equal(t, 120*time.Second, cfg.BanDurationTime())
-}
-
-func TestChatLimitConfig_CooldownDuration(t *testing.T) {
-	t.Parallel()
-
-	cfg := &ChatLimitConfig{Cooldown: 10}
-	assert.Equal(t, 10*time.Second, cfg.CooldownDuration())
 }
 
 func TestLoadFromEnv(t *testing.T) {

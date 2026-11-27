@@ -25,9 +25,3 @@ type ClientInterface interface {
 	Close()
 	IsBot() bool
 }
-
-// ChatLimiter 聊天速率限制器接口
-type ChatLimiter interface {
-	AllowChat(clientID string) (allowed bool, reason string)
-	ClearRateLimit(clientID string)
-}

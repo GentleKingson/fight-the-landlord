@@ -16,9 +16,11 @@
 ## Docker 一键部署
 
 需要 Docker Compose v2。首次构建需要访问 npm、Go、PyTorch 和 GitHub。
+MARVEL 首次源码构建会下载并编译上游 C++ 依赖；Docker Desktop 至少分配 4 GB 内存。
+镜像默认使用单任务编译，可通过构建参数 `NANOPOKERLIB_BUILD_JOBS` 调整。
 
 1. 克隆本仓库并进入根目录。
-2. 将两个权重放到以下位置（本次工作区已放好，Git 不追踪权重）：
+2. 将两个权重放到以下位置（自行提供，Git 不追踪权重）：
 
    ```text
    douzero/models/landlord.pt
@@ -30,13 +32,15 @@
    ```bash
    chmod 755 douzero/models
    chmod 644 douzero/models/landlord.pt douzero/models/farmers.pt
-   docker compose -f compose.web.yml up -d --build
+   docker compose up -d --build
    ```
 
 4. 浏览器打开 `http://localhost:1780`，或 `http://服务器IP:1780`。
    可以创建房间邀请好友、快速匹配，或立即开始人机练习。
 
-此 Compose **从当前源码构建**，不使用尚未包含网页功能的旧版公开镜像。
+默认镜像包含网页和 Go 服务；上述命令从当前源码构建。使用已发布版本时，执行
+`docker compose pull && docker compose up -d`。`SERVER_IMAGE` 和 `AI_IMAGE` 可指定版本标签。
+升级现有部署前先阅读 [Web-Only 迁移说明](web-only-migration.md)，保留原项目名和数据卷。
 网页和 `/ws` 共用 Go 服务的端口。AI、Redis 不向宿主机暴露端口。
 模型目录以只读方式挂载；训练记录和 Redis 使用独立持久卷。
 普通 `docker compose down` 保留数据，`down -v` 会删除持久卷。
@@ -45,7 +49,7 @@
 
 ```bash
 SERVER_PORT=8080 SECURITY_ALLOWED_ORIGINS=https://ddz.example.com \
-COLLECT_TRAINING_DATA=true docker compose -f compose.web.yml up -d
+COLLECT_TRAINING_DATA=true docker compose up -d
 ```
 
 域名部署时，将 HTTPS 反向代理指向容器的 1780 端口，并支持 `/ws` 的 WebSocket Upgrade。
@@ -79,11 +83,11 @@ WEB_DIR=web/dist COLLECT_TRAINING_DATA=true go run ./cmd/server
 
 开发网页可在 `web/` 下执行 `npm run dev`，打开 `http://localhost:5174`。
 `web/.env.example` 中的 `VITE_WS_TARGET` 同时控制 `/ws` 和 `/api` 的开发代理。
-仅运行终端客户端时，可以不设置 `WEB_DIR`。
+由 Vite 或外部静态服务器托管网页时，可以不设置 `WEB_DIR`；WebSocket 握手仍须携带有效 Origin。
 
 网页大厅、牌桌和结算按当前可视窗口分配高度；手机竖屏使用两行手牌，横屏使用全宽手牌。
 中央显示当前需要跟的牌，左右保留玩家身份、余牌和叫抢／不出标记；完整动作可从“历史”查看。
-聊天、记牌器和历史按需展开，长列表与结算的“剩余手牌”在面板内滚动，主要操作保持可见。
+记牌器和历史按需展开，长列表与结算的“剩余手牌”在面板内滚动，主要操作保持可见。
 仅预览界面时，可在开发地址后加 `?demo=lobby`、`?demo=bidding`、`?demo=table` 或 `?demo=result`；
 演示状态不连接游戏服务，不能用来验证真实对局。`?demo=practice` 可预览人机头像。
 
@@ -155,15 +159,8 @@ Vite 将它们输出为 `dist/assets/` 下带内容哈希的 MP3 文件，由 Go
 Compose 中可在 AI 容器里读取：
 
 ```bash
-docker compose -f compose.web.yml exec ai python -c \
+docker compose exec ai python -c \
   "import urllib.request; print(urllib.request.urlopen('http://localhost:2021/health').read().decode())"
-```
-
-本次文件校验值：
-
-```text
-landlord.pt  00001ec5070a014011fa462e4263fcacd45498a485b3736de27b11b510290e31
-farmers.pt   fa1b43a1a0dc075527aa623f3929eb084796016e19f346e778c5f7362d70a0b7
 ```
 
 原有 ONNX 服务保持兼容，`AI_BACKEND=onnx`（默认）仍按原方式加载三个 `.onnx` 文件。
@@ -172,8 +169,8 @@ farmers.pt   fa1b43a1a0dc075527aa623f3929eb084796016e19f346e778c5f7362d70a0b7
 
 ## 真人牌局采集
 
-配置文件默认关闭采集；`compose.web.yml` 默认开启。启用时网页顶部显示采集说明。
-同一个服务端上的网页和终端对局都会记录；使用终端客户端的参与者也应知晓此服务启用了采集。
+配置文件默认关闭采集；`docker-compose.yml` 默认开启。启用时网页顶部显示采集说明。
+网页通过 `/api/config` 获取采集开关，并按实际配置显示提示。
 
 | 配置 | 用途 |
 | --- | --- |
@@ -208,7 +205,7 @@ farmers.pt   fa1b43a1a0dc075527aa623f3929eb084796016e19f346e778c5f7362d70a0b7
 
 ```bash
 mkdir -p data
-docker compose -f compose.web.yml cp server:/app/data/games ./data/games
+docker compose cp server:/app/data/games ./data/games
 python3 scripts/export-training.py data/games --output data/human-decisions.jsonl
 ```
 
@@ -225,10 +222,12 @@ python3 scripts/export-training.py data/games --output data/human-decisions.json
 ## 检查
 
 ```bash
-go test -race -tags ci ./...
+go test -race ./...
 cd web && npm test && npm run build
 npx playwright install chromium
 npm run test:e2e
+# 已启动真实服务时，覆盖人机关页续局及三位独立游客联机/刷新
+DDZ_LIVE_URL=http://localhost:1780 npm run test:e2e
 cd ../douzero
 .venv/bin/python -m unittest discover -s tests -v
 MARVEL_INTEGRATION=1 .venv/bin/python -m unittest discover -s tests -v
@@ -249,10 +248,9 @@ Web 的动画时长直接取协议字段，无需另改前端常量。
 本地播放结束仍等待正式通知，不能自行开放操作。发牌期间重连不重置服务端时间，底牌保持隐藏。
 地主取得底牌时的手牌更新不带发牌时间字段，不重复播放。
 
-`bid_turn` 新增 `bid_token`，Web 和 TUI 必须在 `bid` 请求中原样带回；服务端在会话锁内严格校验，
+`bid_turn` 新增 `bid_token`，Web 必须在 `bid` 请求中原样带回；服务端在会话锁内严格校验，
 拒绝缺失或过期令牌。令牌每次叫/抢通知更新，重连补发保留原令牌。
-**服务端、Web 与 TUI 应同步升级**：旧客户端不携带令牌，其叫牌请求会被拒绝。
-TUI 只显示发牌等待提示，收到正式通知后显示操作和倒计时，不增加牌背动画。
+**服务端与 Web 应同步升级**：旧客户端不携带令牌，其叫牌请求会被拒绝。
 
 Web 将完整手牌一次存入游戏状态，但画面从 0 张开始：牌背从中央牌堆飞向实际手牌槽位，
 每张落地后显示牌面并递增底部数量，最后一张在协议的结束时间落地。布局始终按完整手牌预留，

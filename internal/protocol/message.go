@@ -14,8 +14,7 @@ type MessageType string
 // 客户端 → 服务端 消息类型
 const (
 	// 连接操作
-	MsgReconnect MessageType = "reconnect" // 断线重连
-	MsgPing      MessageType = "ping"      // 心跳 ping
+	MsgPing MessageType = "ping" // 心跳 ping
 
 	// 房间操作
 	MsgCreateRoom    MessageType = "create_room" // 创建房间
@@ -40,7 +39,6 @@ const (
 	MsgGetRoomList          MessageType = "get_room_list"          // 获取房间列表
 	MsgGetOnlineCount       MessageType = "get_online_count"       // 获取在线人数
 	MsgGetMaintenanceStatus MessageType = "get_maintenance_status" // 获取维护状态
-	MsgChat                 MessageType = "chat"                   // 聊天消息
 )
 
 // 服务端 → 客户端 消息类型

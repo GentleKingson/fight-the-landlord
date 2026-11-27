@@ -50,12 +50,10 @@ func identityServer(t *testing.T, redis *miniredis.Miniredis) (gameServer *Serve
 	return s, httpServer
 }
 
-func dialIdentity(t *testing.T, url string, cookie *http.Cookie, browser bool) (*websocket.Conn, []*http.Cookie) {
+func dialIdentity(t *testing.T, url string, cookie *http.Cookie) (*websocket.Conn, []*http.Cookie) {
 	t.Helper()
 	headers := http.Header{}
-	if browser {
-		headers.Set("Origin", url)
-	}
+	headers.Set("Origin", url)
 	if cookie != nil {
 		headers.Set("Cookie", cookie.String())
 	}
@@ -97,9 +95,8 @@ func sendIdentityMessage(t *testing.T, conn *websocket.Conn, typ protocol.Messag
 func TestCookieIdentityRefreshReopenReplacementAndRestart(t *testing.T) {
 	redis := miniredis.RunT(t)
 	s, web := identityServer(t, redis)
-	first, cookies := dialIdentity(t, web.URL, nil, true)
+	first, cookies := dialIdentity(t, web.URL, nil)
 	connected := receivePayload[protocol.ConnectedPayload](t, first, protocol.MsgConnected)
-	require.Empty(t, connected.ReconnectToken)
 	require.Len(t, cookies, 1)
 	cookie := cookies[0]
 	require.True(t, cookie.HttpOnly)
@@ -110,7 +107,7 @@ func TestCookieIdentityRefreshReopenReplacementAndRestart(t *testing.T) {
 	sendIdentityMessage(t, first, protocol.MsgCreateRoom, nil)
 	created := receivePayload[protocol.RoomCreatedPayload](t, first, protocol.MsgRoomCreated)
 	// Refresh / second tab: cookie alone restores the same waiting room and evicts the previous connection.
-	second, _ := dialIdentity(t, web.URL, cookie, true)
+	second, _ := dialIdentity(t, web.URL, cookie)
 	receivePayload[protocol.ConnectedPayload](t, second, protocol.MsgConnected)
 	restored := receivePayload[protocol.ReconnectedPayload](t, second, protocol.MsgReconnected)
 	require.Equal(t, connected.PlayerID, restored.PlayerID)
@@ -126,7 +123,7 @@ func TestCookieIdentityRefreshReopenReplacementAndRestart(t *testing.T) {
 	// Closing every tab retains the room. A new tab has no sessionStorage state.
 	require.NoError(t, second.Close())
 	require.Eventually(t, func() bool { return !s.sessionManager.IsOnline(connected.PlayerID) }, time.Second, time.Millisecond)
-	third, _ := dialIdentity(t, web.URL, cookie, true)
+	third, _ := dialIdentity(t, web.URL, cookie)
 	got := receivePayload[protocol.ReconnectedPayload](t, third, protocol.MsgReconnected)
 	require.Equal(t, created.RoomCode, got.RoomCode)
 	require.NoError(t, s.leaderboard.RecordGameResult(context.Background(), connected.PlayerID, connected.PlayerName, true, true))
@@ -134,7 +131,7 @@ func TestCookieIdentityRefreshReopenReplacementAndRestart(t *testing.T) {
 	web.Close()
 	// Another server instance represents a restart: Redis identity/stats survive; rooms do not.
 	restarted, nextWeb := identityServer(t, redis)
-	fourth, _ := dialIdentity(t, nextWeb.URL, cookie, true)
+	fourth, _ := dialIdentity(t, nextWeb.URL, cookie)
 	got = receivePayload[protocol.ReconnectedPayload](t, fourth, protocol.MsgReconnected)
 	require.Equal(t, connected.PlayerID, got.PlayerID)
 	require.Equal(t, connected.PlayerName, got.PlayerName)
@@ -147,7 +144,7 @@ func TestCookieIdentityRefreshReopenReplacementAndRestart(t *testing.T) {
 func TestIdentityOriginRedisFailureAndTampering(t *testing.T) {
 	redis := miniredis.RunT(t)
 	s, web := identityServer(t, redis)
-	conn, cookies := dialIdentity(t, web.URL, nil, true)
+	conn, cookies := dialIdentity(t, web.URL, nil)
 	original := receivePayload[protocol.ConnectedPayload](t, conn, protocol.MsgConnected)
 	cookie := cookies[0]
 	for _, origin := range []string{"https://evil.example", "null", web.URL + "/path"} {
@@ -168,30 +165,17 @@ func TestIdentityOriginRedisFailureAndTampering(t *testing.T) {
 	require.Empty(t, failed.Cookies())
 	require.Equal(t, original.PlayerID, s.GetClientByID(original.PlayerID).GetID())
 	redis.SetError("")
-	recovered, _ := dialIdentity(t, web.URL, cookie, true)
+	recovered, _ := dialIdentity(t, web.URL, cookie)
 	require.Equal(t, original.PlayerID, receivePayload[protocol.ReconnectedPayload](t, recovered, protocol.MsgReconnected).PlayerID)
 	bad := *cookie
 	bad.Value = strings.Split(cookie.Value, ".")[0] + "." + strings.Repeat("0", 64)
-	tampered, _ := dialIdentity(t, web.URL, &bad, true)
+	tampered, _ := dialIdentity(t, web.URL, &bad)
 	require.NotEqual(t, original.PlayerID, receivePayload[protocol.ConnectedPayload](t, tampered, protocol.MsgConnected).PlayerID)
 	// Secure is explicitly configurable for TLS terminated by a reverse proxy.
 	s.config.Server.CookieSecure = true
-	secure, secureCookies := dialIdentity(t, web.URL, nil, true)
+	secure, secureCookies := dialIdentity(t, web.URL, nil)
 	require.True(t, secureCookies[0].Secure)
 	_ = secure.Close()
-}
-
-func TestTerminalReconnectUsesPersistentCredential(t *testing.T) {
-	redis := miniredis.RunT(t)
-	_, web := identityServer(t, redis)
-	first, _ := dialIdentity(t, web.URL, nil, false)
-	identity := receivePayload[protocol.ConnectedPayload](t, first, protocol.MsgConnected)
-	require.Len(t, identity.ReconnectToken, 64)
-	_, restarted := identityServer(t, redis)
-	next, _ := dialIdentity(t, restarted.URL, nil, false)
-	receivePayload[protocol.ConnectedPayload](t, next, protocol.MsgConnected)
-	sendIdentityMessage(t, next, protocol.MsgReconnect, protocol.ReconnectPayload{PlayerID: identity.PlayerID, Token: identity.ReconnectToken})
-	require.Equal(t, identity.PlayerID, receivePayload[protocol.ReconnectedPayload](t, next, protocol.MsgReconnected).PlayerID)
 }
 
 func TestQueuedMatchCannotUseReplacedConnection(t *testing.T) {
@@ -217,7 +201,7 @@ func TestCookieRecoversGameAndOfflineSettlementWithoutSecondGame(t *testing.T) {
 	ids := make([]string, 3)
 	for i := range sockets {
 		var handshakeCookies []*http.Cookie
-		sockets[i], handshakeCookies = dialIdentity(t, web.URL, nil, true)
+		sockets[i], handshakeCookies = dialIdentity(t, web.URL, nil)
 		identity := receivePayload[protocol.ConnectedPayload](t, sockets[i], protocol.MsgConnected)
 		ids[i], cookies[i] = identity.PlayerID, handshakeCookies[0]
 		players[i] = s.GetClientByID(identity.PlayerID)
@@ -231,7 +215,7 @@ func TestCookieRecoversGameAndOfflineSettlementWithoutSecondGame(t *testing.T) {
 	s.connectionMu.Unlock()
 	t.Cleanup(gs.StopAllTimers)
 	// Reload while cards are being dealt must receive only this player's cards.
-	reloaded, _ := dialIdentity(t, web.URL, cookies[0], true)
+	reloaded, _ := dialIdentity(t, web.URL, cookies[0])
 	state := receivePayload[protocol.ReconnectedPayload](t, reloaded, protocol.MsgReconnected)
 	require.Equal(t, r.Code, state.RoomCode)
 	require.Len(t, state.GameState.Hand, 17)
@@ -278,7 +262,7 @@ func TestCookieRecoversGameAndOfflineSettlementWithoutSecondGame(t *testing.T) {
 	}
 	require.Equal(t, "ended", gs.BuildGameStateDTO(ids[0], s.sessionManager).Phase)
 	require.Equal(t, r.Code, s.sessionManager.Snapshot(ids[0]).LastRoomCode)
-	returned, _ := dialIdentity(t, web.URL, cookies[0], true)
+	returned, _ := dialIdentity(t, web.URL, cookies[0])
 	resultState := receivePayload[protocol.ReconnectedPayload](t, returned, protocol.MsgReconnected)
 	require.Equal(t, r.Code, resultState.RoomCode)
 	require.Equal(t, "ended", resultState.GameState.Phase)
@@ -290,8 +274,31 @@ func TestCookieRecoversGameAndOfflineSettlementWithoutSecondGame(t *testing.T) {
 	}, time.Second, time.Millisecond)
 	sendIdentityMessage(t, returned, protocol.MsgCreateRoom, nil)
 	next := receivePayload[protocol.RoomCreatedPayload](t, returned, protocol.MsgRoomCreated)
-	another, _ := dialIdentity(t, web.URL, cookies[0], true)
+	another, _ := dialIdentity(t, web.URL, cookies[0])
 	restored := receivePayload[protocol.ReconnectedPayload](t, another, protocol.MsgReconnected)
 	require.Equal(t, next.RoomCode, restored.RoomCode)
 	require.Nil(t, restored.GameState)
+}
+
+func TestRejectedOriginDoesNotCreateIdentity(t *testing.T) {
+	redis := miniredis.RunT(t)
+	_, web := identityServer(t, redis)
+	for _, origin := range []string{"", "null", "https://evil.example", web.URL + "/path"} {
+		t.Run(origin, func(t *testing.T) {
+			headers := http.Header{}
+			if origin != "" {
+				headers.Set("Origin", origin)
+			}
+			conn, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(web.URL, "http")+"/ws", headers)
+			if conn != nil {
+				_ = conn.Close()
+			}
+			require.Error(t, err)
+			require.NotNil(t, resp)
+			_ = resp.Body.Close()
+			require.Equal(t, http.StatusForbidden, resp.StatusCode)
+			require.Empty(t, resp.Cookies())
+			require.Empty(t, redis.Keys())
+		})
+	}
 }

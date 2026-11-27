@@ -38,10 +38,10 @@ func TestSlowRedisQueryDoesNotBlockOtherIdentity(t *testing.T) {
 	for _, query := range []protocol.MessageType{protocol.MsgGetStats, protocol.MsgGetLeaderboard} {
 		t.Run(string(query), func(t *testing.T) {
 			s, web := identityServer(t, miniredis.RunT(t))
-			a, aCookies := dialIdentity(t, web.URL, nil, true)
+			a, aCookies := dialIdentity(t, web.URL, nil)
 			identityA := receivePayload[protocol.ReconnectedPayload](t, a, protocol.MsgReconnected)
 			oldA := s.GetClientByID(identityA.PlayerID).(*Client)
-			b, cookies := dialIdentity(t, web.URL, nil, true)
+			b, cookies := dialIdentity(t, web.URL, nil)
 			identityB := receivePayload[protocol.ReconnectedPayload](t, b, protocol.MsgReconnected)
 			require.NoError(t, s.leaderboard.RecordGameResultOnce(context.Background(), "seed", identityA.PlayerID, "A", true, true))
 			hook := &blockedStatsHook{key: "player:stats:" + identityA.PlayerID, entered: make(chan struct{}), release: make(chan struct{})}
@@ -69,14 +69,14 @@ func TestSlowRedisQueryDoesNotBlockOtherIdentity(t *testing.T) {
 			codec.PutMessage(msg)
 			sendIdentityMessage(t, b, protocol.MsgCreateRoom, nil)
 			created := receivePayload[protocol.RoomCreatedPayload](t, b, protocol.MsgRoomCreated)
-			next, _ := dialIdentity(t, web.URL, cookies[0], true)
+			next, _ := dialIdentity(t, web.URL, cookies[0])
 			restored := receivePayload[protocol.ReconnectedPayload](t, next, protocol.MsgReconnected)
 			require.Equal(t, created.RoomCode, restored.RoomCode)
 			require.NoError(t, next.Close())
 			require.Eventually(t, func() bool { return !s.sessionManager.IsOnline(identityB.PlayerID) }, time.Second, time.Millisecond)
 			// Even the querying identity can refresh while its old query is blocked.
 			// The displaced socket must still be unable to mutate room/match state.
-			replacement, _ := dialIdentity(t, web.URL, aCookies[0], true)
+			replacement, _ := dialIdentity(t, web.URL, aCookies[0])
 			recovered := receivePayload[protocol.ReconnectedPayload](t, replacement, protocol.MsgReconnected)
 			require.Equal(t, identityA.PlayerID, recovered.PlayerID)
 			oldA.handleMessage(codec.MustNewMessage(protocol.MsgCreateRoom, nil))

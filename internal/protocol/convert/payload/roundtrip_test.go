@@ -43,21 +43,6 @@ func TestPayloadRoundTrip_ClientRequests(t *testing.T) {
 		assert.Equal(t, original.Timestamp, result.Timestamp)
 	})
 
-	t.Run("Reconnect", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.ReconnectPayload{Token: "token123", PlayerID: "p1"}
-
-		data, err := EncodePayload(protocol.MsgReconnect, original)
-		require.NoError(t, err)
-
-		var result protocol.ReconnectPayload
-		err = DecodePayload(protocol.MsgReconnect, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.Token, result.Token)
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-	})
-
 	t.Run("JoinRoom", func(t *testing.T) {
 		t.Parallel()
 		original := protocol.JoinRoomPayload{RoomCode: "123456"}
@@ -123,9 +108,8 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 	t.Run("Connected", func(t *testing.T) {
 		t.Parallel()
 		original := protocol.ConnectedPayload{
-			PlayerID:       "p1",
-			PlayerName:     "Player1",
-			ReconnectToken: "token123",
+			PlayerID:   "p1",
+			PlayerName: "Player1",
 		}
 
 		data, err := EncodePayload(protocol.MsgConnected, original)
@@ -137,7 +121,6 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 
 		assert.Equal(t, original.PlayerID, result.PlayerID)
 		assert.Equal(t, original.PlayerName, result.PlayerName)
-		assert.Equal(t, original.ReconnectToken, result.ReconnectToken)
 	})
 
 	t.Run("Pong", func(t *testing.T) {

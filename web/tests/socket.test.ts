@@ -278,7 +278,7 @@ function audioSession() {
   const dispose = connectGameAudio(socket, audio as unknown as GameAudio);
   socket.connect();
   FakeSocket.latest.onopen?.();
-  FakeSocket.latest.receive('connected', { player_id: 'me', player_name: 'Me', reconnect_token: 'token' });
+  FakeSocket.latest.receive('connected', { player_id: 'me', player_name: 'Me' });
   useAppStore.setState({ roomCode: '123456', phase: 'bidding' });
   const receive = (type: string, payload: Record<string, unknown> = {}) => {
     FakeSocket.latest.receive(type, payload);

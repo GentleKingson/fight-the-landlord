@@ -12,41 +12,25 @@ import (
 
 const identityCookie = "ddz_guest"
 
-func (s *Server) authenticateTerminal(id, token string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	identity, err := s.redisStore.VerifyIdentity(ctx, id, token)
-	if err != nil {
-		return "", err
-	}
-	return identity.Name, nil
-}
-
 // resolveIdentity runs before upgrading. Redis failures never replace a valid cookie
 // or silently create a temporary in-memory identity.
-func (s *Server) resolveIdentity(r *http.Request) (identity *storage.GuestIdentity, token string, headers http.Header, created bool, err error) {
+func (s *Server) resolveIdentity(r *http.Request) (identity *storage.GuestIdentity, headers http.Header, created bool, err error) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
-	browser := r.Header.Get("Origin") != ""
-	if browser {
-		identity, err := s.verifyCookieIdentity(ctx, r)
-		if err != nil || identity != nil {
-			return identity, "", nil, false, err
-		}
+	identity, err = s.verifyCookieIdentity(ctx, r)
+	if err != nil || identity != nil {
+		return identity, nil, false, err
 	}
-	identity, token, err = s.redisStore.CreateIdentity(ctx, GenerateNickname(), s.config.Server.IdentityTTLDuration())
+	identity, token, err := s.redisStore.CreateIdentity(ctx, GenerateNickname(), s.config.Server.IdentityTTLDuration())
 	if err != nil {
-		return nil, "", nil, false, err
+		return nil, nil, false, err
 	}
 	headers = http.Header{}
-	if browser {
-		cookie := &http.Cookie{Name: identityCookie, Value: identity.ID + "." + token, Path: "/", HttpOnly: true,
-			SameSite: http.SameSiteStrictMode, Secure: s.config.Server.CookieSecure || r.TLS != nil,
-			MaxAge: int(s.config.Server.IdentityTTLDuration() / time.Second), Expires: identity.ExpiresAt}
-		headers.Add("Set-Cookie", cookie.String())
-		token = "" // Never expose a browser bearer credential to JavaScript.
-	}
-	return identity, token, headers, true, nil
+	cookie := &http.Cookie{Name: identityCookie, Value: identity.ID + "." + token, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, Secure: s.config.Server.CookieSecure || r.TLS != nil,
+		MaxAge: int(s.config.Server.IdentityTTLDuration() / time.Second), Expires: identity.ExpiresAt}
+	headers.Add("Set-Cookie", cookie.String())
+	return identity, headers, true, nil
 }
 
 // verifyCookieIdentity returns no identity and no error when a new guest is needed.

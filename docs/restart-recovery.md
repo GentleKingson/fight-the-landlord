@@ -6,7 +6,7 @@
 
 使用随代码更新的 Compose 配置：Redis 数据卷持久化，`appendonly yes`、`appendfsync always`。自行部署 Redis 时也必须设置这两项，并确认写入目录及磁盘可用。默认的 `appendfsync everysec` 可能在 Redis 崩溃时丢失最近约一秒已经确认的动作，不满足本阶段的确认保证。服务进程崩溃和 Redis 进程崩溃可恢复；磁盘/数据卷丢失需要恢复备份，备份之后的数据无法补回。
 
-Web 和终端需要同步更新。出牌/不出新增 `turn_token`，旧终端缺少令牌的动作会被拒绝；新版终端仍使用原有持久游客凭据。浏览器不接触身份凭据，也不会收到其他人的私有快照。
+Web 和服务端需要同步更新。出牌/不出通过 `turn_token` 校验回合。浏览器不接触身份凭据，也不会收到其他人的私有快照。
 
 ## 权威快照与确认顺序
 
@@ -61,9 +61,9 @@ sha256sum -c /secure/backups/ddz-2026-11-09.rdb.sha256
 ## 自动验证
 
 ```sh
-go test -race -tags ci ./...
+go test -race ./...
 # redis-server 与 redis-cli 在 PATH；测试使用临时目录和独立本地端口。
-DDZ_REDIS_INTEGRATION=1 go test -race -tags ci ./internal/server \
+DDZ_REDIS_INTEGRATION=1 go test -race ./internal/server \
   -run TestProcessCrashRedisRestartAndBackupRecovery -count=1 -v
 make lint
 cd web && npm test && npm run build

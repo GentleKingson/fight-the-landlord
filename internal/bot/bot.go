@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/palemoky/fight-the-landlord/internal/client"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -54,7 +53,7 @@ type botState struct {
 	bottomCards   []card.Card
 	recentPlays   [2]PlayRecord // [0]=最近一次出牌, [1]=上上次出牌
 	prevBid       *bool         // 叫地主阶段上一个玩家的决策（nil=尚无）
-	cardCounter   *client.CardCounter
+	cardCounter   *CardCounter
 
 	// DouZero 专用
 	douzeroPos  string         // "landlord"|"landlord_down"|"landlord_up"
@@ -72,7 +71,7 @@ func NewBotClient(engine DecisionEngine) *BotClient {
 		engine: engine,
 		state: botState{
 			cardCounts:  make(map[string]int),
-			cardCounter: client.NewCardCounter(),
+			cardCounter: NewCardCounter(),
 		},
 	}
 }
