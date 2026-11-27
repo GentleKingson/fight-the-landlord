@@ -18,19 +18,15 @@ type HandlerDeps struct {
 	Server         types.ServerInterface
 	RoomManager    *room.RoomManager
 	Matcher        *match.Matcher
-	ChatLimiter    types.ChatLimiter
 	Leaderboard    *storage.LeaderboardManager
-	Authenticate   func(playerID, token string) (string, error)
 	SessionManager *session.SessionManager
 }
 
 // Handler 消息处理器
 type Handler struct {
-	authenticate   func(playerID, token string) (string, error)
 	server         types.ServerInterface
 	roomManager    *room.RoomManager
 	matcher        *match.Matcher
-	chatLimiter    types.ChatLimiter
 	leaderboard    *storage.LeaderboardManager
 	sessionManager *session.SessionManager
 	handlers       map[protocol.MessageType]handlerFunc
@@ -45,10 +41,8 @@ type handlerFunc func(client types.ClientInterface, msg *protocol.Message)
 func NewHandler(deps HandlerDeps) *Handler {
 	h := &Handler{
 		server:         deps.Server,
-		authenticate:   deps.Authenticate,
 		roomManager:    deps.RoomManager,
 		matcher:        deps.Matcher,
-		chatLimiter:    deps.ChatLimiter,
 		leaderboard:    deps.Leaderboard,
 		sessionManager: deps.SessionManager,
 		games:          make(map[string]*session.GameSession),
@@ -111,8 +105,7 @@ func (h *Handler) removeGameSession(r *room.Room) {
 func (h *Handler) initHandlers() {
 	h.handlers = map[protocol.MessageType]handlerFunc{
 		// 连接操作
-		protocol.MsgPing:      h.handlePing,
-		protocol.MsgReconnect: h.handleReconnect,
+		protocol.MsgPing: h.handlePing,
 
 		// 房间操作
 		protocol.MsgCreateRoom: func(c types.ClientInterface, _ *protocol.Message) { h.handleCreateRoom(c) },
@@ -142,7 +135,6 @@ func (h *Handler) initHandlers() {
 		protocol.MsgGetRoomList:          func(c types.ClientInterface, _ *protocol.Message) { h.handleGetRoomList(c) },
 		protocol.MsgGetOnlineCount:       func(c types.ClientInterface, _ *protocol.Message) { h.handleGetOnlineCount(c) },
 		protocol.MsgGetMaintenanceStatus: func(c types.ClientInterface, _ *protocol.Message) { h.handleGetMaintenanceStatus(c) },
-		protocol.MsgChat:                 h.handleChat,
 	}
 }
 

@@ -96,10 +96,10 @@ func TestProcessCrashRedisRestartAndBackupRecovery(t *testing.T) {
 	redisDir, port := t.TempDir(), unusedRedisPort(t)
 	addr, killRedis := startRealRedis(t, redisDir, port, "yes")
 	url, killServer := startRecoveryProcess(t, addr)
-	first, cookies := dialIdentity(t, url, nil, true)
+	first, cookies := dialIdentity(t, url, nil)
 	identity := receivePayload[protocol.ReconnectedPayload](t, first, protocol.MsgReconnected)
 	for range 2 {
-		other, _ := dialIdentity(t, url, nil, true)
+		other, _ := dialIdentity(t, url, nil)
 		receivePayload[protocol.ReconnectedPayload](t, other, protocol.MsgReconnected)
 		sendIdentityMessage(t, other, protocol.MsgQuickMatch, nil)
 	}
@@ -121,7 +121,7 @@ func TestProcessCrashRedisRestartAndBackupRecovery(t *testing.T) {
 		}
 	}
 	checkRecovered := func(endpoint string) {
-		conn, _ := dialIdentity(t, endpoint, cookies[0], true)
+		conn, _ := dialIdentity(t, endpoint, cookies[0])
 		got := receivePayload[protocol.ReconnectedPayload](t, conn, protocol.MsgReconnected)
 		require.Equal(t, identity.PlayerID, got.PlayerID)
 		require.Equal(t, record.RoomCode, got.RoomCode)

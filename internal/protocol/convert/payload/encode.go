@@ -46,12 +46,6 @@ func EncodePayload(msgType protocol.MessageType, payload any) ([]byte, error) {
 // encodeClientRequests 编码客户端请求
 func encodeClientRequests(msgType protocol.MessageType, payload any) (proto.Message, bool) {
 	switch msgType {
-	case protocol.MsgReconnect:
-		p := payload.(protocol.ReconnectPayload)
-		return &pb.ReconnectPayload{
-			Token:    p.Token,
-			PlayerId: p.PlayerID,
-		}, true
 	case protocol.MsgPing:
 		p := payload.(protocol.PingPayload)
 		return &pb.PingPayload{
@@ -94,9 +88,8 @@ func encodeServerSystemMessages(msgType protocol.MessageType, payload any) (prot
 	case protocol.MsgConnected:
 		p := payload.(protocol.ConnectedPayload)
 		return &pb.ConnectedPayload{
-			PlayerId:       p.PlayerID,
-			PlayerName:     p.PlayerName,
-			ReconnectToken: p.ReconnectToken,
+			PlayerId:   p.PlayerID,
+			PlayerName: p.PlayerName,
 		}, true
 	case protocol.MsgReconnected:
 		p := payload.(protocol.ReconnectedPayload)

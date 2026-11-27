@@ -105,7 +105,7 @@ export function sortCards(cards: CardInfo[]): CardInfo[] {
 /**
  * Sorts a played hand copy so the largest rank groups (trio, four-of-a-kind,
  * or airplane body) appear first, followed by kickers in descending rank order.
- * Matches the terminal's `groupPlayedForDisplay` without mutating input data.
+ * Groups the combination body before its kickers without mutating input data.
  */
 export function sortPlayedCards(cards: CardInfo[]): CardInfo[] {
   const counts = new Map<number, number>();

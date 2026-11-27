@@ -26,7 +26,6 @@ repos:
         args:
           - --fix
           - --timeout=5m
-          - --build-tags=ci
           - --config=.golangci.yml
         pass_filenames: false
 

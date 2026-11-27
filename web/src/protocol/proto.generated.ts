@@ -31,7 +31,6 @@ export interface StaticPayloadCodec {
 
 export const MessageType = {
   MSG_UNKNOWN: 0,
-  MSG_RECONNECT: 1,
   MSG_PING: 2,
   MSG_CREATE_ROOM: 3,
   MSG_JOIN_ROOM: 4,
@@ -47,7 +46,6 @@ export const MessageType = {
   MSG_GET_ROOM_LIST: 14,
   MSG_GET_ONLINE_COUNT: 15,
   MSG_GET_MAINTENANCE_STATUS: 17,
-  MSG_CHAT: 16,
   MSG_CONNECTED: 100,
   MSG_RECONNECTED: 101,
   MSG_PONG: 102,
@@ -451,30 +449,6 @@ export function decodeRoomListItem(input: ProtoReader | Uint8Array, length?: num
   return out;
 }
 
-export function encodeReconnectPayload(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
-  wStr(w, 10, msg.token);
-  wStr(w, 18, msg.player_id);
-  return w;
-}
-
-export function decodeReconnectPayload(input: ProtoReader | Uint8Array, length?: number): MsgRecord {
-  const r = toReader(input);
-  const end = length === undefined ? r.len : r.pos + length;
-  const out: MsgRecord = {
-    token: '',
-    player_id: '',
-  };
-  while (r.pos < end) {
-    const tag = r.uint32();
-    switch (tag) {
-      case 10: out.token = r.string(); break;
-      case 18: out.player_id = r.string(); break;
-      default: r.skipType(tag & 7); break;
-    }
-  }
-  return out;
-}
-
 export function encodePingPayload(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
   wI64(w, 8, msg.timestamp);
   return w;
@@ -595,7 +569,6 @@ export function decodeGetLeaderboardPayload(input: ProtoReader | Uint8Array, len
 export function encodeConnectedPayload(msg: MsgRecord, w: ProtoWriter = Writer.create()): ProtoWriter {
   wStr(w, 10, msg.player_id);
   wStr(w, 18, msg.player_name);
-  wStr(w, 26, msg.reconnect_token);
   return w;
 }
 
@@ -605,14 +578,12 @@ export function decodeConnectedPayload(input: ProtoReader | Uint8Array, length?:
   const out: MsgRecord = {
     player_id: '',
     player_name: '',
-    reconnect_token: '',
   };
   while (r.pos < end) {
     const tag = r.uint32();
     switch (tag) {
       case 10: out.player_id = r.string(); break;
       case 18: out.player_name = r.string(); break;
-      case 26: out.reconnect_token = r.string(); break;
       default: r.skipType(tag & 7); break;
     }
   }
@@ -1359,7 +1330,6 @@ export const staticMessageCodecs: Record<string, StaticPayloadCodec> = {
   GameStateDTO: { encode: (m) => encodeGameStateDTO(m).finish(), decode: (b) => decodeGameStateDTO(b) },
   LeaderboardEntry: { encode: (m) => encodeLeaderboardEntry(m).finish(), decode: (b) => decodeLeaderboardEntry(b) },
   RoomListItem: { encode: (m) => encodeRoomListItem(m).finish(), decode: (b) => decodeRoomListItem(b) },
-  ReconnectPayload: { encode: (m) => encodeReconnectPayload(m).finish(), decode: (b) => decodeReconnectPayload(b) },
   PingPayload: { encode: (m) => encodePingPayload(m).finish(), decode: (b) => decodePingPayload(b) },
   JoinRoomPayload: { encode: (m) => encodeJoinRoomPayload(m).finish(), decode: (b) => decodeJoinRoomPayload(b) },
   BidPayload: { encode: (m) => encodeBidPayload(m).finish(), decode: (b) => decodeBidPayload(b) },

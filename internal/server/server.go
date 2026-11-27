@@ -22,9 +22,6 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
-// Version 是服务端版本号，可由 cmd/server 在启动时通过编译注入的值覆盖。
-var Version = "dev"
-
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -58,7 +55,6 @@ type Server struct {
 	originChecker  *OriginChecker
 	ipResolver     *ClientIPResolver
 	messageLimiter *MessageRateLimiter
-	chatLimiter    *ChatRateLimiter
 	ipFilter       *IPFilter
 
 	// 连接控制与 HTTP 服务
@@ -134,11 +130,6 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		originChecker:  NewOriginChecker(cfg.Security.AllowedOrigins),
 		ipResolver:     NewClientIPResolver(cfg.Security.TrustedProxies),
 		messageLimiter: NewMessageRateLimiter(cfg.Security.MessageLimit.MaxPerSecond),
-		chatLimiter: NewChatRateLimiter(
-			cfg.Security.ChatLimit.MaxPerSecond,
-			cfg.Security.ChatLimit.MaxPerMinute,
-			cfg.Security.ChatLimit.CooldownDuration(),
-		),
 		ipFilter:       NewIPFilter(),
 		maxConnections: cfg.Server.MaxConnections,
 		semaphore:      sem,
@@ -164,10 +155,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		Server:         s,
 		RoomManager:    s.roomManager,
 		Matcher:        s.matcher,
-		ChatLimiter:    s.chatLimiter,
 		Leaderboard:    s.leaderboard,
 		SessionManager: s.sessionManager,
-		Authenticate:   s.authenticateTerminal,
 	})
 
 	if botEngine == nil {
@@ -186,8 +175,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	s.recoveryCancel = recoveryCancel
 	go s.settlementLoop(recoveryCtx)
 
-	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 聊天限制=%d/s, 最大连接数=%d",
-		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Security.ChatLimit.MaxPerSecond, cfg.Server.MaxConnections)
+	log.Printf("🔒 安全配置: 连接限制=%d/s, 消息限制=%d/s, 最大连接数=%d",
+		cfg.Security.RateLimit.MaxPerSecond, cfg.Security.MessageLimit.MaxPerSecond, cfg.Server.MaxConnections)
 
 	return s, nil
 }

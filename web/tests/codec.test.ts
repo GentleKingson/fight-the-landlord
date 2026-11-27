@@ -93,22 +93,9 @@ describe('protocol codec', () => {
     expect(decoded.payload).toMatchObject({ turn_token: 'saved-turn' });
   });
 
-  it('decodes server-broadcast chat envelopes without throwing when TUI players chat', () => {
-    const decoded = decodeMessage(encodeMessage('chat', {
-      sender_id: 'p1',
-      sender_name: '青竹',
-      content: '你好',
-      scope: 'lobby',
-      time: 1
-    }));
-    expect(decoded.type).toBe('chat');
-    expect(decoded.payload).toEqual({
-      sender_id: 'p1',
-      sender_name: '青竹',
-      content: '你好',
-      scope: 'lobby',
-      time: 1
-    });
+  it.each([1, 16])('treats retired request number %s as unknown', (type) => {
+    const decoded = decodeMessage(new Uint8Array([8, type]));
+    expect(decoded.type).toBe('unknown');
   });
 
   it('preserves proto3 default values and 64-bit numeric fields with static codecs', () => {

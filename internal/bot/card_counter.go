@@ -1,4 +1,4 @@
-package client
+package bot
 
 import "github.com/palemoky/fight-the-landlord/internal/game/card"
 

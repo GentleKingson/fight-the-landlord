@@ -12,9 +12,8 @@ import (
 
 const (
 	// Redis key 前缀
-	roomKeyPrefix    = "room:"
-	sessionKeyPrefix = "session:"
-	matchQueueKey    = "match:queue"
+	roomKeyPrefix = "room:"
+	matchQueueKey = "match:queue"
 
 	// 房间数据过期时间
 	roomExpiration = 2 * time.Hour
@@ -159,64 +158,6 @@ func (rs *RedisStore) PopFromMatchQueue(ctx context.Context, count int) ([]strin
 	}
 
 	return players, nil
-}
-
-// --- 会话存储 ---
-
-// PlayerSessionData 玩家会话数据（用于 Redis 序列化）
-type PlayerSessionData struct {
-	PlayerID       string `json:"player_id"`
-	PlayerName     string `json:"player_name"`
-	ReconnectToken string `json:"token"`
-	RoomCode       string `json:"room_code"`
-	IsOnline       bool   `json:"is_online"`
-	DisconnectedAt int64  `json:"disconnected_at,omitempty"`
-}
-
-// SaveSession 保存会话到 Redis
-func (rs *RedisStore) SaveSession(ctx context.Context, session *PlayerSessionData) error {
-	data := map[string]any{
-		"player_id":   session.PlayerID,
-		"player_name": session.PlayerName,
-		"token":       session.ReconnectToken,
-		"room_code":   session.RoomCode,
-		"is_online":   session.IsOnline,
-	}
-
-	if session.DisconnectedAt != 0 {
-		data["disconnected_at"] = session.DisconnectedAt
-	}
-
-	key := sessionKeyPrefix + session.PlayerID
-	return rs.client.HSet(ctx, key, data).Err()
-}
-
-// LoadSession 从 Redis 加载会话
-func (rs *RedisStore) LoadSession(ctx context.Context, playerID string) (*PlayerSessionData, error) {
-	key := sessionKeyPrefix + playerID
-	data, err := rs.client.HGetAll(ctx, key).Result()
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-
-	session := &PlayerSessionData{
-		PlayerID:       data["player_id"],
-		PlayerName:     data["player_name"],
-		ReconnectToken: data["token"],
-		RoomCode:       data["room_code"],
-		IsOnline:       data["is_online"] == "1",
-	}
-
-	return session, nil
-}
-
-// DeleteSession 删除会话
-func (rs *RedisStore) DeleteSession(ctx context.Context, playerID string) error {
-	key := sessionKeyPrefix + playerID
-	return rs.client.Del(ctx, key).Err()
 }
 
 // --- 辅助方法 ---

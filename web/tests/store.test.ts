@@ -50,7 +50,6 @@ describe('app store message flow', () => {
       connected: false,
       playerId: '',
       playerName: '',
-      reconnectToken: '',
       phase: 'connecting',
       players: [],
       roomCode: '',
@@ -115,7 +114,7 @@ describe('app store message flow', () => {
   it('enters lobby after connected', () => {
     useAppStore.getState().handleMessage({
       type: MsgType.Connected,
-      payload: { player_id: 'p1', player_name: '青竹', reconnect_token: 'tok' }
+      payload: { player_id: 'p1', player_name: '青竹' }
     });
     expect(useAppStore.getState().phase).toBe('lobby');
     expect(useAppStore.getState().playerId).toBe('p1');
@@ -429,7 +428,7 @@ it('restores the counter, public history, current trick and timer after a fresh 
 
 it('cookie handshake keeps the practice replay preference during reload', () => {
   useAppStore.setState({ matchMode: 'practice' });
-  useAppStore.getState().handleMessage({ type: MsgType.Connected, payload: { player_id: 'me', player_name: 'Me', reconnect_token: '' } });
+  useAppStore.getState().handleMessage({ type: MsgType.Connected, payload: { player_id: 'me', player_name: 'Me' } });
   expect(useAppStore.getState().matchMode).toBe('practice');
 });
 
@@ -503,7 +502,7 @@ it('preserves active table view during same-identity Connected frame and converg
     seenPhases.push(state.phase);
   });
 
-  receive({ type: MsgType.Connected, payload: { player_id: 'me', player_name: 'Me', reconnect_token: '' } });
+  receive({ type: MsgType.Connected, payload: { player_id: 'me', player_name: 'Me' } });
   expect(useAppStore.getState().phase).toBe('playing');
   expect(useAppStore.getState().hand).toEqual(hand);
   expect(useAppStore.getState().drawer).toBe('counter');
@@ -531,7 +530,7 @@ it('preserves active table view during same-identity Connected frame and converg
   expect(useAppStore.getState().phase).toBe('playing');
 
   // If a subsequent reconnect finds the room expired, Reconnected converges cleanly to lobby.
-  receive({ type: MsgType.Connected, payload: { player_id: 'me', player_name: 'Me', reconnect_token: '' } });
+  receive({ type: MsgType.Connected, payload: { player_id: 'me', player_name: 'Me' } });
   expect(useAppStore.getState().phase).toBe('playing');
   receive({ type: MsgType.Reconnected, payload: { player_id: 'me', player_name: 'Me' } });
   expect(useAppStore.getState().phase).toBe('lobby');

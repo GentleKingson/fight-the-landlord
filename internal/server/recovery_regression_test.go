@@ -28,7 +28,7 @@ func connectedRecoveryGame(t *testing.T, mr *miniredis.Miniredis) (server *Serve
 	cookies := make([]*http.Cookie, 3)
 	players := make([]types.ClientInterface, 3)
 	for i := range players {
-		conn, handshake := dialIdentity(t, web.URL, nil, true)
+		conn, handshake := dialIdentity(t, web.URL, nil)
 		identity := receivePayload[protocol.ConnectedPayload](t, conn, protocol.MsgConnected)
 		cookies[i] = handshake[0]
 		players[i] = s.GetClientByID(identity.PlayerID)
@@ -107,7 +107,7 @@ func TestRecoveredSettlementCleanupPreservesNewActiveGame(t *testing.T) {
 	require.Equal(t, newRoom.Code, restarted.sessionManager.Snapshot(id).RoomCode)
 	require.Empty(t, restarted.sessionManager.Snapshot(id).LastRoomCode)
 
-	conn, _ := dialIdentity(t, web.URL, cookies[0], true)
+	conn, _ := dialIdentity(t, web.URL, cookies[0])
 	recovered := receivePayload[protocol.ReconnectedPayload](t, conn, protocol.MsgReconnected)
 	require.Equal(t, newRoom.Code, recovered.RoomCode)
 	require.Equal(t, expected.GameID, recovered.GameState.GameID)
@@ -138,7 +138,7 @@ func TestFailedRecoveryClosesSocketAndRetryRestoresSnapshot(t *testing.T) {
 			require.Eventually(t, func() bool { return s.GetClientByID(id) == nil }, time.Second, time.Millisecond)
 			failWrites.Store(true)
 
-			failed, _ := dialIdentity(t, web.URL, cookies[0], true)
+			failed, _ := dialIdentity(t, web.URL, cookies[0])
 			receivePayload[protocol.ConnectedPayload](t, failed, protocol.MsgConnected)
 			receivePayload[protocol.ErrorPayload](t, failed, protocol.MsgError)
 			_, _, err := failed.ReadMessage()
@@ -154,7 +154,7 @@ func TestFailedRecoveryClosesSocketAndRetryRestoresSnapshot(t *testing.T) {
 			})
 
 			failWrites.Store(false)
-			retry, _ := dialIdentity(t, web.URL, cookies[0], true)
+			retry, _ := dialIdentity(t, web.URL, cookies[0])
 			restored := receivePayload[protocol.ReconnectedPayload](t, retry, protocol.MsgReconnected)
 			require.Equal(t, r.Code, restored.RoomCode)
 			require.Equal(t, expected.GameID, restored.GameState.GameID)
@@ -168,10 +168,10 @@ func TestFailedRecoveryClosesSocketAndRetryRestoresSnapshot(t *testing.T) {
 
 func TestReconnectClearsMissingRoomAssociation(t *testing.T) {
 	s, web := identityServer(t, miniredis.RunT(t))
-	first, cookies := dialIdentity(t, web.URL, nil, true)
+	first, cookies := dialIdentity(t, web.URL, nil)
 	identity := receivePayload[protocol.ConnectedPayload](t, first, protocol.MsgConnected)
 	s.sessionManager.SetRoom(identity.PlayerID, "missing-room")
-	retry, _ := dialIdentity(t, web.URL, cookies[0], true)
+	retry, _ := dialIdentity(t, web.URL, cookies[0])
 	restored := receivePayload[protocol.ReconnectedPayload](t, retry, protocol.MsgReconnected)
 	require.Empty(t, restored.RoomCode)
 	require.Empty(t, s.sessionManager.Snapshot(identity.PlayerID).RoomCode)

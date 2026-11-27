@@ -1,62 +1,63 @@
 services:
-  # 游戏服务器
-  poker-server:
-    image: palemoky/fight-the-landlord:latest
-    container_name: poker-server
+  server:
+    image: ${SERVER_IMAGE:-palemoky/fight-the-landlord:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
-    stop_grace_period: ${GAME_SHUTDOWN_TIMEOUT:-30}m
-    stop_signal: SIGTERM
-    env_file: .env
-    environment:
-      - TZ=Asia/Shanghai
-      - DOUZERO_URL=http://douzero:2021
     ports:
       - "${SERVER_PORT:-1780}:1780"
+    environment:
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+      REDIS_DB: "${REDIS_DB:-0}"
+      BOT_ENABLED: "${BOT_ENABLED:-true}"
+      DOUZERO_ENABLED: "${DOUZERO_ENABLED:-true}"
+      DOUZERO_URL: http://ai:2021
+      NO_PROXY: localhost,127.0.0.1,ai,redis
+      COLLECT_TRAINING_DATA: "${COLLECT_TRAINING_DATA:-true}"
+      TRAINING_DATA_DIR: /app/data/games
+      SECURITY_ALLOWED_ORIGINS: "${SECURITY_ALLOWED_ORIGINS:-}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      IDENTITY_TTL: "${IDENTITY_TTL:-2592000}"
+      GAME_SHUTDOWN_TIMEOUT: "${GAME_SHUTDOWN_TIMEOUT:-30}"
+      GAME_OFFLINE_WAIT_TIMEOUT: "${GAME_OFFLINE_WAIT_TIMEOUT:-30}"
+      GAME_OFFLINE_ROOM_RETENTION: "${GAME_OFFLINE_ROOM_RETENTION:-600}"
+      GAME_RESULT_RETENTION: "${GAME_RESULT_RETENTION:-120}"
+    volumes:
+      - training-data:/app/data/games
     depends_on:
       redis:
         condition: service_healthy
-      douzero:
+      ai:
         condition: service_healthy
-    networks:
-      - poker-network
-
-  # DouZero 推理服务
-  douzero:
-    image: palemoky/fight-the-landlord-douzero:latest
-    container_name: poker-douzero
-    restart: unless-stopped
-    networks:
-      - poker-network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:2021/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-
-  # Redis 数据库
-  redis:
-    image: redis:8-alpine
-    container_name: poker-redis
+    stop_grace_period: ${GAME_SHUTDOWN_TIMEOUT:-30}m
+  ai:
+    image: ${AI_IMAGE:-palemoky/fight-the-landlord-douzero:latest}
+    build:
+      context: .
+      dockerfile: douzero/Dockerfile.marvel
     restart: unless-stopped
     volumes:
-      - redis-data:/data
+      - type: bind
+        source: ./douzero/models
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
     environment:
-      - REDISCLI_AUTH=${REDIS_PASSWORD:-}
-    command: redis-server --appendonly yes --appendfsync always --requirepass "${REDIS_PASSWORD:-}"
-    networks:
-      - poker-network
+      REDISCLI_AUTH: "${REDIS_PASSWORD:-}"
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always", "--requirepass", "${REDIS_PASSWORD:-}"]
+    volumes:
+      - redis-web:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
-      interval: 10s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
       timeout: 3s
-      retries: 3
-      start_period: 5s
-
-networks:
-  poker-network:
-    driver: bridge
-
+      retries: 5
 volumes:
-  redis-data:
-    driver: local
+  training-data:
+  redis-web:

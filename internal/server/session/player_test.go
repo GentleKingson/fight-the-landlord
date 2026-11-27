@@ -16,7 +16,6 @@ func TestSessionManager_CRUD(t *testing.T) {
 	assert.NotNil(t, session)
 	assert.Equal(t, "p1", session.PlayerID)
 	assert.Equal(t, "Player1", session.PlayerName)
-	assert.NotEmpty(t, session.ReconnectToken)
 	assert.True(t, session.IsOnline)
 
 	// Get by ID
@@ -24,13 +23,10 @@ func TestSessionManager_CRUD(t *testing.T) {
 	assert.Equal(t, session, s1)
 
 	// Get by Token
-	s2 := sm.GetSessionByToken(session.ReconnectToken)
-	assert.Equal(t, session, s2)
 
 	// Delete
 	sm.DeleteSession("p1")
 	assert.Nil(t, sm.GetSession("p1"))
-	assert.Nil(t, sm.GetSessionByToken(session.ReconnectToken))
 }
 
 func TestSessionManager_OnlineStatus(t *testing.T) {
@@ -51,72 +47,6 @@ func TestSessionManager_OnlineStatus(t *testing.T) {
 	sm.SetOnline("p1")
 	assert.True(t, sm.GetSession("p1").IsOnline)
 	assert.True(t, sm.GetSession("p1").DisconnectedAt.IsZero())
-}
-
-func TestSessionManager_CanReconnect(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		setup     func(sm *SessionManager) (token, playerID string)
-		wantAllow bool
-	}{
-		{
-			name: "valid reconnection (online)",
-			setup: func(sm *SessionManager) (string, string) {
-				session := sm.CreateSession("p1", "Player1")
-				return session.ReconnectToken, "p1"
-			},
-			wantAllow: true,
-		},
-		{
-			name: "valid reconnection (offline)",
-			setup: func(sm *SessionManager) (string, string) {
-				session := sm.CreateSession("p1", "Player1")
-				sm.SetOffline("p1")
-				return session.ReconnectToken, "p1"
-			},
-			wantAllow: true,
-		},
-		{
-			name: "invalid token",
-			setup: func(sm *SessionManager) (string, string) {
-				sm.CreateSession("p1", "Player1")
-				return "wrong-token", "p1"
-			},
-			wantAllow: false,
-		},
-		{
-			name: "wrong player ID",
-			setup: func(sm *SessionManager) (string, string) {
-				session := sm.CreateSession("p1", "Player1")
-				return session.ReconnectToken, "p2"
-			},
-			wantAllow: false,
-		},
-		{
-			name: "expired session",
-			setup: func(sm *SessionManager) (string, string) {
-				session := sm.CreateSession("p1", "Player1")
-				sm.SetOffline("p1")
-				// Hack internal time for testing
-				session.mu.Lock()
-				session.DisconnectedAt = time.Now().Add(-3 * time.Minute)
-				session.mu.Unlock()
-				return session.ReconnectToken, "p1"
-			},
-			wantAllow: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			sm := NewSessionManager()
-			token, playerID := tt.setup(sm)
-			assert.Equal(t, tt.wantAllow, sm.CanReconnect(token, playerID))
-		})
-	}
 }
 
 func TestSessionManager_SetRoom(t *testing.T) {
@@ -193,24 +123,6 @@ func TestSessionManager_IsOnline(t *testing.T) {
 			assert.Equal(t, tt.wantOnline, sm.IsOnline(tt.playerID))
 		})
 	}
-}
-
-func TestSessionManager_GetSessionByToken_EdgeCases(t *testing.T) {
-	t.Parallel()
-
-	t.Run("invalid token returns nil", func(t *testing.T) {
-		t.Parallel()
-		sm := NewSessionManager()
-		sm.CreateSession("p1", "Player1")
-		assert.Nil(t, sm.GetSessionByToken("invalid-token"))
-	})
-
-	t.Run("empty token returns nil", func(t *testing.T) {
-		t.Parallel()
-		sm := NewSessionManager()
-		sm.CreateSession("p1", "Player1")
-		assert.Nil(t, sm.GetSessionByToken(""))
-	})
 }
 
 func TestSessionManager_SetOffline_NonExistent(t *testing.T) {

@@ -29,9 +29,6 @@ const (
 	defaultRateLimitPerMinute    = 60
 	defaultBanDuration           = 60
 	defaultMessageLimitPerSecond = 20
-	defaultChatLimitPerSecond    = 1
-	defaultChatLimitPerMinute    = 30
-	defaultChatCooldown          = 5
 )
 
 // Config 服务端配置
@@ -61,9 +58,6 @@ type ServerConfig struct {
 	Host           string `yaml:"host"`
 	Port           int    `yaml:"port"`
 	MaxConnections int    `yaml:"max_connections"` // 最大并发连接数，0 表示无限制
-	// 要求的最低客户端版本（如 v1.2.0），空表示不限制。
-	// 低于该版本的客户端启动时会被强制自动升级，用于发布不兼容变更时保证版本一致。
-	MinClientVersion string `yaml:"min_client_version"`
 }
 
 // RedisConfig Redis 配置
@@ -94,7 +88,6 @@ type SecurityConfig struct {
 	TrustedProxies []string           `yaml:"trusted_proxies"` // 可信反向代理 IP 或 CIDR 列表
 	RateLimit      RateLimitConfig    `yaml:"rate_limit"`      // 连接速率限制
 	MessageLimit   MessageLimitConfig `yaml:"message_limit"`   // 消息速率限制
-	ChatLimit      ChatLimitConfig    `yaml:"chat_limit"`      // 聊天消息速率限制
 }
 
 // RateLimitConfig 连接速率限制配置
@@ -107,13 +100,6 @@ type RateLimitConfig struct {
 // MessageLimitConfig 消息速率限制配置
 type MessageLimitConfig struct {
 	MaxPerSecond int `yaml:"max_per_second"` // 每秒最大消息数
-}
-
-// ChatLimitConfig 聊天消息速率限制配置
-type ChatLimitConfig struct {
-	MaxPerSecond int `yaml:"max_per_second"` // 每秒最大聊天消息数
-	MaxPerMinute int `yaml:"max_per_minute"` // 每分钟最大聊天消息数
-	Cooldown     int `yaml:"cooldown"`       // 冷却时间（秒）
 }
 
 // Duration 方法
@@ -165,10 +151,6 @@ func (c *GameConfig) OfflineWaitTimeoutDuration() time.Duration {
 
 func (c *RateLimitConfig) BanDurationTime() time.Duration {
 	return time.Duration(c.BanDuration) * time.Second
-}
-
-func (c *ChatLimitConfig) CooldownDuration() time.Duration {
-	return time.Duration(c.Cooldown) * time.Second
 }
 
 // Load 加载配置文件
@@ -224,7 +206,6 @@ func loadFromEnv(cfg *Config) {
 	getEnvStr("SERVER_HOST", &cfg.Server.Host)
 	getEnvInt("SERVER_PORT", &cfg.Server.Port)
 	getEnvInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
-	getEnvStr("SERVER_MIN_CLIENT_VERSION", &cfg.Server.MinClientVersion)
 
 	getEnvInt("IDENTITY_TTL", &cfg.Server.IdentityTTL)
 	if v := os.Getenv("COOKIE_SECURE"); v != "" {
@@ -317,9 +298,6 @@ func setDefaults(cfg *Config) {
 	setDefaultInt(&cfg.Security.RateLimit.MaxPerMinute, defaultRateLimitPerMinute)
 	setDefaultInt(&cfg.Security.RateLimit.BanDuration, defaultBanDuration)
 	setDefaultInt(&cfg.Security.MessageLimit.MaxPerSecond, defaultMessageLimitPerSecond)
-	setDefaultInt(&cfg.Security.ChatLimit.MaxPerSecond, defaultChatLimitPerSecond)
-	setDefaultInt(&cfg.Security.ChatLimit.MaxPerMinute, defaultChatLimitPerMinute)
-	setDefaultInt(&cfg.Security.ChatLimit.Cooldown, defaultChatCooldown)
 
 	// Bot
 	setDefaultInt(&cfg.BOT.BotFillTimeout, 30)

@@ -47,11 +47,10 @@ func GenerateNickname() string {
 
 // Client 代表一个连接的玩家
 type Client struct {
-	browser bool   // Browser identities are authenticated exclusively by HttpOnly cookies.
-	ID      string // 玩家唯一 ID
-	Name    string // 玩家昵称
-	RoomID  string // 当前所在房间 ID
-	IP      string // 客户端 IP 地址
+	ID     string // 玩家唯一 ID
+	Name   string // 玩家昵称
+	RoomID string // 当前所在房间 ID
+	IP     string // 客户端 IP 地址
 
 	server *Server
 	conn   *websocket.Conn
@@ -162,12 +161,6 @@ func (c *Client) ReadPump() {
 }
 
 func (c *Client) handleMessage(msg *protocol.Message) {
-	if msg.Type == protocol.MsgReconnect {
-		if !c.browser {
-			c.server.handler.Handle(c, msg)
-		}
-		return
-	}
 	// These queries do not change room, game, or identity state. Validate the
 	// socket under the lifecycle lock, but never keep that lock across Redis I/O.
 	// Replacement closes the old client's send channel, suppressing late replies.

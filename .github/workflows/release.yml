@@ -18,112 +18,18 @@ env:
   IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
 
 jobs:
-  # 构建客户端二进制文件
-  build-client:
-    name: Build client binaries
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up QEMU
-        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Go
-        if: matrix.goos != 'linux' || matrix.goarch != 'arm64'
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Install Linux amd64 dependencies
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev libgl1-mesa-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libxxf86vm-dev
-
-      - name: Build Linux ARM64 in Docker
-        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
-        env:
-          DEFAULT_SERVER: ${{ vars.DEFAULT_SERVER || 'localhost:1780' }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          GO_VERSION=$(grep '^go ' go.mod | awk '{print $2}')
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD:/src" -w /src \
-            -e CGO_ENABLED=1 \
-            -e GIT_CEILING_DIRECTORIES=/src \
-            golang:${GO_VERSION}-trixie \
-            sh -c "
-              apt-get update && \
-              apt-get install -y libasound2-dev libgl1-mesa-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev libxxf86vm-dev && \
-              go build -buildvcs=false -trimpath -ldflags='-s -w -X main.version=${VERSION} -X main.defaultServer=${DEFAULT_SERVER}' \
-                -o fight-the-landlord-linux-arm64 ./cmd/client
-            "
-          sha256sum fight-the-landlord-linux-arm64 > fight-the-landlord-linux-arm64.sha256
-
-      - name: Build other platforms
-        if: matrix.goos != 'linux' || matrix.goarch != 'arm64'
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          DEFAULT_SERVER: ${{ vars.DEFAULT_SERVER || 'localhost:1780' }}
-        run: |
-          # Set output filename
-          if [ "$GOOS" = "windows" ]; then
-            OUTPUT="fight-the-landlord-${GOOS}-${GOARCH}.exe"
-          else
-            OUTPUT="fight-the-landlord-${GOOS}-${GOARCH}"
-          fi
-
-          # Set CGO for Linux amd64
-          if [ "$GOOS" = "linux" ]; then
-            export CGO_ENABLED=1
-          else
-            export CGO_ENABLED=0
-          fi
-
-          # Build with optimizations
-          go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }} -X main.defaultServer=${DEFAULT_SERVER}" \
-            -o "$OUTPUT" ./cmd/client
-
-          # Create checksum
-          sha256sum "$OUTPUT" > "$OUTPUT.sha256"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            fight-the-landlord-*
-            *.sha256
-
   # 创建 GitHub Release
   create-release:
     name: Create GitHub release
-    needs: build-client
+    needs: build-and-push-docker
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-          pattern: binary-*
-          merge-multiple: true
 
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/*
           generate_release_notes: true
           draft: false
           prerelease: false
@@ -149,14 +55,6 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 拉取 DHI Community 基础镜像需登录 dhi.io（个人账号 + PAT 即可）
-      - name: Log in to DHI registry
-        uses: docker/login-action@v4
-        with:
-          registry: dhi.io
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -164,7 +62,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
 
       - name: Extract DouZero metadata
         id: meta_douzero
@@ -173,11 +71,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-douzero
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Extract Go Version
-        id: go_version
-        run: echo "version=$(grep '^go ' go.mod | awk '{print $2}')" >> $GITHUB_OUTPUT
+            type=raw,value=latest
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
@@ -191,14 +85,12 @@ jobs:
           cache-to: type=gha,mode=max,compression=zstd
           provenance: true
           sbom: true
-          build-args: |
-            VERSION=${{ github.ref_name }}
-            GO_VERSION=${{ steps.go_version.outputs.version }}
 
       - name: Build and push DouZero Docker image
         uses: docker/build-push-action@v7
         with:
-          context: ./douzero
+          context: .
+          file: douzero/Dockerfile.marvel
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta_douzero.outputs.tags }}

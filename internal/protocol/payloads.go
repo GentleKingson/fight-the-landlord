@@ -2,12 +2,6 @@ package protocol
 
 // --- 客户端请求 Payloads ---
 
-// ReconnectPayload 断线重连请求
-type ReconnectPayload struct {
-	Token    string `json:"token"`     // 重连令牌
-	PlayerID string `json:"player_id"` // 玩家 ID
-}
-
 // PingPayload 心跳请求
 type PingPayload struct {
 	Timestamp int64 `json:"timestamp"` // 客户端时间戳（毫秒）
@@ -41,9 +35,8 @@ type GetLeaderboardPayload struct {
 
 // ConnectedPayload 连接成功响应
 type ConnectedPayload struct {
-	PlayerID       string `json:"player_id"`
-	PlayerName     string `json:"player_name"`
-	ReconnectToken string `json:"reconnect_token"` // 重连令牌
+	PlayerID   string `json:"player_id"`
+	PlayerName string `json:"player_name"`
 }
 
 // ReconnectedPayload 重连成功响应
@@ -315,16 +308,6 @@ type RoomListItem struct {
 	RoomCode    string `json:"room_code"`
 	PlayerCount int    `json:"player_count"`
 	MaxPlayers  int    `json:"max_players"`
-}
-
-// ChatPayload 聊天消息
-type ChatPayload struct {
-	SenderID   string `json:"sender_id,omitempty"`   // 发送者 ID (服务端填充)
-	SenderName string `json:"sender_name,omitempty"` // 发送者名字 (服务端填充)
-	Content    string `json:"content"`               // 消息内容
-	Scope      string `json:"scope"`                 // "lobby" or "room"
-	Time       int64  `json:"time,omitempty"`        // 发送时间 (服务端填充)
-	IsSystem   bool   `json:"is_system,omitempty"`   // 是否是系统消息
 }
 
 // --- 通用数据结构 ---

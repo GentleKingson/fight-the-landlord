@@ -46,7 +46,7 @@ func main() {
 			matches := enumPattern.FindStringSubmatch(line)
 			if len(matches) > 1 {
 				enumName := matches[1]
-				// MSG_RECONNECT -> reconnect
+				// MSG_PING -> ping
 				stringName := strings.ToLower(enumName)
 				protoName := "MSG_" + enumName
 

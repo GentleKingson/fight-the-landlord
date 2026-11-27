@@ -1,5 +1,4 @@
 export const MsgType = {
-  Reconnect: 'reconnect',
   Ping: 'ping',
   CreateRoom: 'create_room',
   JoinRoom: 'join_room',
@@ -173,7 +172,7 @@ export interface ReconnectedPayload {
 }
 
 export interface IncomingPayloadMap {
-  connected: { player_id: string; player_name: string; reconnect_token: string };
+  connected: { player_id: string; player_name: string };
   reconnected: ReconnectedPayload;
   pong: { client_timestamp: number; server_timestamp: number };
   online_count: { count: number };

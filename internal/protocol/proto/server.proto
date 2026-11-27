@@ -12,7 +12,8 @@ import "internal/protocol/proto/common.proto";
 message ConnectedPayload {
   string player_id = 1;
   string player_name = 2;
-  string reconnect_token = 3;
+  reserved 3;
+  reserved "reconnect_token";
 }
 
 // ReconnectedPayload 重连成功响应

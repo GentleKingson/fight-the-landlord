@@ -39,7 +39,7 @@ python3 -m unittest discover -s scripts/tests -v
 GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
   bash scripts/install-ci-lint.sh v2.11.1 "$PWD/bin/ci-lint"
 bin/ci-lint/golangci-lint config verify
-bin/ci-lint/golangci-lint run --build-tags=ci
+bin/ci-lint/golangci-lint run
 ```
 
 再次执行安装命令应显示 `Using cached golangci-lint`。安装阶段失败时

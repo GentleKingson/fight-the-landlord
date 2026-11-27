@@ -64,12 +64,10 @@ func TestReconnectRetiresQueueAndTemporarySessions(t *testing.T) {
 		next := NewClient(s, nil)
 		s.registerClient(next)
 		temporary := s.sessionManager.CreateSession(next.GetID(), next.GetName())
-		s.handler.Handle(next, codec.MustNewMessage(protocol.MsgReconnect, protocol.ReconnectPayload{PlayerID: original.PlayerID, Token: original.ReconnectToken}))
+		s.RestoreClient(original.PlayerID, next, func() { s.handler.RestoreConnection(next, original.PlayerID) })
 		require.Zero(t, s.matcher.GetQueueLength())
 		require.Nil(t, s.GetClientByID(temporary.PlayerID))
 		require.Nil(t, s.sessionManager.Snapshot(temporary.PlayerID))
-		require.Nil(t, s.sessionManager.GetSessionByToken(temporary.ReconnectToken))
-		require.True(t, s.sessionManager.CanReconnect(original.ReconnectToken, original.PlayerID))
 		// A delayed old callback must not remove the new client's queue entry.
 		s.matcher.AddToQueue(next)
 		current.handleDisconnect()
@@ -116,7 +114,7 @@ func TestDisconnectAndReplacementSerializeOfflineEffects(t *testing.T) {
 	next := NewClient(s, nil)
 	s.registerClient(next)
 	s.sessionManager.CreateSession(next.GetID(), next.GetName())
-	s.handler.Handle(next, codec.MustNewMessage(protocol.MsgReconnect, protocol.ReconnectPayload{PlayerID: saved.PlayerID, Token: saved.ReconnectToken}))
+	s.RestoreClient(saved.PlayerID, next, func() { s.handler.RestoreConnection(next, saved.PlayerID) })
 	<-disconnected
 	require.Same(t, next, s.GetClientByID(saved.PlayerID))
 	require.True(t, s.sessionManager.IsOnline(saved.PlayerID))

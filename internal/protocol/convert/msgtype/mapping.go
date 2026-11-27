@@ -9,7 +9,6 @@ import (
 // stringToProtoMap 字符串到 protobuf 枚举的映射表
 var stringToProtoMap = map[string]pb.MessageType{
 	"unknown": pb.MessageType_MSG_UNKNOWN,
-	"reconnect": pb.MessageType_MSG_RECONNECT,
 	"ping": pb.MessageType_MSG_PING,
 	"create_room": pb.MessageType_MSG_CREATE_ROOM,
 	"join_room": pb.MessageType_MSG_JOIN_ROOM,
@@ -25,7 +24,6 @@ var stringToProtoMap = map[string]pb.MessageType{
 	"get_room_list": pb.MessageType_MSG_GET_ROOM_LIST,
 	"get_online_count": pb.MessageType_MSG_GET_ONLINE_COUNT,
 	"get_maintenance_status": pb.MessageType_MSG_GET_MAINTENANCE_STATUS,
-	"chat": pb.MessageType_MSG_CHAT,
 	"connected": pb.MessageType_MSG_CONNECTED,
 	"reconnected": pb.MessageType_MSG_RECONNECTED,
 	"pong": pb.MessageType_MSG_PONG,
@@ -63,7 +61,6 @@ var stringToProtoMap = map[string]pb.MessageType{
 // protoToStringMap protobuf 枚举到字符串的映射表
 var protoToStringMap = map[pb.MessageType]string{
 	pb.MessageType_MSG_UNKNOWN: "unknown",
-	pb.MessageType_MSG_RECONNECT: "reconnect",
 	pb.MessageType_MSG_PING: "ping",
 	pb.MessageType_MSG_CREATE_ROOM: "create_room",
 	pb.MessageType_MSG_JOIN_ROOM: "join_room",
@@ -79,7 +76,6 @@ var protoToStringMap = map[pb.MessageType]string{
 	pb.MessageType_MSG_GET_ROOM_LIST: "get_room_list",
 	pb.MessageType_MSG_GET_ONLINE_COUNT: "get_online_count",
 	pb.MessageType_MSG_GET_MAINTENANCE_STATUS: "get_maintenance_status",
-	pb.MessageType_MSG_CHAT: "chat",
 	pb.MessageType_MSG_CONNECTED: "connected",
 	pb.MessageType_MSG_RECONNECTED: "reconnected",
 	pb.MessageType_MSG_PONG: "pong",

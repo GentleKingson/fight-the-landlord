@@ -28,7 +28,6 @@ interface ConnectionSlice {
   sessionReplaced: boolean;
   playerId: string;
   playerName: string;
-  reconnectToken: string;
   latency: number;
   error: string;
   maintenance: boolean;
@@ -180,7 +179,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionReplaced: false,
   playerId: '',
   playerName: '',
-  reconnectToken: '',
   latency: 0,
   error: '',
   maintenance: false,
@@ -266,7 +264,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     switch (message.type) {
       case MsgType.Connected: {
-        const payload = message.payload as { player_id: string; player_name: string; reconnect_token: string };
+        const payload = message.payload as { player_id: string; player_name: string };
         const samePlayer = Boolean(state.playerId) && state.playerId === payload.player_id;
         const keepResult = state.phase === 'game_over' && Boolean(state.endSnapshot) && samePlayer;
         const keepActiveView =
@@ -284,8 +282,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           error: '',
           phase: keepActiveView ? state.phase : 'lobby',
           playerId: payload.player_id,
-          playerName: payload.player_name,
-          reconnectToken: payload.reconnect_token
+          playerName: payload.player_name
         });
         break;
       }

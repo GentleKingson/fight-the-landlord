@@ -22,7 +22,7 @@ help:  ## Show this help message
 lint:  ## Run linter
 	@echo "$(BLUE)Running linter...$(NC)"
 	golangci-lint config verify
-	golangci-lint run --build-tags=ci
+	golangci-lint run
 
 ## test: 运行所有测试
 test:  ## Run all tests
