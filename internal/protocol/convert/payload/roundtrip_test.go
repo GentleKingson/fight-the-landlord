@@ -28,132 +28,31 @@ func TestDecodePayload_EmptyData(t *testing.T) {
 func TestPayloadRoundTrip_ClientRequests(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Ping", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PingPayload{Timestamp: 1234567890}
+	assertRoundTrip(t, "Ping", protocol.MsgPing, protocol.PingPayload{Timestamp: 1234567890})
 
-		data, err := EncodePayload(protocol.MsgPing, original)
-		require.NoError(t, err)
-		require.NotNil(t, data)
+	assertRoundTrip(t, "JoinRoom", protocol.MsgJoinRoom, protocol.JoinRoomPayload{RoomCode: "123456"})
 
-		var result protocol.PingPayload
-		err = DecodePayload(protocol.MsgPing, data, &result)
-		require.NoError(t, err)
+	assertRoundTrip(t, "Bid", protocol.MsgBid, protocol.BidPayload{Bid: true})
 
-		assert.Equal(t, original.Timestamp, result.Timestamp)
-	})
+	assertRoundTrip(t, "PlayCards", protocol.MsgPlayCards, protocol.PlayCardsPayload{Cards: []protocol.CardInfo{{Suit: 0, Rank: 3, Color: 0}}})
 
-	t.Run("JoinRoom", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.JoinRoomPayload{RoomCode: "123456"}
-
-		data, err := EncodePayload(protocol.MsgJoinRoom, original)
-		require.NoError(t, err)
-
-		var result protocol.JoinRoomPayload
-		err = DecodePayload(protocol.MsgJoinRoom, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.RoomCode, result.RoomCode)
-	})
-
-	t.Run("Bid", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.BidPayload{Bid: true}
-
-		data, err := EncodePayload(protocol.MsgBid, original)
-		require.NoError(t, err)
-
-		var result protocol.BidPayload
-		err = DecodePayload(protocol.MsgBid, data, &result)
-		require.NoError(t, err)
-
-		assert.True(t, result.Bid)
-	})
-
-	t.Run("PlayCards", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayCardsPayload{Cards: []protocol.CardInfo{{Suit: 0, Rank: 3, Color: 0}}}
-
-		data, err := EncodePayload(protocol.MsgPlayCards, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayCardsPayload
-		err = DecodePayload(protocol.MsgPlayCards, data, &result)
-		require.NoError(t, err)
-
-		require.Len(t, result.Cards, 1)
-		assert.Equal(t, 3, result.Cards[0].Rank)
-	})
-
-	t.Run("GetLeaderboard", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.GetLeaderboardPayload{Type: "total", Offset: 0, Limit: 10}
-
-		data, err := EncodePayload(protocol.MsgGetLeaderboard, original)
-		require.NoError(t, err)
-
-		var result protocol.GetLeaderboardPayload
-		err = DecodePayload(protocol.MsgGetLeaderboard, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.Type, result.Type)
-		assert.Equal(t, original.Limit, result.Limit)
-	})
+	assertRoundTrip(t, "GetLeaderboard", protocol.MsgGetLeaderboard, protocol.GetLeaderboardPayload{Type: "total", Offset: 0, Limit: 10})
 }
 
 func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Connected", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.ConnectedPayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-		}
-
-		data, err := EncodePayload(protocol.MsgConnected, original)
-		require.NoError(t, err)
-
-		var result protocol.ConnectedPayload
-		err = DecodePayload(protocol.MsgConnected, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.Equal(t, original.PlayerName, result.PlayerName)
+	assertRoundTrip(t, "Connected", protocol.MsgConnected, protocol.ConnectedPayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
 	})
 
-	t.Run("Pong", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PongPayload{
-			ClientTimestamp: 1234567890,
-			ServerTimestamp: 1234567891,
-		}
-
-		data, err := EncodePayload(protocol.MsgPong, original)
-		require.NoError(t, err)
-
-		var result protocol.PongPayload
-		err = DecodePayload(protocol.MsgPong, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.ClientTimestamp, result.ClientTimestamp)
-		assert.Equal(t, original.ServerTimestamp, result.ServerTimestamp)
+	assertRoundTrip(t, "Pong", protocol.MsgPong, protocol.PongPayload{
+		ClientTimestamp: 1234567890,
+		ServerTimestamp: 1234567891,
 	})
 
-	t.Run("OnlineCount", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.OnlineCountPayload{Count: 42}
-
-		data, err := EncodePayload(protocol.MsgOnlineCount, original)
-		require.NoError(t, err)
-
-		var result protocol.OnlineCountPayload
-		err = DecodePayload(protocol.MsgOnlineCount, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.Count, result.Count)
-	})
+	assertRoundTrip(t, "OnlineCount", protocol.MsgOnlineCount, protocol.OnlineCountPayload{Count: 42})
 
 	t.Run("StartGame empty payload", func(t *testing.T) {
 		t.Parallel()
@@ -162,564 +61,236 @@ func TestPayloadRoundTrip_ServerResponses(t *testing.T) {
 		assert.Nil(t, data)
 	})
 
-	t.Run("RoomCreated", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.RoomCreatedPayload{
-			RoomCode: "123456",
-			OwnerID:  "p1",
-			Player: protocol.PlayerInfo{
-				ID:     "p1",
-				Name:   "Player1",
-				Seat:   0,
-				Online: true,
-			},
-		}
-
-		data, err := EncodePayload(protocol.MsgRoomCreated, original)
-		require.NoError(t, err)
-
-		var result protocol.RoomCreatedPayload
-		err = DecodePayload(protocol.MsgRoomCreated, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.RoomCode, result.RoomCode)
-		assert.Equal(t, original.OwnerID, result.OwnerID)
-		assert.Equal(t, original.Player.ID, result.Player.ID)
-		assert.True(t, result.Player.Online)
+	assertRoundTrip(t, "RoomCreated", protocol.MsgRoomCreated, protocol.RoomCreatedPayload{
+		RoomCode: "123456",
+		OwnerID:  "p1",
+		Player: protocol.PlayerInfo{
+			ID:     "p1",
+			Name:   "Player1",
+			Seat:   0,
+			Online: true,
+		},
 	})
 
-	t.Run("RoomJoined", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.RoomJoinedPayload{
-			RoomCode: "123456",
-			OwnerID:  "p1",
-			Player: protocol.PlayerInfo{
-				ID:     "p2",
-				Name:   "Player2",
-				Seat:   1,
-				Online: true,
-			},
-			Players: []protocol.PlayerInfo{
-				{ID: "p1", Name: "Player1", Seat: 0, Online: true},
-				{ID: "p2", Name: "Player2", Seat: 1, Online: true},
-			},
-		}
-
-		data, err := EncodePayload(protocol.MsgRoomJoined, original)
-		require.NoError(t, err)
-
-		var result protocol.RoomJoinedPayload
-		err = DecodePayload(protocol.MsgRoomJoined, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.RoomCode, result.RoomCode)
-		assert.Equal(t, original.OwnerID, result.OwnerID)
-		assert.Equal(t, original.Player, result.Player)
-		assert.Equal(t, original.Players, result.Players)
+	assertRoundTrip(t, "RoomJoined", protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
+		RoomCode: "123456",
+		OwnerID:  "p1",
+		Player: protocol.PlayerInfo{
+			ID:     "p2",
+			Name:   "Player2",
+			Seat:   1,
+			Online: true,
+		},
+		Players: []protocol.PlayerInfo{
+			{ID: "p1", Name: "Player1", Seat: 0, Online: true},
+			{ID: "p2", Name: "Player2", Seat: 1, Online: true},
+		},
 	})
 
-	t.Run("PlayerLeft", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayerLeftPayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-			OwnerID:    "p2",
-		}
-
-		data, err := EncodePayload(protocol.MsgPlayerLeft, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayerLeftPayload
-		err = DecodePayload(protocol.MsgPlayerLeft, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.Equal(t, original.PlayerName, result.PlayerName)
-		assert.Equal(t, original.OwnerID, result.OwnerID)
+	assertRoundTrip(t, "PlayerLeft", protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
+		OwnerID:    "p2",
 	})
 
-	t.Run("Error", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.ErrorPayload{
-			Code:        404,
-			Message:     "Not found",
-			RequestType: protocol.MsgJoinRoom,
-		}
-
-		data, err := EncodePayload(protocol.MsgError, original)
-		require.NoError(t, err)
-
-		var result protocol.ErrorPayload
-		err = DecodePayload(protocol.MsgError, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.Code, result.Code)
-		assert.Equal(t, original.Message, result.Message)
-		assert.Equal(t, original.RequestType, result.RequestType)
+	assertRoundTrip(t, "Error", protocol.MsgError, protocol.ErrorPayload{
+		Code:        404,
+		Message:     "Not found",
+		RequestType: protocol.MsgJoinRoom,
 	})
 }
 
 func TestPayloadRoundTrip_GameMessages(t *testing.T) {
 	t.Parallel()
 
-	t.Run("GameStart", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.GameStartPayload{
-			Players: []protocol.PlayerInfo{
-				{ID: "p1", Name: "Player1", Seat: 0},
-				{ID: "p2", Name: "Player2", Seat: 1, IsBot: true},
-				{ID: "p3", Name: "Player3", Seat: 2},
-			},
-		}
-
-		data, err := EncodePayload(protocol.MsgGameStart, original)
-		require.NoError(t, err)
-
-		var result protocol.GameStartPayload
-		err = DecodePayload(protocol.MsgGameStart, data, &result)
-		require.NoError(t, err)
-
-		require.Len(t, result.Players, 3)
-		assert.Equal(t, original.Players, result.Players)
+	assertRoundTrip(t, "GameStart", protocol.MsgGameStart, protocol.GameStartPayload{
+		Players: []protocol.PlayerInfo{
+			{ID: "p1", Name: "Player1", Seat: 0},
+			{ID: "p2", Name: "Player2", Seat: 1, IsBot: true},
+			{ID: "p3", Name: "Player3", Seat: 2},
+		},
 	})
 
-	t.Run("DealCards", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.DealCardsPayload{
-			Cards: []protocol.CardInfo{
-				{Suit: 0, Rank: 3, Color: 0},
-				{Suit: 1, Rank: 14, Color: 1},
-			},
-			BottomCards: []protocol.CardInfo{
-				{Suit: 2, Rank: 5, Color: 0},
-			},
-		}
-
-		data, err := EncodePayload(protocol.MsgDealCards, original)
-		require.NoError(t, err)
-
-		var result protocol.DealCardsPayload
-		err = DecodePayload(protocol.MsgDealCards, data, &result)
-		require.NoError(t, err)
-
-		assert.Len(t, result.Cards, 2)
-		assert.Len(t, result.BottomCards, 1)
+	assertRoundTrip(t, "DealCards", protocol.MsgDealCards, protocol.DealCardsPayload{
+		Cards: []protocol.CardInfo{
+			{Suit: 0, Rank: 3, Color: 0},
+			{Suit: 1, Rank: 14, Color: 1},
+		},
+		BottomCards: []protocol.CardInfo{
+			{Suit: 2, Rank: 5, Color: 0},
+		},
 	})
 
-	t.Run("BidTurn", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.BidTurnPayload{
-			PlayerID:   "p1",
-			Timeout:    30,
-			IsGrab:     true,
-			Multiplier: 2,
-		}
-
-		data, err := EncodePayload(protocol.MsgBidTurn, original)
-		require.NoError(t, err)
-
-		var result protocol.BidTurnPayload
-		err = DecodePayload(protocol.MsgBidTurn, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.Equal(t, original.Timeout, result.Timeout)
-		assert.True(t, result.IsGrab)
-		assert.Equal(t, 2, result.Multiplier)
+	assertRoundTrip(t, "BidTurn", protocol.MsgBidTurn, protocol.BidTurnPayload{
+		PlayerID:   "p1",
+		Timeout:    30,
+		IsGrab:     true,
+		Multiplier: 2,
 	})
 
-	t.Run("BidResult", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.BidResultPayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-			Bid:        true,
-			IsGrab:     true,
-			Multiplier: 4,
-		}
-
-		data, err := EncodePayload(protocol.MsgBidResult, original)
-		require.NoError(t, err)
-
-		var result protocol.BidResultPayload
-		err = DecodePayload(protocol.MsgBidResult, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.True(t, result.Bid)
-		assert.True(t, result.IsGrab)
-		assert.Equal(t, 4, result.Multiplier)
+	assertRoundTrip(t, "BidResult", protocol.MsgBidResult, protocol.BidResultPayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
+		Bid:        true,
+		IsGrab:     true,
+		Multiplier: 4,
 	})
 
-	t.Run("Landlord", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.LandlordPayload{
-			PlayerID:    "p1",
-			PlayerName:  "Player1",
-			BottomCards: []protocol.CardInfo{{Suit: 0, Rank: 3, Color: 0}},
-			Multiplier:  3,
-		}
-
-		data, err := EncodePayload(protocol.MsgLandlord, original)
-		require.NoError(t, err)
-
-		var result protocol.LandlordPayload
-		err = DecodePayload(protocol.MsgLandlord, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.Len(t, result.BottomCards, 1)
-		assert.Equal(t, 3, result.Multiplier)
+	assertRoundTrip(t, "Landlord", protocol.MsgLandlord, protocol.LandlordPayload{
+		PlayerID:    "p1",
+		PlayerName:  "Player1",
+		BottomCards: []protocol.CardInfo{{Suit: 0, Rank: 3, Color: 0}},
+		Multiplier:  3,
 	})
 
-	t.Run("PlayTurn", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayTurnPayload{
-			PlayerID: "p1",
-			Timeout:  30,
-			MustPlay: true,
-			CanBeat:  false,
-		}
-
-		data, err := EncodePayload(protocol.MsgPlayTurn, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayTurnPayload
-		err = DecodePayload(protocol.MsgPlayTurn, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.True(t, result.MustPlay)
-		assert.False(t, result.CanBeat)
+	assertRoundTrip(t, "PlayTurn", protocol.MsgPlayTurn, protocol.PlayTurnPayload{
+		PlayerID: "p1",
+		Timeout:  30,
+		MustPlay: true,
+		CanBeat:  false,
 	})
 
-	t.Run("CardPlayed", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.CardPlayedPayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-			Cards:      []protocol.CardInfo{{Suit: 0, Rank: 3, Color: 0}},
-			CardsLeft:  16,
-			HandType:   "Single",
-		}
-
-		data, err := EncodePayload(protocol.MsgCardPlayed, original)
-		require.NoError(t, err)
-
-		var result protocol.CardPlayedPayload
-		err = DecodePayload(protocol.MsgCardPlayed, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.Equal(t, 16, result.CardsLeft)
-		assert.Equal(t, "Single", result.HandType)
+	assertRoundTrip(t, "CardPlayed", protocol.MsgCardPlayed, protocol.CardPlayedPayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
+		Cards:      []protocol.CardInfo{{Suit: 0, Rank: 3, Color: 0}},
+		CardsLeft:  16,
+		HandType:   "Single",
 	})
 
-	t.Run("PlayerPass", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayerPassPayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-		}
-
-		data, err := EncodePayload(protocol.MsgPlayerPass, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayerPassPayload
-		err = DecodePayload(protocol.MsgPlayerPass, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
+	assertRoundTrip(t, "PlayerPass", protocol.MsgPlayerPass, protocol.PlayerPassPayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
 	})
 
-	t.Run("GameOver", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.GameOverPayload{
-			WinnerID:   "p1",
-			WinnerName: "Player1",
-			IsLandlord: true,
-			PlayerHands: []protocol.PlayerHand{
-				{PlayerID: "p1", PlayerName: "Player1", Cards: []protocol.CardInfo{}},
-			},
-			Multiplier: 8,
-			Scores: []protocol.PlayerScore{
-				{PlayerID: "p1", PlayerName: "Player1", IsLandlord: true, Score: 16},
-				{PlayerID: "p2", PlayerName: "Player2", IsLandlord: false, Score: -8},
-			},
-		}
-
-		data, err := EncodePayload(protocol.MsgGameOver, original)
-		require.NoError(t, err)
-
-		var result protocol.GameOverPayload
-		err = DecodePayload(protocol.MsgGameOver, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.WinnerID, result.WinnerID)
-		assert.True(t, result.IsLandlord)
-		assert.Len(t, result.PlayerHands, 1)
-		assert.Equal(t, 8, result.Multiplier)
-		require.Len(t, result.Scores, 2)
-		assert.Equal(t, 16, result.Scores[0].Score)
-		assert.True(t, result.Scores[0].IsLandlord)
-		assert.Equal(t, -8, result.Scores[1].Score)
+	assertRoundTrip(t, "GameOver", protocol.MsgGameOver, protocol.GameOverPayload{
+		WinnerID:   "p1",
+		WinnerName: "Player1",
+		IsLandlord: true,
+		PlayerHands: []protocol.PlayerHand{
+			{PlayerID: "p1", PlayerName: "Player1", Cards: []protocol.CardInfo{}},
+		},
+		Multiplier: 8,
+		Scores: []protocol.PlayerScore{
+			{PlayerID: "p1", PlayerName: "Player1", IsLandlord: true, Score: 16},
+			{PlayerID: "p2", PlayerName: "Player2", IsLandlord: false, Score: -8},
+		},
 	})
 }
 
 func TestPayloadRoundTrip_RoomMessages(t *testing.T) {
 	t.Parallel()
 
-	t.Run("RoomJoined", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.RoomJoinedPayload{
-			RoomCode: "123456",
-			Player:   protocol.PlayerInfo{ID: "p1", Name: "Player1"},
-			Players: []protocol.PlayerInfo{
-				{ID: "p1", Name: "Player1"},
-				{ID: "p2", Name: "Player2"},
-			},
-		}
-
-		data, err := EncodePayload(protocol.MsgRoomJoined, original)
-		require.NoError(t, err)
-
-		var result protocol.RoomJoinedPayload
-		err = DecodePayload(protocol.MsgRoomJoined, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.RoomCode, result.RoomCode)
-		assert.Len(t, result.Players, 2)
+	assertRoundTrip(t, "RoomJoined", protocol.MsgRoomJoined, protocol.RoomJoinedPayload{
+		RoomCode: "123456",
+		Player:   protocol.PlayerInfo{ID: "p1", Name: "Player1"},
+		Players: []protocol.PlayerInfo{
+			{ID: "p1", Name: "Player1"},
+			{ID: "p2", Name: "Player2"},
+		},
 	})
 
-	t.Run("PlayerJoined", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayerJoinedPayload{
-			Player: protocol.PlayerInfo{ID: "p2", Name: "Player2", Seat: 1},
-		}
-
-		data, err := EncodePayload(protocol.MsgPlayerJoined, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayerJoinedPayload
-		err = DecodePayload(protocol.MsgPlayerJoined, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, "p2", result.Player.ID)
+	assertRoundTrip(t, "PlayerJoined", protocol.MsgPlayerJoined, protocol.PlayerJoinedPayload{
+		Player: protocol.PlayerInfo{ID: "p2", Name: "Player2", Seat: 1},
 	})
 
-	t.Run("PlayerLeft", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayerLeftPayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-		}
-
-		data, err := EncodePayload(protocol.MsgPlayerLeft, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayerLeftPayload
-		err = DecodePayload(protocol.MsgPlayerLeft, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
+	assertRoundTrip(t, "PlayerLeft", protocol.MsgPlayerLeft, protocol.PlayerLeftPayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
 	})
 
-	t.Run("PlayerReady", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayerReadyPayload{
-			PlayerID: "p1",
-			Ready:    true,
-		}
-
-		data, err := EncodePayload(protocol.MsgPlayerReady, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayerReadyPayload
-		err = DecodePayload(protocol.MsgPlayerReady, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.True(t, result.Ready)
+	assertRoundTrip(t, "PlayerReady", protocol.MsgPlayerReady, protocol.PlayerReadyPayload{
+		PlayerID: "p1",
+		Ready:    true,
 	})
 }
 
 func TestPayloadRoundTrip_StatsAndLeaderboard(t *testing.T) {
 	t.Parallel()
 
-	t.Run("StatsResult", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.StatsResultPayload{
-			PlayerID:      "p1",
-			PlayerName:    "Player1",
-			TotalGames:    100,
-			Wins:          60,
-			Losses:        40,
-			WinRate:       0.6,
-			LandlordGames: 50,
-			LandlordWins:  30,
-			FarmerGames:   50,
-			FarmerWins:    30,
-			Score:         1000,
-			Rank:          5,
-			CurrentStreak: 3,
-			MaxWinStreak:  10,
-		}
-
-		data, err := EncodePayload(protocol.MsgStatsResult, original)
-		require.NoError(t, err)
-
-		var result protocol.StatsResultPayload
-		err = DecodePayload(protocol.MsgStatsResult, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.TotalGames, result.TotalGames)
-		assert.Equal(t, original.WinRate, result.WinRate)
-		assert.Equal(t, original.Score, result.Score)
+	assertRoundTrip(t, "StatsResult", protocol.MsgStatsResult, protocol.StatsResultPayload{
+		PlayerID:      "p1",
+		PlayerName:    "Player1",
+		TotalGames:    100,
+		Wins:          60,
+		Losses:        40,
+		WinRate:       0.6,
+		LandlordGames: 50,
+		LandlordWins:  30,
+		FarmerGames:   50,
+		FarmerWins:    30,
+		Score:         1000,
+		Rank:          5,
+		CurrentStreak: 3,
+		MaxWinStreak:  10,
 	})
 
-	t.Run("LeaderboardResult", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.LeaderboardResultPayload{
-			Type: "total",
-			Entries: []protocol.LeaderboardEntry{
-				{Rank: 1, PlayerID: "p1", PlayerName: "Champion", Score: 1000},
-				{Rank: 2, PlayerID: "p2", PlayerName: "Runner", Score: 900},
-			},
-		}
-
-		data, err := EncodePayload(protocol.MsgLeaderboardResult, original)
-		require.NoError(t, err)
-
-		var result protocol.LeaderboardResultPayload
-		err = DecodePayload(protocol.MsgLeaderboardResult, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, "total", result.Type)
-		assert.Len(t, result.Entries, 2)
+	assertRoundTrip(t, "LeaderboardResult", protocol.MsgLeaderboardResult, protocol.LeaderboardResultPayload{
+		Type: "total",
+		Entries: []protocol.LeaderboardEntry{
+			{Rank: 1, PlayerID: "p1", PlayerName: "Champion", Score: 1000},
+			{Rank: 2, PlayerID: "p2", PlayerName: "Runner", Score: 900},
+		},
 	})
 
-	t.Run("RoomListResult", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.RoomListResultPayload{
-			Rooms: []protocol.RoomListItem{
-				{RoomCode: "123456", PlayerCount: 2, MaxPlayers: 3},
-			},
-		}
-
-		data, err := EncodePayload(protocol.MsgRoomListResult, original)
-		require.NoError(t, err)
-
-		var result protocol.RoomListResultPayload
-		err = DecodePayload(protocol.MsgRoomListResult, data, &result)
-		require.NoError(t, err)
-
-		assert.Len(t, result.Rooms, 1)
-		assert.Equal(t, "123456", result.Rooms[0].RoomCode)
+	assertRoundTrip(t, "RoomListResult", protocol.MsgRoomListResult, protocol.RoomListResultPayload{
+		Rooms: []protocol.RoomListItem{
+			{RoomCode: "123456", PlayerCount: 2, MaxPlayers: 3},
+		},
 	})
 }
 
 func TestPayloadRoundTrip_ReconnectionMessages(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Reconnected with GameState", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.ReconnectedPayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-			RoomCode:   "123456",
-			GameState: &protocol.GameStateDTO{
-				Phase: "playing",
-				Players: []protocol.PlayerInfo{
-					{ID: "p1", Name: "Player1", Seat: 0, IsLandlord: true},
-					{ID: "p2", Name: "Player2", Seat: 1, IsBot: true},
-				},
-				Hand:        []protocol.CardInfo{{Suit: 0, Rank: 3}},
-				BottomCards: []protocol.CardInfo{{Suit: 1, Rank: 5}},
-				CurrentTurn: "p1",
-				MustPlay:    true,
+	assertRoundTrip(t, "Reconnected with GameState", protocol.MsgReconnected, protocol.ReconnectedPayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
+		RoomCode:   "123456",
+		GameState: &protocol.GameStateDTO{
+			Phase:       "playing",
+			BidHistory:  []protocol.PublicBid{},
+			PublicPlays: []protocol.PublicPlay{},
+			LastPlayed:  []protocol.CardInfo{},
+			Players: []protocol.PlayerInfo{
+				{ID: "p1", Name: "Player1", Seat: 0, IsLandlord: true},
+				{ID: "p2", Name: "Player2", Seat: 1, IsBot: true},
 			},
-		}
-
-		data, err := EncodePayload(protocol.MsgReconnected, original)
-		require.NoError(t, err)
-
-		var result protocol.ReconnectedPayload
-		err = DecodePayload(protocol.MsgReconnected, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, "p1", result.PlayerID)
-		assert.Equal(t, "123456", result.RoomCode)
-		require.NotNil(t, result.GameState)
-		assert.Equal(t, "playing", result.GameState.Phase)
-		assert.Equal(t, original.GameState.Players, result.GameState.Players)
-		assert.True(t, result.GameState.MustPlay)
+			Hand:        []protocol.CardInfo{{Suit: 0, Rank: 3}},
+			BottomCards: []protocol.CardInfo{{Suit: 1, Rank: 5}},
+			CurrentTurn: "p1",
+			MustPlay:    true,
+		},
 	})
 
-	t.Run("PlayerOffline", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayerOfflinePayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-			Timeout:    120,
-		}
-
-		data, err := EncodePayload(protocol.MsgPlayerOffline, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayerOfflinePayload
-		err = DecodePayload(protocol.MsgPlayerOffline, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
-		assert.Equal(t, 120, result.Timeout)
+	assertRoundTrip(t, "PlayerOffline", protocol.MsgPlayerOffline, protocol.PlayerOfflinePayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
+		Timeout:    120,
 	})
 
-	t.Run("PlayerOnline", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.PlayerOnlinePayload{
-			PlayerID:   "p1",
-			PlayerName: "Player1",
-		}
-
-		data, err := EncodePayload(protocol.MsgPlayerOnline, original)
-		require.NoError(t, err)
-
-		var result protocol.PlayerOnlinePayload
-		err = DecodePayload(protocol.MsgPlayerOnline, data, &result)
-		require.NoError(t, err)
-
-		assert.Equal(t, original.PlayerID, result.PlayerID)
+	assertRoundTrip(t, "PlayerOnline", protocol.MsgPlayerOnline, protocol.PlayerOnlinePayload{
+		PlayerID:   "p1",
+		PlayerName: "Player1",
 	})
 }
 
 func TestPayloadRoundTrip_MaintenanceMessages(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Maintenance", func(t *testing.T) {
+	assertRoundTrip(t, "Maintenance", protocol.MsgMaintenancePush, protocol.MaintenancePayload{Maintenance: true})
+
+	assertRoundTrip(t, "MaintenanceStatus", protocol.MsgMaintenancePull, protocol.MaintenanceStatusPayload{Maintenance: false})
+}
+
+func assertRoundTrip[T any](t *testing.T, name string, messageType protocol.MessageType, original T) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
 		t.Parallel()
-		original := protocol.MaintenancePayload{Maintenance: true}
-
-		data, err := EncodePayload(protocol.MsgMaintenancePush, original)
+		data, err := EncodePayload(messageType, original)
 		require.NoError(t, err)
-
-		var result protocol.MaintenancePayload
-		err = DecodePayload(protocol.MsgMaintenancePush, data, &result)
-		require.NoError(t, err)
-
-		assert.True(t, result.Maintenance)
-	})
-
-	t.Run("MaintenanceStatus", func(t *testing.T) {
-		t.Parallel()
-		original := protocol.MaintenanceStatusPayload{Maintenance: false}
-
-		data, err := EncodePayload(protocol.MsgMaintenancePull, original)
-		require.NoError(t, err)
-
-		var result protocol.MaintenanceStatusPayload
-		err = DecodePayload(protocol.MsgMaintenancePull, data, &result)
-		require.NoError(t, err)
-
-		assert.False(t, result.Maintenance)
+		var result T
+		require.NoError(t, DecodePayload(messageType, data, &result))
+		assert.Equal(t, original, result)
 	})
 }

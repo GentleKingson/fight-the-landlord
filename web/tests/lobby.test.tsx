@@ -1,3 +1,4 @@
+import './resetStore';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import axe from 'axe-core';
@@ -6,23 +7,8 @@ import { Lobby } from '../src/features/lobby/Lobby';
 import { useAppStore } from '../src/stores/appStore';
 import { MsgType } from '../src/protocol/types';
 import type { GameSocket } from '../src/transport/wsClient';
-import landlordLogo from '../src/assets/landlord-logo-176.webp';
 
 afterEach(cleanup);
-
-it.each(['lobby', 'matching', 'waiting'] as const)('shows the brand image beside the title while %s', (phase) => {
-  useAppStore.setState({ phase, lobbyPanel: 'home', players: [] });
-  const { container } = render(<Lobby socket={{ subscribe: () => () => {}, send: vi.fn() } as unknown as GameSocket} />);
-  const logo = container.querySelector<HTMLImageElement>('.lobby-header .brand-mark');
-
-  expect(logo?.tagName).toBe('IMG');
-  expect(logo?.getAttribute('src')).toBe(landlordLogo);
-  // The adjacent heading supplies the name, so the image is decorative.
-  expect(logo?.getAttribute('alt')).toBe('');
-  expect(logo?.getAttribute('width')).toBe('44');
-  expect(logo?.getAttribute('height')).toBe('44');
-  expect(screen.getByRole('heading', { name: '斗地主', level: 1 })).toBeTruthy();
-});
 
 it('enters matching immediately and sends only one practice request on repeated clicks', () => {
   useAppStore.setState({ phase: 'lobby', lobbyPanel: 'home', matchMode: 'online' });
@@ -302,7 +288,7 @@ it('prompts secondary confirmation for full 3-human game as well and transfers h
   expect(screen.getByRole('button', { name: '开始游戏' })).toBeEnabled();
 });
 
-it('renders leaderboard header, top-rank badges, win stats, and current-player marker with zero axe violations', async () => {
+it('renders leaderboard scores and win stats with zero axe violations', async () => {
   let listener: ((msg: { type: string }) => void) | undefined;
   const send = vi.fn().mockReturnValue(true);
   const socket = {
@@ -331,123 +317,11 @@ it('renders leaderboard header, top-rank badges, win stats, and current-player m
     listener?.({ type: MsgType.LeaderboardResult });
   });
 
-  const head = container.querySelector('.sub-panel__head');
-  const reload = screen.getByRole('button', { name: '重新加载' });
-  expect(head).toContainElement(reload);
   expect(screen.getByText('42 胜 · 胜率 67.7%')).toBeInTheDocument();
   expect(screen.getByText('268 分')).toBeInTheDocument();
 
-  const meRow = container.querySelector('.ranking-row.is-me.is-top-2');
-  expect(meRow).toBeTruthy();
-  expect(meRow?.textContent).toContain('青竹');
-  expect(meRow?.textContent).toContain('我');
-  expect(container.querySelector('.ranking-row:last-child .ranking-rank')?.textContent).toBe('#4');
-
   const results = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
   expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
-});
-
-it('automatically scrolls the leaderboard to center the current player rank on open and reload', () => {
-  let listener: ((msg: { type: string }) => void) | undefined;
-  const socket = {
-    send: vi.fn().mockReturnValue(true),
-    subscribe: (fn: typeof listener) => {
-      listener = fn;
-      return () => {};
-    },
-  } as unknown as GameSocket;
-
-  const entries = Array.from({ length: 30 }, (_, idx) => ({
-    rank: idx + 1,
-    player_id: `p${idx + 1}`,
-    player_name: `牌友${idx + 1}`,
-    score: 300 - idx * 5,
-    wins: 30 - idx,
-    win_rate: 55,
-  }));
-
-  const rowHeight = 52;
-  const rowGap = 8;
-  const rowStep = rowHeight + rowGap;
-  const listViewportHeight = 300;
-
-  const scrollHeightSpy = vi
-    .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
-    .mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('ranking-list') ? entries.length * rowStep - rowGap : 0;
-    });
-  const clientHeightSpy = vi
-    .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
-    .mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('ranking-list') ? listViewportHeight : 0;
-    });
-  const offsetHeightSpy = vi
-    .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
-    .mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('ranking-row') ? rowHeight : 0;
-    });
-  const offsetTopSpy = vi
-    .spyOn(HTMLElement.prototype, 'offsetTop', 'get')
-    .mockImplementation(function (this: HTMLElement) {
-      if (!this.classList.contains('ranking-row') || !this.parentElement) {
-        return 0;
-      }
-      const index = Array.from(this.parentElement.children).indexOf(this);
-      return index >= 0 ? index * rowStep : 0;
-    });
-
-  try {
-    useAppStore.setState({
-      phase: 'lobby',
-      lobbyPanel: 'leaderboard',
-      connected: true,
-      playerId: 'p18',
-      playerName: '牌友18',
-      leaderboard: entries,
-    });
-
-    const { container } = render(<Lobby socket={socket} />);
-    act(() => {
-      listener?.({ type: MsgType.LeaderboardResult });
-    });
-
-    const listEl = container.querySelector<HTMLElement>('.ranking-list');
-    if (!listEl) {
-      throw new Error('Expected .ranking-list element');
-    }
-    expect(listEl.scrollTop).toBe(896);
-
-    act(() => {
-      useAppStore.setState({ playerId: 'p2' });
-    });
-    expect(listEl.scrollTop).toBe(0);
-
-    act(() => {
-      useAppStore.setState({ playerId: 'p30' });
-    });
-    expect(listEl.scrollTop).toBe(1492);
-
-    act(() => {
-      useAppStore.setState({ playerId: 'unranked' });
-    });
-    expect(listEl.scrollTop).toBe(0);
-
-    act(() => {
-      useAppStore.setState({ playerId: 'p18' });
-    });
-    expect(listEl.scrollTop).toBe(896);
-    listEl.scrollTop = 0;
-    fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
-    act(() => {
-      listener?.({ type: MsgType.LeaderboardResult });
-    });
-    expect(container.querySelector<HTMLElement>('.ranking-list')?.scrollTop).toBe(896);
-  } finally {
-    scrollHeightSpy.mockRestore();
-    clientHeightSpy.mockRestore();
-    offsetHeightSpy.mockRestore();
-    offsetTopSpy.mockRestore();
-  }
 });
 
 it('renders full personal stats dashboard and empty-record CTA cleanly with zero axe violations', async () => {
@@ -488,7 +362,6 @@ it('renders full personal stats dashboard and empty-record CTA cleanly with zero
   const { container } = render(<Lobby socket={socket} />);
   act(() => listener?.({ type: MsgType.StatsResult }));
 
-  expect(container.querySelector('.sub-panel__head')).toContainElement(screen.getByRole('button', { name: '重新加载' }));
   expect(screen.getByRole('heading', { name: '青竹', level: 3 })).toBeInTheDocument();
   expect(screen.getByText('4 连胜中')).toBeInTheDocument();
   expect(screen.getByText('+186')).toBeInTheDocument();

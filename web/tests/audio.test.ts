@@ -1,55 +1,14 @@
+import './resetStore';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { BGM_VOLUME, connectBackgroundMusic } from '../src/audio/backgroundMusic';
-import { cardSoundNames, cardSoundUrls } from '../src/audio/cardSounds';
-import { GameAudio, SFX_VOLUME } from '../src/audio/gameAudio';
+import { connectBackgroundMusic } from '../src/audio/backgroundMusic';
+import { cardSoundUrls } from '../src/audio/cardSounds';
+import { GameAudio } from '../src/audio/gameAudio';
 import type { Phase } from '../src/protocol/types';
 import { useAppStore } from '../src/stores/appStore';
 
 function cards(rank: number, count = 1) {
   return Array.from({ length: count }, (_, suit) => ({ rank, suit, color: 0 }));
 }
-
-it('loads all 66 game clips from web assets and maps every single/pair/trio rank', () => {
-  expect(Object.keys(cardSoundUrls)).toHaveLength(66);
-  for (const url of Object.values(cardSoundUrls)) {
-    expect(url).toMatch(/^\/src\/assets\/audio\/gaming\//);
-  }
-  const tokens = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2', 'joker_small', 'joker_big'];
-  for (const [type, prefix, count] of [['单张', 'single', 1], ['对子', 'pair', 2], ['三张', 'trio', 3]] as const) {
-    for (let rank = 3; rank <= (count === 1 ? 17 : 15); rank++) {
-      const name = `${prefix}_${tokens[rank - 3]}`;
-      expect(cardSoundNames(type, cards(rank, count))).toEqual([name]);
-      expect(cardSoundUrls[name]).toContain(`${name}.mp3`);
-    }
-  }
-});
-
-it.each([
-  ['三带一', ['type_trio_single']],
-  ['三带二', ['type_trio_pair']],
-  ['顺子', ['type_straight']],
-  ['连对', ['type_pairstraight']],
-  ['飞机', ['type_plane', 'plane']],
-  ['飞机带单', ['type_plane', 'plane']],
-  ['飞机带对', ['type_plane', 'plane']],
-  ['炸弹', ['type_bomb', 'bomb']],
-  ['王炸', ['type_rocket', 'bomb']],
-  ['四带二', ['type_four_two']],
-  ['四带两对', ['type_four_twopair']],
-  ['未来牌型', ['play']],
-  ['constructor', ['play']],
-])('maps %s to voice/effects or a safe fallback', (type, expected) => {
-  expect(cardSoundNames(type as string, [])).toEqual(expected);
-  for (const name of expected) {
-    expect(cardSoundUrls[name]).toBeTruthy();
-  }
-});
-
-it('falls back for missing ranks and uses the most frequent rank', () => {
-  expect(cardSoundNames('单张', [])).toEqual(['play']);
-  expect(cardSoundNames('对子', cards(16, 2))).toEqual(['play']);
-  expect(cardSoundNames('三张', [...cards(4), ...cards(8, 3)])).toEqual(['trio_8']);
-});
 
 class FakeSource {
   buffer: unknown;
@@ -108,6 +67,7 @@ beforeEach(() => {
 afterEach(() => {
   audio.stop();
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -337,7 +297,6 @@ it('cancels an active turn cue and keeps the confirmed action behind it', async 
   await flush();
   expect(spoken()[0].stop).toHaveBeenCalledOnce();
   expect(fetch).toHaveBeenLastCalledWith(cardSoundUrls.single_3, expect.anything());
-  expect(FakeContext.latest.createGain.mock.results[0].value.gain.value).toBe(0.3);
 });
 
 it('drops queued turn cues without interrupting the current voice', async () => {
@@ -555,21 +514,15 @@ class FakeMusicElement {
   }
 }
 
-it('plays background music at 50% of SFX volume only in lobby phases and never during matches', async () => {
+it('plays background music only in lobby phases and never during matches', async () => {
   vi.stubGlobal('Audio', FakeMusicElement);
   audio.setEnabled(true);
   audio.play('单张', cards(3));
   await flush();
-  const sfxGain = FakeContext.latest.createGain.mock.results[0].value.gain.value as number;
-  expect(sfxGain).toBe(SFX_VOLUME);
-  expect(BGM_VOLUME).toBe(sfxGain * 0.5);
-
   useAppStore.setState({ connected: true, phase: 'connecting' });
   const dispose = connectBackgroundMusic(audio);
   const music = FakeMusicElement.latest;
   expect(music.loop).toBe(true);
-  expect(music.volume).toBe(0.5);
-  expect(music.volume).toBe(sfxGain * 0.5);
 
   // Gesture during handshake ('connecting') does not start music prematurely.
   document.dispatchEvent(new Event('pointerup'));

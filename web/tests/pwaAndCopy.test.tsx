@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import './resetStore';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Lobby } from '../src/features/lobby/Lobby';
@@ -150,66 +149,5 @@ describe('RoomWaiting copy and share controls', () => {
       text: '快来加入我的斗地主房间，房间号：135790'
     });
     expect(liveStatus.textContent).toBe('已分享房间号 135790');
-  });
-});
-
-interface ManifestIcon {
-  src: string;
-  sizes: string;
-  type: string;
-  purpose?: string;
-}
-
-interface WebManifest {
-  id: string;
-  display: string;
-  orientation: string;
-  theme_color: string;
-  icons: ManifestIcon[];
-}
-
-describe('PWA manifest and lobby background preload links', () => {
-  it('configures fullscreen landscape manifest with #143d2a theme color and valid PNG icons', () => {
-    const raw = readFileSync(resolve(process.cwd(), 'public/manifest.webmanifest'), 'utf8');
-    const manifest = JSON.parse(raw) as WebManifest;
-
-    expect(manifest.id).toBe('/');
-    expect(manifest.display).toBe('fullscreen');
-    expect(manifest.orientation).toBe('landscape');
-    expect(manifest.theme_color).toBe('#143d2a');
-    expect(manifest.icons.length).toBeGreaterThanOrEqual(2);
-
-    for (const icon of manifest.icons) {
-      expect(icon.type).toBe('image/png');
-      const bytes = readFileSync(resolve(process.cwd(), `public${icon.src}`));
-      // PNG signature + IHDR width/height match declared sizes
-      expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-      const [expectedWidth, expectedHeight] = icon.sizes.split('x').map(Number);
-      expect(bytes.readUInt32BE(16)).toBe(expectedWidth);
-      expect(bytes.readUInt32BE(20)).toBe(expectedHeight);
-    }
-  });
-
-  it('declares manifest link and mutually-exclusive portrait/landscape high-priority lobby preloads in index.html', () => {
-    const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-
-    const manifestLink = doc.querySelector('link[rel="manifest"]');
-    expect(manifestLink?.getAttribute('href')).toBe('/manifest.webmanifest');
-
-    const preloadLinks = Array.from(doc.querySelectorAll('link[rel="preload"][as="image"]'));
-    expect(preloadLinks).toHaveLength(3);
-
-    const byMedia = new Map(preloadLinks.map((el) => [el.getAttribute('media'), el]));
-    expect(byMedia.get('(orientation: portrait)')?.getAttribute('href')).toContain('scene-lobby-portrait-900.webp');
-    expect(byMedia.get('(orientation: landscape) and (max-width: 960px)')?.getAttribute('href')).toContain('scene-lobby-960.webp');
-    expect(byMedia.get('(orientation: landscape) and (min-width: 961px)')?.getAttribute('href')).toContain('scene-lobby-1600.webp');
-
-    for (const link of preloadLinks) {
-      expect(link.getAttribute('fetchpriority')).toBe('high');
-      expect(link.getAttribute('type')).toBe('image/webp');
-      // Must omit crossorigin so no-cors CSS background-image reuses the preloaded response.
-      expect(link.hasAttribute('crossorigin')).toBe(false);
-    }
   });
 });

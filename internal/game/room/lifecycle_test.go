@@ -16,19 +16,8 @@ import (
 func TestNotifyPlayerOffline_AllPlayersOffline(t *testing.T) {
 	t.Parallel()
 
-	// Setup
-	rm := NewRoomManager(storage.NewRedisStore(nil), config.GameConfig{RoomTimeout: 10})
-	client1 := testutil.NewSimpleClient("p1", "Player1")
-	client2 := testutil.NewSimpleClient("p2", "Player2")
-	client3 := testutil.NewSimpleClient("p3", "Player3")
-
-	// Create room with 3 players
-	room, err := rm.CreateRoom(client1)
-	require.NoError(t, err)
-	_, err = rm.JoinRoom(client2, room.Code)
-	require.NoError(t, err)
-	_, err = rm.JoinRoom(client3, room.Code)
-	require.NoError(t, err)
+	rm, room, clients := fullTestRoom(t)
+	client1, client2, client3 := clients[0], clients[1], clients[2]
 
 	// All players go offline
 	rm.NotifyPlayerOffline(client1)
@@ -47,19 +36,8 @@ func TestNotifyPlayerOffline_AllPlayersOffline(t *testing.T) {
 func TestNotifyPlayerOffline_PartialOffline(t *testing.T) {
 	t.Parallel()
 
-	// Setup
-	rm := NewRoomManager(storage.NewRedisStore(nil), config.GameConfig{RoomTimeout: 10})
-	client1 := testutil.NewSimpleClient("p1", "Player1")
-	client2 := testutil.NewSimpleClient("p2", "Player2")
-	client3 := testutil.NewSimpleClient("p3", "Player3")
-
-	// Create room with 3 players
-	room, err := rm.CreateRoom(client1)
-	require.NoError(t, err)
-	_, err = rm.JoinRoom(client2, room.Code)
-	require.NoError(t, err)
-	_, err = rm.JoinRoom(client3, room.Code)
-	require.NoError(t, err)
+	rm, room, clients := fullTestRoom(t)
+	client1, client2, client3 := clients[0], clients[1], clients[2]
 
 	// Only one player goes offline
 	rm.NotifyPlayerOffline(client1)
@@ -195,8 +173,9 @@ func TestCleanup_TimeoutRooms(t *testing.T) {
 	room, err := rm.CreateRoom(client)
 	require.NoError(t, err)
 
-	// Wait for timeout
-	time.Sleep(150 * time.Millisecond)
+	room.mu.Lock()
+	room.CreatedAt = time.Now().Add(-time.Second)
+	room.mu.Unlock()
 
 	// Run cleanup
 	rm.cleanup()
@@ -241,8 +220,9 @@ func TestCleanup_DoesNotRemovePlayingRooms(t *testing.T) {
 	room.State = RoomStatePlaying
 	room.mu.Unlock()
 
-	// Wait for timeout
-	time.Sleep(150 * time.Millisecond)
+	room.mu.Lock()
+	room.CreatedAt = time.Now().Add(-time.Second)
+	room.mu.Unlock()
 
 	// Run cleanup
 	rm.cleanup()
@@ -254,18 +234,7 @@ func TestCleanup_DoesNotRemovePlayingRooms(t *testing.T) {
 func TestSetAllPlayersReady(t *testing.T) {
 	t.Parallel()
 
-	rm := NewRoomManager(storage.NewRedisStore(nil), config.GameConfig{RoomTimeout: 10})
-	client1 := testutil.NewSimpleClient("p1", "Player1")
-	client2 := testutil.NewSimpleClient("p2", "Player2")
-	client3 := testutil.NewSimpleClient("p3", "Player3")
-
-	// Create room with 3 players
-	room, err := rm.CreateRoom(client1)
-	require.NoError(t, err)
-	_, err = rm.JoinRoom(client2, room.Code)
-	require.NoError(t, err)
-	_, err = rm.JoinRoom(client3, room.Code)
-	require.NoError(t, err)
+	_, room, _ := fullTestRoom(t)
 
 	// Initially not ready
 	room.mu.RLock()
@@ -342,4 +311,21 @@ func TestRecoveredRoomUsesOriginalRetentionPolicy(t *testing.T) {
 		rm.cleanup()
 		require.Nil(t, rm.GetRoom(r.Code))
 	}
+}
+
+func fullTestRoom(t *testing.T) (*RoomManager, *Room, []*testutil.SimpleClient) {
+	t.Helper()
+	rm := NewRoomManager(storage.NewRedisStore(nil), config.GameConfig{RoomTimeout: 10})
+	clients := []*testutil.SimpleClient{
+		testutil.NewSimpleClient("p1", "Player1"),
+		testutil.NewSimpleClient("p2", "Player2"),
+		testutil.NewSimpleClient("p3", "Player3"),
+	}
+	r, err := rm.CreateRoom(clients[0])
+	require.NoError(t, err)
+	for _, client := range clients[1:] {
+		_, err = rm.JoinRoom(client, r.Code)
+		require.NoError(t, err)
+	}
+	return rm, r, clients
 }

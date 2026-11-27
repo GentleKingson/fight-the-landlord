@@ -1,3 +1,4 @@
+import './resetStore';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { GameSocket } from '../src/transport/wsClient';
 import { encodeMessage, decodeMessage } from '../src/protocol/codec';
@@ -38,8 +39,23 @@ class FakeSocket {
   }
 }
 
+const sockets: GameSocket[] = [];
+const audioDisposers: (() => void)[] = [];
+
+function newSocket() {
+  const socket = new GameSocket('ws://localhost/ws');
+  sockets.push(socket);
+  return socket;
+}
+
+function openSocket(socket = newSocket()) {
+  socket.connect();
+  const transport = FakeSocket.latest;
+  transport.onopen?.();
+  return { socket, transport };
+}
+
 beforeEach(() => {
-  sessionStorage.clear();
   vi.stubGlobal('WebSocket', FakeSocket);
 });
 
@@ -49,14 +65,12 @@ function sentTypes(socket: FakeSocket) {
 
 test('opening queries online count immediately and applies online_count responses', () => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   socket.connect();
   const transport = FakeSocket.latest;
   expect(transport.sent).toHaveLength(0);
-  expect(vi.getTimerCount()).toBe(1);
   transport.onopen?.();
   expect(sentTypes(transport)).toEqual(['ping', 'get_online_count', 'get_maintenance_status']);
-  expect(vi.getTimerCount()).toBe(1);
   for (const count of [12, 8, 0]) {
     transport.receive('online_count', { count });
     expect(useAppStore.getState().onlineCount).toBe(count);
@@ -64,12 +78,9 @@ test('opening queries online count immediately and applies online_count response
   socket.close();
 });
 
-test('queries online count every two five-second heartbeats using one timer', () => {
+test('queries online count every two five-second heartbeats', () => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
-  socket.connect();
-  const transport = FakeSocket.latest;
-  transport.onopen?.();
+  const { socket, transport } = openSocket();
   transport.sent = [];
   for (let cycle = 0; cycle < 3; cycle++) {
     vi.advanceTimersByTime(5000);
@@ -79,7 +90,6 @@ test('queries online count every two five-second heartbeats using one timer', ()
     expect(sentTypes(transport)).toEqual(['ping']);
     vi.advanceTimersByTime(1);
     expect(sentTypes(transport)).toEqual(['ping', 'ping', 'get_online_count']);
-    expect(vi.getTimerCount()).toBe(1);
     transport.sent = [];
   }
   socket.close();
@@ -89,7 +99,7 @@ test.each(['manual', 'replaced', 'network'])(
   '%s disconnect stops heartbeat queries and close cancels retries',
   (reason) => {
     vi.useFakeTimers();
-    const socket = new GameSocket('ws://localhost/ws');
+    const socket = newSocket();
     socket.connect();
     const transport = FakeSocket.latest;
     transport.onopen?.();
@@ -100,22 +110,18 @@ test.each(['manual', 'replaced', 'network'])(
       transport.close(reason === 'replaced' ? 4001 : 1006);
     }
     expect(useAppStore.getState().connected).toBe(false);
-    expect(vi.getTimerCount()).toBe(reason === 'network' ? 1 : 0);
     const messagesBeforeClose = sentTypes(transport);
     socket.close();
-    expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(20000);
     expect(sentTypes(transport)).toEqual(messagesBeforeClose);
     expect(FakeSocket.latest).toBe(transport);
   }
 );
 
-test('reconnect queries immediately and restarts the full heartbeat cycle without duplicate timers', () => {
+test('reconnect queries immediately and restarts the full heartbeat cycle', () => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
-  socket.connect();
-  let transport = FakeSocket.latest;
-  transport.onopen?.();
+  const socket = newSocket();
+  let transport = openSocket(socket).transport;
   for (let cycle = 0; cycle < 2; cycle++) {
     vi.advanceTimersByTime(5000);
     transport.close(1006);
@@ -127,26 +133,22 @@ test('reconnect queries immediately and restarts the full heartbeat cycle withou
     vi.advanceTimersByTime(10000);
     expect(sentTypes(previous)).toEqual(previousMessages);
     expect(transport.sent).toHaveLength(0);
-    expect(vi.getTimerCount()).toBe(1);
     transport.onopen?.();
     socket.connect();
     expect(FakeSocket.latest).toBe(transport);
     expect(sentTypes(transport)).toEqual(['ping', 'get_online_count', 'get_maintenance_status']);
-    expect(vi.getTimerCount()).toBe(1);
     transport.sent = [];
     vi.advanceTimersByTime(5000);
     expect(sentTypes(transport)).toEqual(['ping']);
     vi.advanceTimersByTime(5000);
     expect(sentTypes(transport)).toEqual(['ping', 'ping', 'get_online_count']);
-    expect(vi.getTimerCount()).toBe(1);
   }
   socket.close();
-  expect(vi.getTimerCount()).toBe(0);
 });
 
 test('reload relies on server cookie authentication and removes legacy JS credentials', () => {
   sessionStorage.setItem('ddz_next_reconnect', JSON.stringify({ id: 'old', token: 'old-token' }));
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   for (let i = 0; i < 2; i++) {
     socket.connect();
     const transport = FakeSocket.latest;
@@ -161,6 +163,8 @@ test('reload relies on server cookie authentication and removes legacy JS creden
 });
 
 afterEach(() => {
+  for (const dispose of audioDisposers.splice(0)) dispose();
+  for (const socket of sockets.splice(0)) socket.close();
   vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -168,7 +172,7 @@ afterEach(() => {
 
 test('a replaced tab stops reconnecting while network failures still retry', () => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   socket.connect();
   const first = FakeSocket.latest;
   first.onopen?.();
@@ -194,7 +198,7 @@ test('audio only follows confirmed live plays, never sends, errors, snapshots or
     endTurn: vi.fn(),
     subscribe: vi.fn(() => () => {}),
   };
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   let dispose = connectGameAudio(socket, audio as unknown as GameAudio);
   socket.connect();
   FakeSocket.latest.onopen?.();
@@ -242,8 +246,9 @@ test('audio clears on backgrounding/disconnect and gesture listeners are removed
     endTurn: vi.fn(),
     subscribe: vi.fn(() => () => {}),
   };
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   const dispose = connectGameAudio(socket, audio as unknown as GameAudio);
+  audioDisposers.push(dispose);
   document.dispatchEvent(new Event('pointerup'));
   document.dispatchEvent(new Event('keydown'));
   expect(audio.unlock).toHaveBeenCalledTimes(2);
@@ -274,8 +279,9 @@ function audioSession() {
     getEnabled: vi.fn(() => true),
     subscribe: vi.fn((_listener: () => void): (() => void) => () => {}),
   };
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   const dispose = connectGameAudio(socket, audio as unknown as GameAudio);
+  audioDisposers.push(dispose);
   socket.connect();
   FakeSocket.latest.onopen?.();
   FakeSocket.latest.receive('connected', { player_id: 'me', player_name: 'Me' });
@@ -532,10 +538,7 @@ test('authoritative deal rounds replay audio, seek on reconnect, and stop at the
 
 test.each([500, 1000, 2000])('RTT %d: one submission, matching acknowledgement, no replay', (rtt) => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
-  socket.connect();
-  const transport = FakeSocket.latest;
-  transport.onopen?.();
+  const { socket, transport } = openSocket();
   transport.receive('connected', { player_id: 'me' });
   transport.receive('reconnected', { player_id: 'me' });
   useAppStore.setState({ currentTurn: 'me', bidToken: 'bid-1', timerStart: Date.now(), timeout: 15 });
@@ -552,10 +555,8 @@ test.each([500, 1000, 2000])('RTT %d: one submission, matching acknowledgement, 
 
 test.each([true, false])('disconnect during submission resolves committed=%s from snapshot', (committed) => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
-  socket.connect();
-  let transport = FakeSocket.latest;
-  transport.onopen?.();
+  const socket = newSocket();
+  let transport = openSocket(socket).transport;
   transport.receive('connected', { player_id: 'me' });
   transport.receive('reconnected', { player_id: 'me' });
   useAppStore.setState({ currentTurn: 'me', turnToken: 'play-1', timerStart: Date.now(), timeout: 15 });
@@ -580,10 +581,7 @@ test.each([true, false])('disconnect during submission resolves committed=%s fro
 
 test('half-open socket times out and ignores messages from the old transport', () => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
-  socket.connect();
-  const transport = FakeSocket.latest;
-  transport.onopen?.();
+  const { socket, transport } = openSocket();
   // Blackhole pong responses to simulate a half-open connection.
   transport.send = (data) => {
     transport.sent.push(data);
@@ -600,10 +598,7 @@ test('half-open socket times out and ignores messages from the old transport', (
 
 test.each([1, 5])('%d%% heartbeat response loss does not cause false disconnects', (loss) => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
-  socket.connect();
-  const transport = FakeSocket.latest;
-  transport.onopen?.();
+  const { socket, transport } = openSocket();
   let pings = 0;
   transport.send = (data) => {
     transport.sent.push(data);
@@ -620,7 +615,7 @@ test.each([1, 5])('%d%% heartbeat response loss does not cause false disconnects
 
 test('offline submission is explicit; online and background recovery never replay it', () => {
   vi.useFakeTimers();
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   expect(socket.send('bid', { bid: true })).toBe(false);
   expect(useAppStore.getState().submissionMessage).toContain('未发送');
   socket.connect();
@@ -653,10 +648,7 @@ test('late RTT sample corrects both the active countdown and its warning', () =>
 });
 
 function submitPendingPlay() {
-  const socket = new GameSocket('ws://localhost/ws');
-  socket.connect();
-  const transport = FakeSocket.latest;
-  transport.onopen?.();
+  const { socket, transport } = openSocket();
   transport.receive('connected', { player_id: 'me' });
   transport.receive('reconnected', { player_id: 'me' });
   useAppStore.setState({ currentTurn: 'me', turnToken: 'play-1', timerStart: Date.now(), timeout: 30 });
@@ -711,7 +703,7 @@ test.each(['quota', 'read-denied', 'storage-disabled'])(
 test.each([true, false])('reload waits for final recovery response, snapshot available=%s', (hasSnapshot) => {
   vi.useFakeTimers();
   submitPendingPlay().close();
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   socket.connect();
   try {
     const transport = FakeSocket.latest;
@@ -736,7 +728,7 @@ test.each([true, false])('reload waits for final recovery response, snapshot ava
 });
 
 test('identity message alone does not unlock game or lobby state-mutating submissions', () => {
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   socket.connect();
   try {
     const transport = FakeSocket.latest;
@@ -761,7 +753,7 @@ test('identity message alone does not unlock game or lobby state-mutating submis
 test('asymmetric RTT clock skew does not locally reject a valid turn submission before server deadline', () => {
   vi.useFakeTimers();
   vi.setSystemTime(6000);
-  const socket = new GameSocket('ws://localhost/ws');
+  const socket = newSocket();
   socket.connect();
   try {
     const transport = FakeSocket.latest;

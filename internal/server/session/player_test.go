@@ -22,8 +22,6 @@ func TestSessionManager_CRUD(t *testing.T) {
 	s1 := sm.GetSession("p1")
 	assert.Equal(t, session, s1)
 
-	// Get by Token
-
 	// Delete
 	sm.DeleteSession("p1")
 	assert.Nil(t, sm.GetSession("p1"))
@@ -36,16 +34,20 @@ func TestSessionManager_OnlineStatus(t *testing.T) {
 
 	// Initial state: online
 	assert.True(t, session.IsOnline)
+	assert.True(t, sm.IsOnline("p1"))
+	assert.False(t, sm.IsOnline("missing"))
 	assert.True(t, session.DisconnectedAt.IsZero())
 
 	// Set Offline
 	sm.SetOffline("p1")
 	assert.False(t, sm.GetSession("p1").IsOnline)
+	assert.False(t, sm.IsOnline("p1"))
 	assert.False(t, sm.GetSession("p1").DisconnectedAt.IsZero())
 
 	// Set Online again
 	sm.SetOnline("p1")
 	assert.True(t, sm.GetSession("p1").IsOnline)
+	assert.True(t, sm.IsOnline("p1"))
 	assert.True(t, sm.GetSession("p1").DisconnectedAt.IsZero())
 }
 
@@ -81,69 +83,14 @@ func TestSessionManager_SetRoom(t *testing.T) {
 	}
 }
 
-func TestSessionManager_IsOnline(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		setup      func(sm *SessionManager)
-		playerID   string
-		wantOnline bool
-	}{
-		{
-			name: "online player",
-			setup: func(sm *SessionManager) {
-				sm.CreateSession("p1", "Player1")
-			},
-			playerID:   "p1",
-			wantOnline: true,
-		},
-		{
-			name: "offline player",
-			setup: func(sm *SessionManager) {
-				sm.CreateSession("p1", "Player1")
-				sm.SetOffline("p1")
-			},
-			playerID:   "p1",
-			wantOnline: false,
-		},
-		{
-			name:       "non-existent player",
-			setup:      func(_ *SessionManager) {},
-			playerID:   "p999",
-			wantOnline: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			sm := NewSessionManager()
-			tt.setup(sm)
-			assert.Equal(t, tt.wantOnline, sm.IsOnline(tt.playerID))
-		})
-	}
-}
-
-func TestSessionManager_SetOffline_NonExistent(t *testing.T) {
+func TestSessionManager_MissingPlayer(t *testing.T) {
 	t.Parallel()
 	sm := NewSessionManager()
-	// Should not panic
-	sm.SetOffline("non-existent")
-}
-
-func TestSessionManager_SetOnline_NonExistent(t *testing.T) {
-	t.Parallel()
-	sm := NewSessionManager()
-	// Should not panic
-	sm.SetOnline("non-existent")
-}
-
-func TestSessionManager_DeleteSession_NonExistent(t *testing.T) {
-	t.Parallel()
-	sm := NewSessionManager()
-	// Should not panic
-	sm.DeleteSession("non-existent")
+	sm.SetOffline("missing")
+	sm.SetOnline("missing")
+	sm.SetRoom("missing", "123456")
+	sm.DeleteSession("missing")
+	assert.Nil(t, sm.GetSession("missing"))
 }
 
 func TestLongOfflineGameRetainsNewSettlementMetadata(t *testing.T) {

@@ -6,11 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
-	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
 
 // assertRoundCards 验证底牌归属以及整副牌的完整性，不依赖随机结果或牌力。
@@ -21,6 +18,8 @@ func assertRoundCards(t *testing.T, gs *GameSession, landlordAssigned bool) {
 	allCards := make([]card.Card, 0, 54)
 	landlordCount := 0
 	for i, p := range gs.players {
+		assert.Equal(t, i, p.Seat)
+		assert.Equal(t, gs.room.PlayerOrder[i], p.ID)
 		wantCards := 17
 		if p.IsLandlord {
 			landlordCount++
@@ -48,23 +47,15 @@ func assertRoundCards(t *testing.T, gs *GameSession, landlordAssigned bool) {
 func TestStartGame_DealCards(t *testing.T) {
 	t.Parallel()
 
-	// Setup room with 3 players
-	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
-
-	// Create game session
-	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
+	gs := newTestGame(t)
 
 	// Start game
-	t.Cleanup(gs.StopAllTimers)
 	gs.Start()
 	gs.finishDeal(gs.dealID)
 
 	// Verify state
 	assert.Equal(t, GameStateBidding, gs.state)
-	assert.Equal(t, room.RoomStateBidding, r.State)
+	assert.Equal(t, room.RoomStateBidding, gs.room.State)
 
 	assertRoundCards(t, gs, false)
 }
@@ -72,13 +63,7 @@ func TestStartGame_DealCards(t *testing.T) {
 func TestStartGame_CardsAreSorted(t *testing.T) {
 	t.Parallel()
 
-	// Setup
-	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
-
-	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
+	gs := newTestGame(t)
 	gs.Start()
 	gs.finishDeal(gs.dealID)
 
@@ -91,34 +76,10 @@ func TestStartGame_CardsAreSorted(t *testing.T) {
 	}
 }
 
-func TestStartGame_BidderSelected(t *testing.T) {
-	t.Parallel()
-
-	// Setup
-	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
-
-	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
-	gs.Start()
-	gs.finishDeal(gs.dealID)
-
-	// Verify a bidder was selected (0, 1, or 2)
-	assert.GreaterOrEqual(t, gs.currentBidder, 0)
-	assert.Less(t, gs.currentBidder, 3)
-}
-
 func TestEndGame_WinnerAnnounced(t *testing.T) {
 	t.Parallel()
 
-	// Setup
-	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
-
-	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
+	gs := newTestGame(t)
 	gs.Start()
 	gs.finishDeal(gs.dealID)
 
@@ -131,53 +92,5 @@ func TestEndGame_WinnerAnnounced(t *testing.T) {
 
 	// Verify state
 	assert.Equal(t, GameStateEnded, gs.state)
-	assert.Equal(t, room.RoomStateEnded, r.State)
-}
-
-func TestNewGameSession_Initialization(t *testing.T) {
-	t.Parallel()
-
-	// Setup
-	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
-
-	// Create session
-	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
-
-	// Verify initialization
-	assert.Equal(t, GameStateInit, gs.state)
-	assert.Len(t, gs.players, 3)
-	assert.Equal(t, -1, gs.landlordCaller)
-	assert.Equal(t, -1, gs.landlordCandidate)
-	assert.Equal(t, 1, gs.bidMultiplier)
-
-	// Verify players are in correct seats
-	for i, p := range gs.players {
-		assert.Equal(t, i, p.Seat)
-		assert.Equal(t, r.PlayerOrder[i], p.ID)
-	}
-}
-
-func TestGameSession_PlayerOfflineHandling(t *testing.T) {
-	t.Parallel()
-
-	// Setup
-	r := room.NewMockRoom("TEST123", testutil.NewSimpleClient("p1", "Player1"))
-	r.Players["p2"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p2", "Player2"), Seat: 1}
-	r.Players["p3"] = &room.RoomPlayer{Client: testutil.NewSimpleClient("p3", "Player3"), Seat: 2}
-	r.PlayerOrder = []string{"p1", "p2", "p3"}
-
-	gs := NewGameSession(r, storage.NewLeaderboardManager(nil), config.GameConfig{TurnTimeout: 30, BidTimeout: 15})
-
-	// Mark player as offline
-	gs.mu.Lock()
-	gs.players[0].IsOffline = true
-	gs.mu.Unlock()
-
-	// Verify offline status
-	gs.mu.RLock()
-	assert.True(t, gs.players[0].IsOffline)
-	gs.mu.RUnlock()
+	assert.Equal(t, room.RoomStateEnded, gs.room.State)
 }

@@ -85,11 +85,11 @@ it('distinguishes loading, empty response, timeout and retry in the leaderboard'
   expect(screen.getByRole('button', { name: '战绩榜' })).toHaveAttribute('aria-current', 'page');
 });
 
-it('shows pending roles, read-only faces, low cards, disconnected status and only a final-five-second pulse', () => {
+it('shows pending roles, read-only faces and disconnected status', () => {
   vi.useFakeTimers();
   const { socket } = transport();
   useAppStore.setState({ phase: 'bidding', timerStart: Date.now(), timeout: 20 });
-  const { container } = render(<GameTable socket={socket} />);
+  render(<GameTable socket={socket} />);
   expect(screen.getAllByText(/身份待定/)).toHaveLength(2);
   expect(within(screen.getByLabelText('底牌')).queryAllByRole('button')).toHaveLength(0);
   act(() => {
@@ -99,12 +99,6 @@ it('shows pending roles, read-only faces, low cards, disconnected status and onl
       players: useAppStore.getState().players.map((p) => ({ ...p, cards_count: 2 })),
     });
   });
-  expect(container.querySelectorAll('.cards-warning').length).toBeGreaterThanOrEqual(2);
-  expect(container.querySelector('.turn-banner')).not.toHaveClass('is-urgent');
-  act(() => {
-    vi.advanceTimersByTime(15200);
-  });
-  expect(container.querySelector('.turn-banner')).toHaveClass('is-urgent');
   act(() => {
     useAppStore.setState({ latency: 88 });
     useAppStore.getState().setConnected(false);

@@ -1,12 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import './resetStore';
+import { describe, expect, it } from 'vitest';
 import { MsgType } from '../src/protocol/types';
 import { useAppStore } from '../src/stores/appStore';
 
 describe('reconnect preserves recoverable table state', () => {
-  beforeEach(() => {
-    useAppStore.getState().leaveLocalRoom();
-  });
-
   it.each([1, 4, 8])('restores authoritative x%i multiplier through a playing snapshot and turn replay', (multiplier) => {
     useAppStore.setState({ playerId: 'farmer', phase: 'playing', multiplier: 999 });
     const receive = useAppStore.getState().handleMessage;
@@ -44,26 +41,6 @@ describe('reconnect preserves recoverable table state', () => {
 });
 
 describe('app store message flow', () => {
-  beforeEach(() => {
-    sessionStorage.clear();
-    useAppStore.setState({
-      connected: false,
-      playerId: '',
-      playerName: '',
-      phase: 'connecting',
-      players: [],
-      roomCode: '',
-      hand: [],
-      bottomCards: [],
-      bottomCardsRevealed: false,
-      currentTurn: '',
-      selectedCards: new Set(),
-      recentActions: [],
-      seatActions: {},
-      cardCounter: {}
-    });
-  });
-
   it('keeps revealed bottom cards through the landlord supplemental deal', () => {
     const cards = Array.from({ length: 17 }, (_, i) => ({ suit: i % 4, rank: 3 + Math.floor(i / 4), color: 0 }));
     const bottom = [{ suit: 0, rank: 14, color: 0 }, { suit: 1, rank: 14, color: 1 }, { suit: 2, rank: 14, color: 0 }];

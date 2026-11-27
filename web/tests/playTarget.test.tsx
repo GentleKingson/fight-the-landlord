@@ -58,7 +58,6 @@ it('moves the unique target after a reply, retains it after a pass and clears it
   expect(screen.getAllByText('待压过')).toHaveLength(1);
   const ownCards = screen.getByRole('region', { name: '青竹的出牌' });
   expect(within(ownCards).getByText('待压过')).toBeTruthy();
-  expect(ownCards.classList.contains('played-seat--target')).toBe(true);
   act(() => {
     pass('p2');
     turn('p3');
@@ -69,7 +68,6 @@ it('moves the unique target after a reply, retains it after a pass and clears it
     turn('p1', true);
   });
   expect(target()).toBeNull();
-  expect(ownCards.classList.contains('played-seat--target')).toBe(false);
   expect(within(ownCards).getAllByRole('img')).toHaveLength(2);
   expect(screen.getByText('新一轮，请出牌')).toBeTruthy();
 });

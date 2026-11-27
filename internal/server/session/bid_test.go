@@ -51,6 +51,7 @@ func TestClassicBidOrder(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("start%d/%s", start, tc.name), func(t *testing.T) {
 				gs := classicBidGame(t, start)
+				multiplier := 1
 				for step, relative := range tc.seats {
 					seat := (start + relative) % 3
 					require.Equal(t, GameStateBidding, gs.state)
@@ -74,6 +75,10 @@ func TestClassicBidOrder(t *testing.T) {
 					require.ErrorIs(t, gs.HandleBid(wrong, true), apperrors.ErrNotYourTurn)
 					require.Equal(t, turn, gs.turnID)
 					require.NoError(t, gs.HandleBid(gs.players[seat].ID, tc.bids[step]))
+					if isGrab && tc.bids[step] {
+						multiplier *= 2
+					}
+					require.Equal(t, multiplier, gs.bidMultiplier)
 					if !isGrab && !tc.bids[step] {
 						require.True(t, gs.declinedCall[seat])
 					}

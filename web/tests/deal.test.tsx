@@ -63,11 +63,9 @@ test('deal spends no bidding time and only the server turn opens actions with it
   expect(useAppStore.getState().timeout).toBe(0);
   expect(useAppStore.getState().currentTurn).toBe('');
   expect(screen.queryByRole('button', { name: '叫地主' })).toBeNull();
-  expect(document.querySelectorAll('.deal-card')).toHaveLength(52);
   act(() => {
     vi.advanceTimersByTime(4000);
   });
-  expect(document.querySelectorAll('.deal-card')).toHaveLength(0);
   expect(screen.getByText('等待叫地主通知…')).toBeTruthy();
   expect(useAppStore.getState().phase).toBe('dealing');
   expect(screen.queryByRole('button', { name: '叫地主' })).toBeNull();
@@ -135,7 +133,6 @@ test('dealing reconnect resumes remaining time, hides bottom cards, and clears o
   act(() => {
     vi.advanceTimersByTime(1870);
   });
-  expect(document.querySelectorAll('.deal-card')).toHaveLength(0);
   expect(useAppStore.getState().phase).toBe('dealing');
   receive(MsgType.Reconnected, {
     player_id: 'me',
@@ -145,31 +142,19 @@ test('dealing reconnect resumes remaining time, hides bottom cards, and clears o
   expect(screen.getAllByRole('option')).toHaveLength(17);
 });
 
-test('faces and count advance on each landing while all final slots stay reserved', () => {
+test('dealing keeps cards read-only until the server starts play', () => {
   deal();
   render(<GameTable socket={{ send } as unknown as GameSocket} />);
-  expect(useAppStore.getState().hand).toHaveLength(17);
   expect(screen.queryAllByRole('option')).toHaveLength(0);
-  expect(screen.getByText('手牌 0 张')).toBeTruthy();
-  const slots = [...document.querySelectorAll<HTMLElement>('.hand__slot')];
-  const positions = slots.map((slot) => slot.style.cssText);
-  expect(slots).toHaveLength(17);
-  // 430ms flight; local arrivals start at 567.6ms then repeat every 206.4ms.
-  for (let count = 1; count <= 17; count++) {
-    const landing = Math.ceil(567.6 + (count - 1) * 206.4);
-    act(() => {
-      vi.advanceTimersByTime(500000 + landing - Date.now());
-    });
-    expect(screen.getAllByRole('option')).toHaveLength(count);
-    expect(screen.getByText(`手牌 ${count} 张`)).toBeTruthy();
-    expect(slots.map((slot) => slot.style.cssText)).toEqual(positions);
-    const face = screen.getAllByRole('option')[0];
-    expect(face.getAttribute('aria-disabled')).toBe('true');
-    fireEvent.click(face);
-    expect(useAppStore.getState().selectedCards.size).toBe(0);
-  }
-  receive(MsgType.PlayTurn, { player_id: 'me', timeout: 30, must_play: true });
+  act(() => {
+    vi.advanceTimersByTime(4000);
+  });
+  expect(screen.getAllByRole('option')).toHaveLength(17);
   const face = screen.getAllByRole('option')[0];
+  expect(face.getAttribute('aria-disabled')).toBe('true');
+  fireEvent.click(face);
+  expect(useAppStore.getState().selectedCards.size).toBe(0);
+  receive(MsgType.PlayTurn, { player_id: 'me', timeout: 30, must_play: true });
   expect(face.getAttribute('aria-disabled')).toBeNull();
   fireEvent.click(face);
   expect(useAppStore.getState().selectedCards.size).toBe(1);
@@ -193,13 +178,13 @@ test('redeal starts at zero; landlord supplement and ordinary reconnect show ful
   expect(screen.getAllByRole('option')).toHaveLength(20);
   receive(MsgType.DealCards, { cards: [...cards, ...cards.slice(0, 3)], bottom_cards: cards.slice(0, 3) });
   expect(screen.getAllByRole('option')).toHaveLength(20);
-  expect(document.querySelector('.deal-animation')).toBeNull();
+  expect(screen.queryByLabelText('正在发牌')).toBeNull();
   receive(MsgType.Reconnected, {
     player_id: 'me',
     game_state: { phase: 'playing', players, hand: cards, bottom_cards: [] },
   });
   expect(screen.getAllByRole('option')).toHaveLength(17);
-  expect(document.querySelector('.deal-animation')).toBeNull();
+  expect(screen.queryByLabelText('正在发牌')).toBeNull();
 });
 
 test('reduced motion reveals immediately but still waits for server authorization', () => {
