@@ -11,7 +11,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 )
 
 // GameState 游戏状态

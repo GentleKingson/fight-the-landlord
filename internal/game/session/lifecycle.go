@@ -13,7 +13,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 	"github.com/palemoky/fight-the-landlord/internal/securerand"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 )
 
 // Start 开始游戏
@@ -22,7 +22,7 @@ func (gs *GameSession) Start() {
 	defer gs.mu.Unlock()
 
 	// Disconnect/expiry can remove a matched room before session registration.
-	if gs.state != GameStateInit || gs.room.GetState() == RoomStateEnded {
+	if gs.state != GameStateInit || gs.room.GetState() == room.RoomStateEnded {
 		return
 	}
 	gs.startBiddingRound()
@@ -44,7 +44,7 @@ func (gs *GameSession) startBiddingRound() {
 	gs.bidToken = ""
 	gs.dealID = rand.Text()
 	gs.state = GameStateDealing
-	gs.setRoomState(RoomStateDealing)
+	gs.setRoomState(room.RoomStateDealing)
 	gs.dealStartAt = time.Now()
 	gs.dealEndAt = gs.dealStartAt.Add(DealDuration)
 	gs.currentBidder = securerand.New().IntN(3)
@@ -59,13 +59,13 @@ func (gs *GameSession) startBiddingRound() {
 func (gs *GameSession) finishDeal(dealID string) {
 	gs.mu.Lock()
 	defer gs.mu.Unlock()
-	if gs.state != GameStateDealing || gs.dealID != dealID || gs.room.GetState() == RoomStateEnded {
+	if gs.state != GameStateDealing || gs.dealID != dealID || gs.room.GetState() == room.RoomStateEnded {
 		return
 	}
 	_ = gs.transition(func() error {
 		gs.stopDealTimer()
 		gs.state = GameStateBidding
-		gs.setRoomState(RoomStateBidding)
+		gs.setRoomState(room.RoomStateBidding)
 		gs.notifyBidTurn()
 		return nil
 	})
@@ -161,7 +161,7 @@ func (gs *GameSession) endGame(winner *GamePlayer) {
 	gs.recordGameResults(winner)
 	gs.endedAt = time.Now()
 	gs.state = GameStateEnded
-	gs.setRoomState(RoomStateEnded)
+	gs.setRoomState(room.RoomStateEnded)
 
 	// 计算最终倍数与各玩家得分
 	multiplier := gs.finalMultiplier(winner)

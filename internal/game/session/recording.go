@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 )
 

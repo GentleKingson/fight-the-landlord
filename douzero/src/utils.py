@@ -23,10 +23,6 @@ TYPE_13_4_2 = 13
 TYPE_14_4_22 = 14
 TYPE_15_WRONG = 15
 
-# betting round action
-PASS = 0
-CALL = 1
-RAISE = 2
 
 # return all possible results of selecting num cards from cards list
 def select(cards, num):

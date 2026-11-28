@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 )
 
 const identityCookie = "ddz_guest"
@@ -26,9 +26,11 @@ func (s *Server) resolveIdentity(r *http.Request) (identity *storage.GuestIdenti
 		return nil, nil, false, err
 	}
 	headers = http.Header{}
-	cookie := &http.Cookie{Name: identityCookie, Value: identity.ID + "." + token, Path: "/", HttpOnly: true,
+	cookie := &http.Cookie{
+		Name: identityCookie, Value: identity.ID + "." + token, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, Secure: s.config.Server.CookieSecure || r.TLS != nil,
-		MaxAge: int(s.config.Server.IdentityTTLDuration() / time.Second), Expires: identity.ExpiresAt}
+		MaxAge: int(s.config.Server.IdentityTTLDuration() / time.Second), Expires: identity.ExpiresAt,
+	}
 	headers.Add("Set-Cookie", cookie.String())
 	return identity, headers, true, nil
 }

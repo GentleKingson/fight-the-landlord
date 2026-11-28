@@ -2,10 +2,11 @@ package storage
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestIdentityVerificationExpiryAndFailure(t *testing.T) {

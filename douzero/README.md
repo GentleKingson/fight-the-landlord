@@ -1,96 +1,57 @@
-# DouZero Service
+# Marvel 推理服务
 
-DouZero 强化学习模型的 ONNX 推理服务，供 Go 游戏服务端通过 HTTP 调用。
+使用 MARVEL v1.3 的 CPU 策略，通过现有 DouZero HTTP 协议为 Go 游戏服务提供出牌决策。地主使用 `landlord.pt`，两个农民席位共享 `farmers.pt`。
 
-## 本地调试
+## 本地运行
 
-```bash
-cd douzero
-
-# 安装依赖
-uv sync
-
-# 启动服务（首次运行自动从 HuggingFace 下载 ONNX 模型）
-uv run python server.py
-# 监听 :2021
-```
-
-环境变量：
-
-| 变量             | 说明     | 默认值     |
-| ---------------- | -------- | ---------- |
-| `DOUZERO_MODELS` | 模型目录 | `./models` |
-| `PORT`           | 监听端口 | `2021`     |
-
-## Docker 构建
+使用 Python 3.12 和 uv 0.13.5。在仓库根目录运行：
 
 ```bash
-# 构建镜像（会自动从 HuggingFace 下载 ONNX 模型）
-docker build -t palemoky/fight-the-landlord-douzero:latest ./douzero
-
-# 也可以通过 docker compose 一起构建
-docker compose build douzero
+bash scripts/setup-marvel.sh
+douzero/.venv/bin/python douzero/server.py
 ```
 
-## Go 侧启用
+安装脚本从 `pyproject.toml` 和 `uv.lock` 安装 CPU 依赖，并编译固定提交的 nanopokerlib；需要 Git、C++ 编译器和 make。模型由部署者提供，放入 `douzero/models/landlord.pt` 与 `douzero/models/farmers.pt`。来源为 [GentleKingson/doudizhu](https://github.com/GentleKingson/doudizhu)，固定提交为 `acdcf199cf422e2b683cb22142b8e7cb33b14460`。
 
-`config.yaml`：
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `DOUZERO_MODELS` | 权重目录 | 服务目录下的 `models` |
+| `MARVEL_ROOT` | 固定上游源码目录 | `douzero/vendor/doudizhu` |
+| `PORT` | HTTP 端口 | `2021` |
+| `TORCH_NUM_THREADS` | CPU 推理线程数 | `2` |
+| `AI_BACKEND` | 兼容旧部署配置，仅接受 `marvel` | `marvel` |
 
-```yaml
-ai:
-  enabled: true
-  douzero_enabled: true
-  douzero_url: "http://localhost:2021" # 本地调试
-  # douzero_url: "http://douzero:2021"  # Docker Compose
+其他 `AI_BACKEND` 值会在启动时明确报错。
+
+## Docker
+
+在仓库根目录构建，使用现有镜像名称及构建入口：
+
+```bash
+docker build -f douzero/Dockerfile.marvel -t palemoky/fight-the-landlord-douzero:latest .
+docker compose build ai
 ```
 
-## API
+权重挂载到 `/models`，完整部署说明见[网页部署指南](../docs/web-play.md)。Go 侧继续使用 `DOUZERO_ENABLED`、`DOUZERO_URL` 或配置文件中的 `bot.douzero_enabled`、`bot.douzero_url`。
 
-### `POST /decide_play`
+## HTTP 协议
 
-```json
-// 请求
-{
-  "position": "landlord",
-  "hand": [3, 5, 7, 14, 17],
-  "bottom_cards": [17, 20, 30],
-  "played_cards_landlord": [],
-  "played_cards_landlord_down": [],
-  "played_cards_landlord_up": [],
-  "card_play_action_seq": [],
-  "num_cards_left": {"landlord": 20, "landlord_down": 17, "landlord_up": 17},
-  "last_move": [],
-  "last_move_position": "",
-  "must_play": true
-}
+`POST /decide_play` 接收现有请求字段：`position`、`hand`、`bottom_cards`、`card_play_action_seq`、`num_cards_left`、`last_move`、`last_move_position`、`must_play` 和各席位的 `played_cards_*`。历史记录包含 PASS；手牌、底牌及历史必须相互一致。
 
-// 响应
-{"action": [3, 5]}   // 出牌
-{"action": []}       // pass
+席位为 `landlord`、`landlord_down`、`landlord_up`。牌值 3–14 对应 3–A，17 为 2，20 为小王，30 为大王。
+
+成功响应为 `{"action":[3]}`，PASS 为 `{"action":[]}`。请求大小错误返回 HTTP 400 和 `error`；解析、模型或非法动作错误保持 HTTP 500、空 `action` 和 `error`。
+
+`GET /health` 保留 `status`、`backend`、`agents`、`models`，以及模型已有的文件、摘要、架构和迭代元数据。
+
+## 检查与回归
+
+```bash
+uv sync --project douzero --locked --inexact
+uv run --project douzero --locked ruff check douzero
+uv run --project douzero --locked python -m unittest discover -s douzero/tests -v
+# 固定源码和两份真实权重就绪后运行：
+MARVEL_INTEGRATION=1 douzero/.venv/bin/python -m unittest discover -s douzero/tests -v
 ```
 
-### `GET /health`
-
-```json
-{ "status": "ok", "agents": ["landlord", "landlord_down", "landlord_up"] }
-```
-
-## 卡牌编码
-
-| 牌面 | DouZero int |
-| ---- | ----------- |
-| 3–A  | 3–14        |
-| 2    | 17          |
-| 小王 | 20          |
-| 大王 | 30          |
-
-## 模型来源
-
-ONNX 模型托管在 [HuggingFace](https://huggingface.co/palemoky/douzero-baselines)。
-
-如需重新转换（从 PyTorch checkpoint → ONNX），参考 [DouZero](https://github.com/kwai/DouZero) 项目。
-# MARVEL 双权重
-
-除原有 ONNX 模式外，服务支持 `AI_BACKEND=marvel`，通过原训练仓库的编码与模型加载
-`models/landlord.pt` 和 `models/farmers.pt`。安装、Docker 部署及真人数据导出见
-[网页部署指南](../docs/web-play.md)。
+规则与 HTTP 测试无需权重；真实完整牌局测试缺省跳过，保留为模型部署验收入口。

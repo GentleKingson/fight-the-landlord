@@ -51,9 +51,6 @@ export const MsgType = {
 } as const;
 
 export type MessageType = (typeof MsgType)[keyof typeof MsgType];
-export type Phase = 'connecting' | 'lobby' | 'matching' | 'waiting' | 'dealing' | 'bidding' | 'playing' | 'game_over';
-export type LobbyPanel = 'home' | 'leaderboard' | 'stats' | 'rules';
-export type UtilityDrawer = 'none' | 'counter' | 'history' | 'rules';
 
 export interface CardInfo {
   suit: number;
@@ -185,13 +182,42 @@ export interface IncomingPayloadMap {
   match_found: Record<string, never>;
   game_start: { players: PlayerInfo[] };
   deal_cards: DealTiming & { cards: CardInfo[]; bottom_cards: CardInfo[] };
-  bid_turn: { server_time?: number; turn_deadline?: number; bid_token?: string; player_id: string; timeout: number; is_grab: boolean; multiplier: number };
+  bid_turn: {
+    server_time?: number;
+    turn_deadline?: number;
+    bid_token?: string;
+    player_id: string;
+    timeout: number;
+    is_grab: boolean;
+    multiplier: number;
+  };
   bid_result: { player_id: string; player_name: string; bid: boolean; is_grab: boolean; multiplier: number };
   landlord: { player_id: string; player_name: string; bottom_cards: CardInfo[]; multiplier: number };
-  play_turn: { server_time?: number; turn_deadline?: number; turn_token?: string; player_id: string; timeout: number; must_play: boolean; can_beat: boolean };
-  card_played: { player_id: string; player_name: string; cards: CardInfo[]; cards_left: number; hand_type: string };
+  play_turn: {
+    server_time?: number;
+    turn_deadline?: number;
+    turn_token?: string;
+    player_id: string;
+    timeout: number;
+    must_play: boolean;
+    can_beat: boolean;
+  };
+  card_played: {
+    player_id: string;
+    player_name: string;
+    cards: CardInfo[];
+    cards_left: number;
+    hand_type: string;
+  };
   player_pass: { player_id: string; player_name: string };
-  game_over: { winner_id: string; winner_name: string; is_landlord: boolean; player_hands: PlayerHand[]; multiplier: number; scores: PlayerScore[] };
+  game_over: {
+    winner_id: string;
+    winner_name: string;
+    is_landlord: boolean;
+    player_hands: PlayerHand[];
+    multiplier: number;
+    scores: PlayerScore[];
+  };
   stats_result: StatsResultPayload;
   leaderboard_result: { type: string; entries: LeaderboardEntry[] };
   room_list_result: { rooms: RoomListItem[] };

@@ -57,7 +57,7 @@ COLLECT_TRAINING_DATA=true docker compose up -d
 
 ## 本地运行
 
-Go 版本见 `go.mod`；Node 22+；MARVEL 推理建议使用 Python 3.12。
+Go 版本见 `go.mod`；Node 22+；MARVEL 推理使用 Python 3.12，依赖由 uv.lock 锁定。
 
 ```bash
 # 网页构建
@@ -67,12 +67,10 @@ npm run build
 cd ..
 
 # Python 环境和 CPU 推理依赖
-python3.12 -m venv douzero/.venv
-douzero/.venv/bin/python -m pip install 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu
-PYTHON="$PWD/douzero/.venv/bin/python" bash scripts/setup-marvel.sh
+bash scripts/setup-marvel.sh
 
 # 单独终端启动 AI，两个 .pt 文件须已放在 douzero/models
-AI_BACKEND=marvel douzero/.venv/bin/python douzero/server.py
+douzero/.venv/bin/python douzero/server.py
 
 # 单独终端启动 Redis
 redis-server
@@ -144,7 +142,7 @@ Vite 将它们输出为 `dist/assets/` 下带内容哈希的 MP3 文件，由 Go
 的 MARVEL / VRPO `v1.3` checkpoint：history_dim=128、feature_dim=256、4 层 decoder。
 适配器固定使用训练仓库版本 `acdcf199cf422e2b683cb22142b8e7cb33b14460`，
 调用原始 `Agent`、nanopokerlib 观测编码和 Kagami direct-policy 解码。
-没有将两个文件伪装为三个 ONNX 模型，也不需要转换权重。
+两个角色权重直接使用原训练仓库的编码与模型加载。
 
 - 地主加载 `landlord.pt`（iteration 26411）。
 - 下家农民与上家农民共用 `farmers.pt`（iteration 25011）。
@@ -163,7 +161,7 @@ docker compose exec ai python -c \
   "import urllib.request; print(urllib.request.urlopen('http://localhost:2021/health').read().decode())"
 ```
 
-原有 ONNX 服务保持兼容，`AI_BACKEND=onnx`（默认）仍按原方式加载三个 `.onnx` 文件。
+推理后端固定为 Marvel。`AI_BACKEND` 可省略或设为 `marvel`，其他值会在启动时明确报错。
 `DOUZERO_URL` 是 Go 到 AI 的兼容 HTTP 地址，也可指向 MARVEL 后端。
 叫/抢地主仍使用原有规则策略，这两个权重用于出牌决策。
 

@@ -11,17 +11,8 @@ import (
 
 func newTestLeaderboardManager(t *testing.T) (*LeaderboardManager, *miniredis.Miniredis) {
 	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("failed to start miniredis: %v", err)
-	}
-
-	client := redis.NewClient(&redis.Options{
-		Addr: mr.Addr(),
-	})
-
-	lm := NewLeaderboardManager(client)
-	return lm, mr
+	store, mr := newTestRedisStore(t)
+	return NewLeaderboardManager(store.client), mr
 }
 
 func TestLeaderboard_RecordGameResult_NewPlayer(t *testing.T) {

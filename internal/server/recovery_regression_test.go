@@ -12,14 +12,15 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	redisserver "github.com/alicebob/miniredis/v2/server"
 	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/require"
+
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
+	"github.com/palemoky/fight-the-landlord/internal/game/session"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
-	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/types"
-	"github.com/stretchr/testify/require"
 )
 
 func connectedRecoveryGame(t *testing.T, mr *miniredis.Miniredis) (server *Server, httpServer *httptest.Server, guestCookies []*http.Cookie, gameRoom *room.Room, game *session.GameSession) {

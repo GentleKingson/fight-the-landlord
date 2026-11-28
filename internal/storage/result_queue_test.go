@@ -20,6 +20,7 @@ func (h *blockedResultHook) DialHook(next redis.DialHook) redis.DialHook { retur
 func (h *blockedResultHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return next
 }
+
 func (h *blockedResultHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
 		if cmd.Name() == "watch" && cmd.Args()[1] == playerStatsKey+"blocked" {
@@ -33,7 +34,6 @@ func (h *blockedResultHook) ProcessHook(next redis.ProcessHook) redis.ProcessHoo
 func TestResultQueueIsolatesPlayersAndDeduplicatesRetries(t *testing.T) {
 	lb, mr := newTestLeaderboardManager(t)
 	defer mr.Close()
-	defer lb.redis.Close()
 	hook := &blockedResultHook{entered: make(chan struct{}), release: make(chan struct{})}
 	lb.redis.AddHook(hook)
 	var release sync.Once

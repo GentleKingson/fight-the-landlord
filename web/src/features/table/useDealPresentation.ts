@@ -1,5 +1,5 @@
 import { useLayoutEffect, useState } from 'react';
-import type { DealStage } from '../../stores/appStore';
+import type { DealStage } from '../../stores/types';
 
 /** Start/end timestamps and duration for a single dealt card flight. */
 export interface DealFlightTiming {

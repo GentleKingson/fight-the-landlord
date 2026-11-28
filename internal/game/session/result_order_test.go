@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 )
 
 type failedResultHook struct {
@@ -22,6 +23,7 @@ func (h *failedResultHook) DialHook(next redis.DialHook) redis.DialHook { return
 func (h *failedResultHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return next
 }
+
 func (h *failedResultHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
 		err := next(ctx, cmd)

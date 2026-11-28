@@ -1,7 +1,7 @@
 package room
 
 import (
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 )
 
 // ToRoomData 将 Room 转换为可序列化的 RoomData

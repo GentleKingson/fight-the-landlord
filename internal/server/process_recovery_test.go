@@ -13,14 +13,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/palemoky/fight-the-landlord/internal/bot"
-	"github.com/palemoky/fight-the-landlord/internal/config"
-	"github.com/palemoky/fight-the-landlord/internal/protocol"
-	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
-	"github.com/palemoky/fight-the-landlord/internal/server/session"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+
+	"github.com/palemoky/fight-the-landlord/internal/bot"
+	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/game/session"
+	"github.com/palemoky/fight-the-landlord/internal/protocol"
+	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 )
 
 // This subprocess is intentionally killed without cleanup to test crash recovery.

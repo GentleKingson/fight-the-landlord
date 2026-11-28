@@ -10,8 +10,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const gameKeyPrefix = "game:v2:"
-const pendingGamesKey = "game:pending-results"
+const (
+	gameKeyPrefix   = "game:v2:"
+	pendingGamesKey = "game:pending-results"
+)
 
 var ErrStaleGame = errors.New("game snapshot revision conflict")
 

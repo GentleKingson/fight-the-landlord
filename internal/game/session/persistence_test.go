@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
+
 	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
@@ -15,11 +18,9 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 	"github.com/palemoky/fight-the-landlord/internal/types"
-	"github.com/redis/go-redis/v9"
-	"github.com/stretchr/testify/require"
 )
 
 func persistentGame(t *testing.T) (game *GameSession, mr *miniredis.Miniredis, rdb *redis.Client) {
@@ -93,6 +94,7 @@ func (h *lostGameResponse) DialHook(next redis.DialHook) redis.DialHook { return
 func (h *lostGameResponse) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
 	return next
 }
+
 func (h *lostGameResponse) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
 		err := next(ctx, cmd)
@@ -225,6 +227,7 @@ func TestTerminalSnapshotRecoversResultAndDurableStatistics(t *testing.T) {
 type recoveryBotEngine struct{ contexts chan bot.GameContext }
 
 func (e *recoveryBotEngine) DecideBid(context.Context, string, []card.Card, *bool) bool { return false }
+
 func (e *recoveryBotEngine) DecidePlay(_ context.Context, _ string, game bot.GameContext) []card.Card {
 	e.contexts <- game
 	return nil

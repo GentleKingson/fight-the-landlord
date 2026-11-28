@@ -196,9 +196,11 @@ func (sm *SessionManager) Snapshot(playerID string) *PlayerSession {
 	}
 	session.mu.RLock()
 	defer session.mu.RUnlock()
-	return &PlayerSession{PlayerID: session.PlayerID, PlayerName: session.PlayerName,
+	return &PlayerSession{
+		PlayerID: session.PlayerID, PlayerName: session.PlayerName,
 		RoomCode: session.RoomCode, LastRoomCode: session.LastRoomCode,
-		IsOnline: session.IsOnline, DisconnectedAt: session.DisconnectedAt}
+		IsOnline: session.IsOnline, DisconnectedAt: session.DisconnectedAt,
+	}
 }
 
 // EnsureSession restores volatile metadata only after persistent identity verification.

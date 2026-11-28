@@ -2,7 +2,7 @@
 
 项目仅支持网页游玩。CLI、安装器、自动更新、聊天和 `/version` 接口已退役，旧 CLI 无法连接；历史源码可从 Git 标签获取。CLI 用户首次访问网页会创建游客身份，本次不提供 CLI 身份导入。现有网页用户在原域名下继续使用原 Cookie。
 
-默认入口为根 `Dockerfile` 和 `docker-compose.yml`。游戏镜像包含网页与 Go 服务，AI 镜像默认运行 MARVEL；两个模型由部署者提供并挂载到 `/models`。ONNX 推理源码继续保留。默认开启匿名牌局采集，可通过 `COLLECT_TRAINING_DATA=false` 关闭。
+默认入口为根 `Dockerfile` 和 `docker-compose.yml`。游戏镜像包含网页与 Go 服务，AI 镜像默认运行 MARVEL；两个模型由部署者提供并挂载到 `/models`。推理服务仅保留 MARVEL，统一使用 Python 3.12 和 uv 锁文件。默认开启匿名牌局采集，可通过 `COLLECT_TRAINING_DATA=false` 关闭。
 
 ## 现有 Web 部署
 

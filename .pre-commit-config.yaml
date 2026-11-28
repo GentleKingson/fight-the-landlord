@@ -52,6 +52,20 @@ repos:
         types: [go]
         exclude: '(internal/protocol/pb/.*\.pb\.go|internal/protocol/convert/msgtype/mapping\.go)$'
 
+      - id: web-prettier
+        name: Check changed web file formatting
+        entry: web/node_modules/.bin/prettier --check
+        language: system
+        files: '^web/.*\.(ts|tsx|json|css)$'
+        exclude: '(proto\.generated\.ts|package-lock\.json)$'
+
+      - id: python-ruff
+        name: Check changed inference Python files
+        entry: uv run --project douzero --locked ruff check
+        language: system
+        files: '^douzero/.*\.py$'
+        exclude: '^douzero/vendor/'
+
       # Build verification (catch compilation errors early)
       - id: go-build
         name: Verify Go build

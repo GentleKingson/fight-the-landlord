@@ -6,12 +6,13 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 type dealBotProbe struct {
@@ -45,7 +46,7 @@ func TestDealDeadlineRedealAndStaleCallbacks(t *testing.T) {
 		var oldTurn uint64
 		for range 6 {
 			require.Equal(t, GameStateDealing, gs.state)
-			require.Equal(t, RoomStateDealing, gs.room.GetState())
+			require.Equal(t, room.RoomStateDealing, gs.room.GetState())
 			require.Nil(t, gs.turnTimer)
 			require.Empty(t, gs.bidToken)
 			require.Error(t, gs.HandleBid(gs.players[gs.currentBidder].ID, true))
@@ -129,7 +130,7 @@ func TestDealCancelledOnCleanupAndRoomEnd(t *testing.T) {
 					gs.endGame(gs.players[0])
 					gs.mu.Unlock()
 				case "room_end":
-					gs.room.SetState(RoomStateEnded)
+					gs.room.SetState(room.RoomStateEnded)
 				}
 				advanceDealTime(t, gs, DealDuration)
 				gs.finishDeal(id)
