@@ -1,7 +1,9 @@
-.PHONY: help release test coverage lint fmt clean build install proto
+.PHONY: help release test coverage lint proto check-fast check-fast-go check-fast-web check-fast-python check-proto check-proto-changed test-core
 
 # 默认目标
-.DEFAULT_GOAL := help
+.DEFAULT_GOAL := check-fast
+CHECK_BASE ?= origin/main
+export CHECK_BASE
 
 # 颜色输出
 BLUE := \033[0;34m
@@ -17,6 +19,40 @@ help:  ## Show this help message
 	@echo "$(BLUE)      Fight the Landlord - Makefile     $(NC)"
 	@echo "$(BLUE)════════════════════════════════════════$(NC)"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "$(CYAN)%-15s$(NC) %s\n", $$1, $$2}'
+
+check-fast: check-fast-go check-fast-web check-fast-python check-proto-changed ## Static checks only; no unit tests or E2E
+
+check-fast-go: ## Go build, vet, and incremental correctness lint
+	go build ./...
+	go vet ./...
+	golangci-lint config verify
+	@if base=$$(git merge-base HEAD "$(CHECK_BASE)" 2>/dev/null) && \
+		git diff --quiet "$$base" -- .golangci.yml go.mod go.sum && \
+		[ -z "$$(git ls-files --others --exclude-standard -- '*.go')" ]; then \
+		echo "Go lint baseline: $$base"; \
+		golangci-lint run --new-from-rev="$$base" --whole-files; \
+	else \
+		echo 'Go lint: full analysis (changed configuration, new source, or unavailable baseline)'; \
+		golangci-lint run; \
+	fi
+
+check-fast-web: ## Typecheck Web source, existing tests, and tooling without running tests
+	npm --prefix web run typecheck
+
+check-fast-python: ## Python syntax and defect checks without installing inference dependencies
+	uv run --project douzero --locked --only-group dev ruff check douzero
+
+check-proto: ## Check Go/TS protocol generation without changing the worktree
+	bash scripts/check-proto.sh
+
+check-proto-changed:
+	bash scripts/check-proto.sh --if-changed
+
+test-core: ## Explicit, manual shared-rule checks and UI demo smoke tests
+	go test ./internal/game/rule
+	cd web && npm test -- tests/rules.test.ts
+	uv run --project douzero --locked --only-group dev python -m unittest discover -s douzero/tests -p test_classic_rules.py
+	cd web && npm run test:e2e -- tests/e2e/smoke.spec.ts
 
 ## lint: 运行 linter
 lint:  ## Run linter
@@ -49,6 +85,7 @@ proto:  ## Regenerate Protocol Buffer and message type mapping code
 	@echo "$(BLUE)Generating MessageType mapping code...$(NC)"
 	@cd internal/protocol/convert/msgtype && go run gen.go
 	@echo "$(GREEN)✓ MessageType mapping code generated$(NC)"
+	npm --prefix web run gen:proto
 
 ## release: 创建并推送版本标签
 release:  ## Create and push version tag

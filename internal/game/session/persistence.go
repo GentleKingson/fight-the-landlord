@@ -11,7 +11,6 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/storage"
-	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
 var ErrPersistenceUnavailable = errors.New("牌局正在等待可靠存储，请稍后重试或重连")
@@ -115,14 +114,6 @@ func (gs *GameSession) effect(effect func()) {
 
 func (gs *GameSession) broadcast(msg *protocol.Message) {
 	gs.effect(func() { gs.room.Broadcast(msg) })
-}
-
-func (gs *GameSession) send(client types.ClientInterface, msg *protocol.Message) {
-	gs.effect(func() {
-		if client != nil {
-			client.SendMessage(msg)
-		}
-	})
 }
 
 func (gs *GameSession) sendToPlayer(playerID string, msg *protocol.Message) {

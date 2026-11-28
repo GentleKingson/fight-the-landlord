@@ -7,6 +7,7 @@
     "dev": "vite",
     "gen:proto": "pbjs -t ./scripts/pbjs-static-target.cjs --keep-case -p .. -o src/protocol/proto.generated.ts ../internal/protocol/proto/message.proto ../internal/protocol/proto/common.proto ../internal/protocol/proto/client.proto ../internal/protocol/proto/server.proto ../internal/protocol/proto/game.proto",
     "build": "npm run gen:proto && tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",

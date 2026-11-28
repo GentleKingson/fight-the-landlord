@@ -1,6 +1,7 @@
 # Pre-commit hooks configuration
 # Install: pre-commit install && pre-commit install --hook-type pre-push
 # Run manually: pre-commit run --all-files
+default_stages: [pre-commit]
 
 repos:
   # General file checks (fast, run on commit)
@@ -16,28 +17,9 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=1000"]
 
-  # Go linting with golangci-lint
-  # 版本须与 CI (.github/workflows/test.yml 的 GOLANGCI_LINT_VERSION) 保持一致，
-  # 否则会出现"本地通过、CI 报错"的情况（不同版本的 linter 规则/阈值会变化）。
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.11.1
-    hooks:
-      - id: golangci-lint
-        args:
-          - --fix
-          - --timeout=5m
-          - --config=.golangci.yml
-        pass_filenames: false
-
-  # Go formatting and imports
+  # Tools are installed by .agents/setup; golangci-lint v2.11.1 matches CI.
   - repo: local
     hooks:
-      - id: go-mod-tidy
-        name: Tidy Go modules
-        entry: go mod tidy
-        language: system
-        pass_filenames: false
-
       - id: goimports
         name: Format Go imports
         entry: goimports -w -local github.com/palemoky/fight-the-landlord
@@ -61,24 +43,36 @@ repos:
 
       - id: python-ruff
         name: Check changed inference Python files
-        entry: uv run --project douzero --locked ruff check
+        entry: uv run --project douzero --locked --only-group dev ruff check
         language: system
         files: '^douzero/.*\.py$'
         exclude: '^douzero/vendor/'
 
-      # Build verification (catch compilation errors early)
-      - id: go-build
-        name: Verify Go build
-        entry: bash -c 'go build -v ./...'
+      - id: go-check-fast
+        name: Go build, vet, and incremental lint
+        entry: make check-fast-go
         language: system
+        files: '(\.go$|^go\.(mod|sum)$|^\.golangci\.yml$|^Makefile$)'
         pass_filenames: false
-        stages: [pre-push]
 
-      # Go unit tests with coverage (heavy, run on push)
-      - id: go-test
-        name: Run Go unit tests
-        entry: bash -c 'pkgs=$(go list ./internal/... | grep -v "/internal/ai$"); go test -race -shuffle=on -coverprofile=coverage.out -covermode=atomic $pkgs'
+      - id: web-typecheck
+        name: Typecheck Web source and tooling
+        entry: make check-fast-web
         language: system
-        stages: [pre-push]
+        files: '^web/.*\.(ts|tsx|json)$|^Makefile$'
         pass_filenames: false
-        verbose: true
+
+      - id: python-check-fast
+        name: Check inference Python configuration
+        entry: make check-fast-python
+        language: system
+        files: '^douzero/(pyproject\.toml|uv\.lock)$|^Makefile$'
+        pass_filenames: false
+
+      - id: protocol-sync
+        name: Check generated Go and TS protocol files
+        entry: make check-proto-changed
+        language: system
+        # pre-commit omits deleted files; the script handles path filtering itself.
+        always_run: true
+        pass_filenames: false
