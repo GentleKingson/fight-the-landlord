@@ -54,6 +54,19 @@ docker compose up -d --build
 CLI 已退役，旧客户端停止连接，历史源码保留在 Git 标签中。网页首次使用创建游客身份。
 现有部署升级前请阅读[Web-Only 迁移说明](docs/web-only-migration.md)，沿用原项目名和数据卷。
 
+### Amp orb 开发环境
+
+新 orb 通过 `.agents/setup` 预装 Go（跟随 `go.mod`）、Node 22、Python 3.12、uv 0.13.5、
+Go lint/格式化与协议生成工具，并安装锁定的 Web/Python 依赖、Playwright Chromium 和
+MARVEL 原生编码器。Amp 将安装结果与缓存保存到项目快照；重复 setup 会复用已安装的工具。
+setup 不执行测试，也不安装 Git hooks，不复制 Docker 专用的 `.env.example`。
+
+`.agents/resume` 在启动和唤醒时确保受监管的本地 Redis 可用；Redis 仅监听回环地址，
+关闭磁盘持久化，仅供开发使用。可用 `amp orb services ensure` 手动恢复服务。
+网页和 Go 服务仍按[网页部署指南](docs/web-play.md)按需启动，不在每个 orb 自动运行。
+模型权重不会自动下载，真实推理仍需自行提供 `douzero/models/landlord.pt` 和 `farmers.pt`。
+生命周期脚本合入项目默认分支后，后续新 orb 才会使用这套配置。
+
 ## 游戏规则
 
 与常见的斗地主相同，开局叫地主后，两位农民需配合击败地主，地主则需要阻击两个农民，率先出完手牌的一方获胜。

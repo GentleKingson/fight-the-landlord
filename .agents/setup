@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+started=$SECONDS
+trap 'echo "[orb setup] Failed at line $LINENO after ${SECONDS}s" >&2' ERR
+
+# Match go.mod, CI, and the versions recorded in generated protobuf files.
+go_version=$(awk '$1 == "go" { print $2; exit }' go.mod)
+node_version=22.23.5
+uv_version=0.13.5
+protoc_version=36.2
+lint_version=v2.11.1
+tools="$HOME/.local/share/fight-the-landlord/toolchains"
+downloads="$PWD/.amp/in/orb-backup/setup-downloads"
+export GOBIN="$HOME/.local/bin"
+export PATH="$GOBIN:$PATH"
+mkdir -p "$tools" "$downloads" "$GOBIN"
+
+if [[ $(uname -sm) != 'Linux x86_64' ]]; then
+  echo 'Orb setup currently supports Linux x86_64.' >&2
+  exit 1
+fi
+
+step() { echo "[orb setup ${SECONDS}s] $*"; }
+
+download() {
+  local url=$1 file="$downloads/$2" checksum=$3
+  if ! echo "$checksum  $file" | sha256sum --check --status 2>/dev/null; then
+    curl --fail --location --retry 3 --connect-timeout 20 --max-time 180 "$url" -o "$file.part"
+    echo "$checksum  $file.part" | sha256sum --check --status
+    mv "$file.part" "$file"
+  fi
+}
+
+step 'Checking system packages'
+missing=()
+for package in ca-certificates curl unzip xz-utils build-essential redis-server redis-tools shellcheck; do
+  if [[ $(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true) != 'install ok installed' ]]; then
+    missing+=("$package")
+  fi
+done
+if ((${#missing[@]})); then
+  sudo apt-get update -qq
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+fi
+
+step "Installing Go $go_version, Node $node_version, and protoc $protoc_version if needed"
+if [[ ! -x "$tools/go$go_version/bin/go" ]]; then
+  # Read the checksum for the exact go.mod version from Go's official manifest.
+  go_archive="go$go_version.linux-amd64.tar.gz"
+  go_checksum=$(curl -fsSL --retry 3 --max-time 60 'https://go.dev/dl/?mode=json&include=all' |
+    python3 -c 'import json,sys; name=sys.argv[1]; print(next(f["sha256"] for v in json.load(sys.stdin) for f in v["files"] if f["filename"] == name))' "$go_archive")
+  download "https://go.dev/dl/$go_archive" "$go_archive" "$go_checksum"
+  mkdir -p "$tools/go$go_version"
+  tar -xzf "$downloads/$go_archive" --strip-components=1 -C "$tools/go$go_version"
+fi
+ln -sfn "$tools/go$go_version/bin/go" "$GOBIN/go"
+ln -sfn "$tools/go$go_version/bin/gofmt" "$GOBIN/gofmt"
+
+if [[ ! -x "$tools/node-v$node_version/bin/node" ]]; then
+  node_archive="node-v$node_version-linux-x64.tar.xz"
+  download "https://nodejs.org/dist/v$node_version/$node_archive" "$node_archive" \
+    cdeb8670a0c81f51b4dc4ac61919f9b1ad917b304bf8221eb939570663d240f8
+  mkdir -p "$tools/node-v$node_version"
+  tar -xJf "$downloads/$node_archive" --strip-components=1 -C "$tools/node-v$node_version"
+fi
+for binary in node npm npx; do
+  ln -sfn "$tools/node-v$node_version/bin/$binary" "$GOBIN/$binary"
+done
+
+if [[ ! -x "$tools/protoc-$protoc_version/bin/protoc" ]]; then
+  protoc_archive="protoc-$protoc_version-linux-x86_64.zip"
+  download "https://github.com/protocolbuffers/protobuf/releases/download/v$protoc_version/$protoc_archive" \
+    "$protoc_archive" 121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278
+  unzip -qo "$downloads/$protoc_archive" -d "$tools/protoc-$protoc_version"
+fi
+ln -sfn "$tools/protoc-$protoc_version/bin/protoc" "$GOBIN/protoc"
+
+# Amp preserves PATH additions in shared snapshots; no shell activation is needed.
+# shellcheck disable=SC2016
+profile_line='case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac'
+if ! grep -Fqx "$profile_line" "$HOME/.bash_profile" 2>/dev/null; then
+  printf '\n%s\n' "$profile_line" >> "$HOME/.bash_profile"
+fi
+
+step 'Installing Python tools and locked inference dependencies'
+if [[ $(uv --version) != "uv $uv_version"* ]]; then
+  uv tool install "uv==$uv_version" --force
+fi
+hash -r
+uv python install 3.12
+uv sync --project douzero --locked --group build
+
+step 'Installing the pinned MARVEL source and native encoder (no model downloads)'
+bash scripts/setup-marvel.sh
+# setup-marvel installs production/build dependencies; restore the dev group too.
+uv sync --project douzero --locked --group build --inexact
+uv tool install pre-commit==4.5.1 --python 3.12
+
+step 'Downloading Go modules and installing Go development tools'
+go mod download
+bash scripts/install-ci-lint.sh "$lint_version" "$GOBIN"
+for spec in \
+  google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11 \
+  golang.org/x/tools/cmd/goimports@v0.42.0 \
+  mvdan.cc/gofumpt@v0.9.2; do
+  binary=${spec%@*}
+  binary=${binary##*/}
+  if ! go version -m "$GOBIN/$binary" 2>/dev/null | awk -v version="${spec##*@}" \
+    '$1 == "mod" && $3 == version { found = 1 } END { exit !found }'; then
+    go install "$spec"
+  fi
+done
+
+step 'Installing locked Web dependencies and Playwright Chromium'
+npm --prefix web ci --no-audit --no-fund
+(
+  cd web
+  npx playwright install --only-shell chromium
+  check_browser() {
+    node --input-type=module -e 'import { chromium } from "playwright"; const browser = await chromium.launch(); await browser.close();'
+  }
+  # Avoid apt-get update on warm snapshots when all browser libraries work.
+  if ! check_browser; then
+    npx playwright install-deps chromium
+    check_browser
+  fi
+)
+
+step 'Warming the Go build cache (no tests)'
+go build ./...
+step "Ready in $((SECONDS - started))s; model weights remain user-provided"

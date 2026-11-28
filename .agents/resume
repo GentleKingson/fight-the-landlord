@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# Only the local Redis service is declared; no installs or user authentication.
+amp orb services ensure
+# A non-portal service can return from ensure before its listener opens.
+for _ in {1..25}; do
+  if redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null; then
+    exit 0
+  fi
+  sleep 0.1
+done
+echo 'Local Redis did not become ready within 2.5 seconds.' >&2
+exit 1
