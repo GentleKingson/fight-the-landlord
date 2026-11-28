@@ -1,140 +1,22 @@
+import type { AppState, DealStage, TableSlice, SeatAction, TableAction } from './types';
 import { create } from 'zustand';
 import {
   MsgType,
   type CardInfo,
   type DealTiming,
   type GameStateDto,
-  type IncomingMessage,
   type LeaderboardEntry,
-  type LobbyPanel,
-  type Phase,
   type PlayerHand,
   type PlayerInfo,
   type PlayerScore,
   type RoomListItem,
-  type StatsResultPayload,
-  type UtilityDrawer
+  type StatsResultPayload
 } from '../protocol/types';
 import { cardKey, deductCounter, initialCounter, sortCards } from '../shared/cards/cardModel';
 import { observeClock, turnTiming } from '../transport/clock';
-import { captureEndSnapshot, END_REVEAL_DURATION_MS, type EndSnapshot, type EndView } from './endGame';
+import { captureEndSnapshot, END_REVEAL_DURATION_MS } from './endGame';
 
 const MATCH_MODE_STORAGE_KEY = 'ddz_match_mode';
-
-interface ConnectionSlice {
-  submission: 'idle' | 'pending' | 'unknown' | 'confirmed' | 'rejected';
-  submissionMessage: string;
-  connected: boolean;
-  sessionReplaced: boolean;
-  playerId: string;
-  playerName: string;
-  latency: number;
-  error: string;
-  maintenance: boolean;
-}
-
-interface LobbySlice {
-  roomRequest: 'create_room' | 'join_room' | 'ready' | 'cancel_ready' | 'start_game' | null;
-  cancellingMatch: boolean;
-  matchMode: 'practice' | 'online';
-  phase: Phase;
-  roomCode: string;
-  ownerId: string;
-  players: PlayerInfo[];
-  onlineCount: number;
-  lobbyPanel: LobbyPanel;
-  roomCodeInput: string;
-  stats: StatsResultPayload | null;
-  leaderboard: LeaderboardEntry[];
-  leaderboardType: string;
-  roomList: RoomListItem[];
-}
-
-/** Local wall-clock window for an active card-dealing animation. */
-export interface DealStage {
-  id: string;
-  startAt: number;
-  endAt: number;
-}
-
-interface TableSlice {
-  roundId: string;
-  endSnapshot: EndSnapshot | null;
-  endView: EndView;
-  revealDeadline: number | null;
-  deal: DealStage | null;
-  bidToken: string;
-  turnToken: string;
-  hand: CardInfo[];
-  bottomCards: CardInfo[];
-  bottomCardsRevealed: boolean;
-  currentTurn: string;
-  lastPlayed: CardInfo[];
-  lastPlayedBy: string;
-  lastPlayedName: string;
-  lastHandType: string;
-  mustPlay: boolean;
-  canBeat: boolean;
-  multiplier: number;
-  isGrabTurn: boolean;
-  timeout: number;
-  timerStart: number;
-  serverDeadline: number;
-  serverTimestamp: number;
-  winnerId: string;
-  winnerName: string;
-  winnerIsLandlord: boolean;
-  finalMultiplier: number;
-  scores: PlayerScore[];
-  playerHands: PlayerHand[];
-  cardCounter: Record<number, number>;
-  recentActions: TableAction[];
-  seatActions: Record<string, SeatAction>;
-}
-
-interface UiSlice {
-  selectedCards: Set<string>;
-  drawer: UtilityDrawer;
-  tableMessage: string;
-}
-
-/** Recent play, pass, bid, or system event recorded in the table history drawer. */
-export interface TableAction {
-  type: 'play' | 'pass' | 'bid' | 'system';
-  player_id?: string;
-  player_name?: string;
-  cards?: CardInfo[];
-  hand_type?: string;
-  label?: string;
-}
-
-/** Most recent action displayed next to a player's seat on the table. */
-export interface SeatAction {
-  type: 'play' | 'pass' | 'bid';
-  player_id: string;
-  player_name?: string;
-  cards?: CardInfo[];
-  hand_type?: string;
-  label?: string;
-}
-
-interface AppActions {
-  setConnected: (connected: boolean) => void;
-  setError: (error: string) => void;
-  setLobbyPanel: (panel: LobbyPanel) => void;
-  setRoomCodeInput: (value: string) => void;
-  setDrawer: (drawer: UtilityDrawer) => void;
-  toggleCard: (key: string) => void;
-  setSelection: (keys: string[]) => void;
-  clearSelection: () => void;
-  leaveLocalRoom: () => void;
-  showSettlement: () => void;
-  reviewEndTable: () => void;
-  handleMessage: (message: IncomingMessage) => void;
-}
-
-/** Combined application state and store actions. */
-export type AppState = ConnectionSlice & LobbySlice & TableSlice & UiSlice & AppActions;
 
 const INITIAL_TABLE: TableSlice = {
   roundId: '',
@@ -299,7 +181,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           snapshot &&
           payload.game_state?.phase === 'ended' &&
           snapshot.roomCode === payload.room_code &&
-          (!payload.game_state.deal_id || !snapshot.roundId || snapshot.roundId === payload.game_state.deal_id);
+          (!payload.game_state.deal_id ||
+            !snapshot.roundId ||
+            snapshot.roundId === payload.game_state.deal_id);
         // The server may already have expired the room; a local snapshot remains readable.
         if (
           state.phase === 'game_over' &&
@@ -319,7 +203,9 @@ export const useAppStore = create<AppState>((set, get) => ({
             ...restoreSnapshot(payload.game_state)
           });
         } else {
-          const keepWaitingPlayers = Boolean(samePlayer && payload.room_code && state.roomCode === payload.room_code);
+          const keepWaitingPlayers = Boolean(
+            samePlayer && payload.room_code && state.roomCode === payload.room_code
+          );
           set({
             ...INITIAL_TABLE,
             players: keepWaitingPlayers ? state.players : [],
@@ -454,7 +340,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (deal && state.deal?.id === deal.id) break;
         set({
           ...(deal
-            ? { ...INITIAL_TABLE, deal, phase: 'dealing' as const, selectedCards: new Set<string>(), tableMessage: '' }
+            ? {
+                ...INITIAL_TABLE,
+                deal,
+                phase: 'dealing' as const,
+                selectedCards: new Set<string>(),
+                tableMessage: ''
+              }
             : {}),
           roundId: payload.deal_id ?? state.roundId,
           hand,
@@ -502,7 +394,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           is_grab: boolean;
           multiplier: number;
         };
-        const label = payload.bid ? (payload.is_grab ? '抢地主' : '叫地主') : payload.is_grab ? '不抢' : '不叫';
+        const label = payload.bid
+          ? payload.is_grab
+            ? '抢地主'
+            : '叫地主'
+          : payload.is_grab
+            ? '不抢'
+            : '不叫';
         const seatAction: SeatAction = {
           type: 'bid',
           player_id: payload.player_id,
@@ -600,7 +498,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           seatActions: setSeatAction(state.mustPlay ? {} : state.seatActions, action),
           selectedCards: new Set(
             state.hand
-              .filter((card) => state.selectedCards.has(cardKey(card)) && (!isMe || !playedKeys.has(cardKey(card))))
+              .filter(
+                (card) => state.selectedCards.has(cardKey(card)) && (!isMe || !playedKeys.has(cardKey(card)))
+              )
               .map((card) => cardKey(card))
           ),
           tableMessage: ''
@@ -670,20 +570,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       case MsgType.RoomListResult:
         set({ roomList: (message.payload as { rooms: RoomListItem[] }).rooms ?? [] });
         break;
-      case MsgType.PlayerOffline: {
-        const payload = message.payload as { player_id: string };
-        set({
-          players: state.players.map((player) =>
-            player.id === payload.player_id ? { ...player, online: false } : player
-          )
-        });
-        break;
-      }
+      case MsgType.PlayerOffline:
       case MsgType.PlayerOnline: {
         const payload = message.payload as { player_id: string };
         set({
           players: state.players.map((player) =>
-            player.id === payload.player_id ? { ...player, online: true } : player
+            player.id === payload.player_id
+              ? { ...player, online: message.type === MsgType.PlayerOnline }
+              : player
           )
         });
         break;
@@ -734,7 +628,11 @@ function normalizeLobbyPlayers(players: PlayerInfo[]): PlayerInfo[] {
   return players.map((player) => normalizeLobbyPlayer(player)).sort((a, b) => a.seat - b.seat);
 }
 
-function normalizeGamePlayers(players: PlayerInfo[], currentPlayerId: string, currentHandCount = 17): PlayerInfo[] {
+function normalizeGamePlayers(
+  players: PlayerInfo[],
+  currentPlayerId: string,
+  currentHandCount = 17
+): PlayerInfo[] {
   return players
     .map((player) => ({
       ...player,
@@ -826,7 +724,7 @@ function restoreSnapshot(dto: GameStateDto): Partial<AppState> {
         ? 'dealing'
         : dto.phase === 'bidding'
           ? 'bidding'
-            : dto.phase === 'playing'
+          : dto.phase === 'playing'
             ? 'playing'
             : dto.phase === 'ended'
               ? 'game_over'

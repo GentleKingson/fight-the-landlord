@@ -6,6 +6,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
+
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
@@ -174,7 +176,7 @@ func (gs *GameSession) setLandlord(idx int) {
 
 	// 开始游戏，地主先出牌
 	gs.state = GameStatePlaying
-	gs.setRoomState(RoomStatePlaying)
+	gs.setRoomState(room.RoomStatePlaying)
 	gs.currentPlayer = idx
 	gs.lastPlayerIdx = idx
 

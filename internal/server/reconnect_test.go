@@ -1,19 +1,21 @@
 package server
 
 import (
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/server/handler"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
-	"sync"
-	"testing"
-	"time"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/palemoky/fight-the-landlord/internal/game/session"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
-	"github.com/palemoky/fight-the-landlord/internal/server/session"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRecoveredClientIdentityAndRoomAreRetained(t *testing.T) {

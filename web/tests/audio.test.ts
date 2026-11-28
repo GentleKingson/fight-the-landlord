@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { connectBackgroundMusic } from '../src/audio/backgroundMusic';
 import { cardSoundUrls } from '../src/audio/cardSounds';
 import { GameAudio } from '../src/audio/gameAudio';
-import type { Phase } from '../src/protocol/types';
+import type { Phase } from '../src/stores/types';
 import { useAppStore } from '../src/stores/appStore';
 
 function cards(rank: number, count = 1) {
@@ -60,7 +60,10 @@ function spoken() {
 beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal('AudioContext', FakeContext);
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(1))));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(new Uint8Array(1)))
+  );
   audio = new GameAudio();
 });
 
@@ -109,7 +112,7 @@ it('serializes voices and effects and bounds rapid pending turns', async () => {
     await flush();
   }
   expect(vi.mocked(fetch).mock.calls.map((call) => call[0])).toEqual(
-    ['type_bomb', 'bomb', 'single_5', 'single_6', 'single_7'].map((name) => cardSoundUrls[name]),
+    ['type_bomb', 'bomb', 'single_5', 'single_6', 'single_7'].map((name) => cardSoundUrls[name])
   );
 });
 
@@ -202,7 +205,7 @@ it.each([
   ['fetch', 100],
   ['fetch', 1000],
   ['decode', 100],
-  ['decode', 1000],
+  ['decode', 1000]
 ] as const)('includes queue time when checking expiry after %s takes %i ms', async (stage, loadMs) => {
   vi.useFakeTimers();
   audio.setEnabled(true);
@@ -260,7 +263,7 @@ it.each([1, 2])('announces %i remaining cards after the hand voice and effect', 
     await flush();
   }
   expect(vi.mocked(fetch).mock.calls.map((call) => call[0])).toEqual(
-    ['type_bomb', 'bomb', `last${remaining}`].map((name) => cardSoundUrls[name]),
+    ['type_bomb', 'bomb', `last${remaining}`].map((name) => cardSoundUrls[name])
   );
 });
 
@@ -268,7 +271,7 @@ it.each([
   [true, false, 'bid_call'],
   [false, false, 'bid_nocall'],
   [true, true, 'bid_grab'],
-  [false, true, 'bid_nograb'],
+  [false, true, 'bid_nograb']
 ] as const)('maps confirmed bid=%s grab=%s to %s', async (bid, grab, name) => {
   audio.setEnabled(true);
   audio.bid(bid, grab);
@@ -345,7 +348,7 @@ it('preserves the winning hand before settlement and discards older pending acti
     await flush();
   }
   expect(vi.mocked(fetch).mock.calls.map((call) => call[0])).toEqual(
-    ['pass_buyao', 'type_rocket', 'bomb', 'win'].map((name) => cardSoundUrls[name]),
+    ['pass_buyao', 'type_rocket', 'bomb', 'win'].map((name) => cardSoundUrls[name])
   );
 });
 

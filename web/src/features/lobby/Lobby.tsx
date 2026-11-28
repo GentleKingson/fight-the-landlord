@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { MsgType, type LobbyPanel, type PlayerInfo } from '../../protocol/types';
+import { MsgType, type PlayerInfo } from '../../protocol/types';
+import type { LobbyPanel } from '../../stores/types';
 import type { GameSocket } from '../../transport/wsClient';
 import { useAppStore } from '../../stores/appStore';
 import { SoundToggle } from '../../audio/SoundToggle';
@@ -28,7 +29,7 @@ const NAV_ITEMS = [
   ['home', '大厅'],
   ['leaderboard', '战绩榜'],
   ['stats', '我的战绩'],
-  ['rules', '规则'],
+  ['rules', '规则']
 ] as const;
 
 const ROOM_REQUEST_LABELS = {
@@ -36,7 +37,7 @@ const ROOM_REQUEST_LABELS = {
   join_room: '加入房间',
   ready: '准备',
   cancel_ready: '取消准备',
-  start_game: '开始游戏',
+  start_game: '开始游戏'
 } as const;
 
 const COPY_RESET_DELAY_MS = 2000;
@@ -76,7 +77,11 @@ export function Lobby({ socket }: LobbyProps) {
       {phase === 'matching' ? <MatchingPanel socket={socket} /> : null}
       {phase === 'waiting' ? <RoomWaiting socket={socket} roomCode={roomCode} players={players} /> : null}
       {!activeSession ? (
-        panel === 'home' ? <LobbyHome socket={socket} /> : <LobbySubPanel socket={socket} panel={panel} />
+        panel === 'home' ? (
+          <LobbyHome socket={socket} />
+        ) : (
+          <LobbySubPanel socket={socket} panel={panel} />
+        )
       ) : null}
 
       <nav className={`bottom-nav${activeSession ? ' is-locked' : ''}`} aria-label="大厅导航">
@@ -116,7 +121,7 @@ function submitRoomRequest(socket: GameSocket, type: keyof typeof ROOM_REQUEST_L
     useAppStore.setState({
       roomRequest: type,
       error: '',
-      matchMode: type === MsgType.CreateRoom || type === MsgType.JoinRoom ? 'online' : state.matchMode,
+      matchMode: type === MsgType.CreateRoom || type === MsgType.JoinRoom ? 'online' : state.matchMode
     });
   } else {
     state.setError(`${label}请求未发送，请连接恢复后重试`);
@@ -124,7 +129,12 @@ function submitRoomRequest(socket: GameSocket, type: keyof typeof ROOM_REQUEST_L
 }
 
 function LobbyHome({ socket }: LobbyProps) {
-  const { status, retry, requested } = useLobbyRequest(socket, MsgType.GetRoomList, MsgType.RoomListResult, false);
+  const { status, retry, requested } = useLobbyRequest(
+    socket,
+    MsgType.GetRoomList,
+    MsgType.RoomListResult,
+    false
+  );
   const roomCodeInput = useAppStore((state) => state.roomCodeInput);
   const roomList = useAppStore((state) => state.roomList);
   const setRoomCodeInput = useAppStore((state) => state.setRoomCodeInput);
@@ -354,7 +364,11 @@ function legacyCopyText(text: string): boolean {
 }
 
 async function writeTextToClipboard(text: string): Promise<void> {
-  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+  if (
+    typeof navigator !== 'undefined' &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+  ) {
     await navigator.clipboard.writeText(text);
     return;
   }
@@ -478,7 +492,7 @@ function RoomWaiting({ socket, roomCode, players }: RoomWaitingProps) {
     }
     const shareData: ShareData = {
       title: '斗地主房间邀请',
-      text: `快来加入我的斗地主房间，房间号：${roomCode}`,
+      text: `快来加入我的斗地主房间，房间号：${roomCode}`
     };
     try {
       if (typeof navigator.canShare === 'function' && !navigator.canShare(shareData)) {
@@ -547,7 +561,9 @@ function RoomWaiting({ socket, roomCode, players }: RoomWaitingProps) {
               }
             >
               <Icon name={copyState === 'copied' ? 'check' : 'copy'} />
-              <span>{copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制房间号'}</span>
+              <span>
+                {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制房间号'}
+              </span>
             </button>
             {canShare ? (
               <button
@@ -669,7 +685,12 @@ function RoomWaiting({ socket, roomCode, players }: RoomWaitingProps) {
               <button ref={cancelButtonRef} type="button" className="secondary-action" onClick={closeConfirm}>
                 取消
               </button>
-              <button ref={confirmButtonRef} type="button" className="primary-action" onClick={confirmStartGame}>
+              <button
+                ref={confirmButtonRef}
+                type="button"
+                className="primary-action"
+                onClick={confirmStartGame}
+              >
                 确认开始
               </button>
             </div>
@@ -782,7 +803,9 @@ function LeaderboardPanel({ socket }: LobbyProps) {
                     <strong>{entry.player_name}</strong>
                     {isMe ? <small className="me-tag">我</small> : null}
                   </div>
-                  <span className="ranking-meta">{wins} 胜 · 胜率 {winRate.toFixed(1)}%</span>
+                  <span className="ranking-meta">
+                    {wins} 胜 · 胜率 {winRate.toFixed(1)}%
+                  </span>
                   <em>{entry.score} 分</em>
                 </div>
               );
@@ -810,42 +833,47 @@ function StatsPanel({ socket }: LobbyProps) {
   const isLoading = status === '正在加载…';
 
   const hasPlayedGames = Boolean(
-    stats && (
-      stats.total_games > 0 ||
+    stats &&
+    (stats.total_games > 0 ||
       stats.wins > 0 ||
       (stats.losses ?? 0) > 0 ||
       stats.score !== 0 ||
-      stats.rank > 0
-    )
+      stats.rank > 0)
   );
   const displayName = stats?.player_name || playerName;
 
   const totalGames = stats?.total_games ?? 0;
   const wins = stats?.wins ?? 0;
   const losses = stats?.losses ?? Math.max(0, totalGames - wins);
-  const rawWinRate = stats && Number.isFinite(stats.win_rate)
-    ? stats.win_rate
-    : totalGames > 0 ? (wins / totalGames) * 100 : 0;
+  const rawWinRate =
+    stats && Number.isFinite(stats.win_rate)
+      ? stats.win_rate
+      : totalGames > 0
+        ? (wins / totalGames) * 100
+        : 0;
   const winRate = Math.min(100, Math.max(0, rawWinRate));
   const score = stats?.score ?? 0;
   const rankLabel = stats && stats.rank > 0 ? `#${stats.rank}` : '未上榜';
   const currentStreak = stats?.current_streak ?? 0;
   const maxWinStreak = stats?.max_win_streak ?? 0;
-  const streakBadge = currentStreak > 0
-    ? `${currentStreak} 连胜中`
-    : currentStreak < 0
-      ? `${Math.abs(currentStreak)} 连败`
-      : '状态平稳';
-  const streakTileValue = currentStreak > 0
-    ? `${currentStreak} 连胜`
-    : currentStreak < 0
-      ? `${Math.abs(currentStreak)} 连败`
-      : '暂无连胜';
+  const streakBadge =
+    currentStreak > 0
+      ? `${currentStreak} 连胜中`
+      : currentStreak < 0
+        ? `${Math.abs(currentStreak)} 连败`
+        : '状态平稳';
+  const streakTileValue =
+    currentStreak > 0
+      ? `${currentStreak} 连胜`
+      : currentStreak < 0
+        ? `${Math.abs(currentStreak)} 连败`
+        : '暂无连胜';
 
   const landlordGames = stats?.landlord_games ?? 0;
   const landlordWins = stats?.landlord_wins ?? 0;
   const landlordLosses = Math.max(0, landlordGames - landlordWins);
-  const landlordRate = landlordGames > 0 ? Math.min(100, Math.max(0, (landlordWins / landlordGames) * 100)) : 0;
+  const landlordRate =
+    landlordGames > 0 ? Math.min(100, Math.max(0, (landlordWins / landlordGames) * 100)) : 0;
 
   const farmerGames = stats?.farmer_games ?? 0;
   const farmerWins = stats?.farmer_wins ?? 0;
@@ -884,11 +912,15 @@ function StatsPanel({ socket }: LobbyProps) {
               <div className="stats-identity__copy">
                 <div className="stats-identity__row">
                   <h3>{displayName || '当前玩家'}</h3>
-                  <span className={`streak-pill${currentStreak > 0 ? ' is-hot' : currentStreak < 0 ? ' is-cold' : ''}`}>
+                  <span
+                    className={`streak-pill${currentStreak > 0 ? ' is-hot' : currentStreak < 0 ? ' is-cold' : ''}`}
+                  >
                     {streakBadge}
                   </span>
                 </div>
-                <p>累计对局 {totalGames} 场 · {wins} 胜 {losses} 负</p>
+                <p>
+                  累计对局 {totalGames} 场 · {wins} 胜 {losses} 负
+                </p>
               </div>
             </div>
 
@@ -916,7 +948,11 @@ function StatsPanel({ socket }: LobbyProps) {
 
           <div className="stats-grid">
             <Stat label="总局数" value={totalGames} meta="已完成场次" />
-            <Stat label="胜局 / 负局" value={`${wins} / ${losses}`} meta={`胜场差 ${wins - losses >= 0 ? `+${wins - losses}` : wins - losses}`} />
+            <Stat
+              label="胜局 / 负局"
+              value={`${wins} / ${losses}`}
+              meta={`胜场差 ${wins - losses >= 0 ? `+${wins - losses}` : wins - losses}`}
+            />
             <Stat label="当前走势" value={streakTileValue} meta="近期连续战况" />
             <Stat label="最高连胜" value={maxWinStreak} meta="历史最佳纪录" />
           </div>
@@ -1009,16 +1045,7 @@ interface RoleStatProps {
   totalGames: number;
 }
 
-function RoleStat({
-  role,
-  title,
-  tag,
-  games,
-  wins,
-  losses,
-  rate,
-  totalGames,
-}: RoleStatProps) {
+function RoleStat({ role, title, tag, games, wins, losses, rate, totalGames }: RoleStatProps) {
   const share = totalGames > 0 ? Math.round((games / totalGames) * 100) : 0;
   return (
     <div className={`role-stat role-stat--${role}`}>

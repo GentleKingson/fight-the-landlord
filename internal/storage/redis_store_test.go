@@ -12,17 +12,14 @@ import (
 
 func newTestRedisStore(t *testing.T) (*RedisStore, *miniredis.Miniredis) {
 	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("failed to start miniredis: %v", err)
-	}
+	mr := miniredis.RunT(t)
 
 	client := redis.NewClient(&redis.Options{
 		Addr: mr.Addr(),
 	})
 
-	store := NewRedisStore(client)
-	return store, mr
+	t.Cleanup(func() { assert.NoError(t, client.Close()) })
+	return NewRedisStore(client), mr
 }
 
 func TestRedisStore_SaveLoadDeleteRoom(t *testing.T) {

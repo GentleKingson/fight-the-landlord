@@ -1,4 +1,5 @@
-import type { Phase, PlayerScore } from '../../protocol/types';
+import type { PlayerScore } from '../../protocol/types';
+import type { Phase } from '../../stores/types';
 
 /** Visual backdrop scene identifier for the app shell. */
 export type BackgroundScene = 'lobby' | 'table' | 'settlement';

@@ -6,16 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/palemoky/fight-the-landlord/internal/bot"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/game/session"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
-	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 	"github.com/palemoky/fight-the-landlord/internal/types"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRoomOperationsCannotRemoveActivePlayer(t *testing.T) {
@@ -28,10 +29,12 @@ func TestRoomOperationsCannotRemoveActivePlayer(t *testing.T) {
 	h := NewHandler(HandlerDeps{Server: server, RoomManager: rm})
 	// Matcher is deliberately nil: none of these requests may reach it.
 	for _, msg := range []*protocol.Message{
-		{Type: protocol.MsgLeaveRoom}, {Type: protocol.MsgCreateRoom},
+		{Type: protocol.MsgLeaveRoom},
+		{Type: protocol.MsgCreateRoom},
 		codec.MustNewMessage(protocol.MsgJoinRoom, protocol.JoinRoomPayload{RoomCode: "123456"}),
 		{Type: protocol.MsgStartGame},
-		{Type: protocol.MsgQuickMatch}, {Type: protocol.MsgPracticeMatch},
+		{Type: protocol.MsgQuickMatch},
+		{Type: protocol.MsgPracticeMatch},
 	} {
 		h.handlers[msg.Type](clients[0], msg)
 		require.Equal(t, r.Code, clients[0].GetRoom())

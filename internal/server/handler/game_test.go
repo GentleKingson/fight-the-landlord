@@ -1,19 +1,21 @@
 package handler
 
 import (
-	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	r "github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/game/session"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	payloadconv "github.com/palemoky/fight-the-landlord/internal/protocol/convert/payload"
-	"github.com/palemoky/fight-the-landlord/internal/server/session"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
 

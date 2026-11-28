@@ -6,10 +6,10 @@ import (
 
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/game/session"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
-	"github.com/palemoky/fight-the-landlord/internal/server/session"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 

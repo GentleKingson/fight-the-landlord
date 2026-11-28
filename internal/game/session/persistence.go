@@ -10,7 +10,7 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
 	"github.com/palemoky/fight-the-landlord/internal/types"
 )
 
@@ -42,8 +42,10 @@ func (gs *GameSession) transition(action func() error) error {
 	if err != nil {
 		return err
 	}
-	record := &storage.GameRecord{Version: 2, ID: gs.gameID, RoomCode: gs.room.Code,
-		Revision: gs.revision + 1, SavedAt: time.Now(), State: data, Ended: gs.state == GameStateEnded}
+	record := &storage.GameRecord{
+		Version: 2, ID: gs.gameID, RoomCode: gs.room.Code,
+		Revision: gs.revision + 1, SavedAt: time.Now(), State: data, Ended: gs.state == GameStateEnded,
+	}
 	if record.Ended {
 		record.ExpiresAt = gs.endedAt.Add(gs.gameConfig.ResultRetentionDuration())
 		record.Results = gs.settlementResults()
@@ -177,8 +179,10 @@ func (gs *GameSession) settlementResults() []storage.GameResult {
 	var results []storage.GameResult
 	for _, p := range gs.players {
 		if !gs.room.IsPlayerBot(p.ID) {
-			results = append(results, storage.GameResult{GameID: gs.gameID, PlayerID: p.ID,
-				PlayerName: p.Name, IsLandlord: p.IsLandlord, IsWinner: p.IsLandlord == result.IsLandlord})
+			results = append(results, storage.GameResult{
+				GameID: gs.gameID, PlayerID: p.ID,
+				PlayerName: p.Name, IsLandlord: p.IsLandlord, IsWinner: p.IsLandlord == result.IsLandlord,
+			})
 		}
 	}
 	return results

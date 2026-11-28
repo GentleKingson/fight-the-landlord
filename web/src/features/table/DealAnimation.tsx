@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
-import type { DealStage } from '../../stores/appStore';
+import type { DealStage } from '../../stores/types';
 import { dealFlightTiming } from './useDealPresentation';
 
 /** Props for the card-dealing overlay animation. */

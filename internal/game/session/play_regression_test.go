@@ -3,6 +3,8 @@ package session
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/palemoky/fight-the-landlord/internal/apperrors"
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
@@ -12,7 +14,6 @@ import (
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestForgedColorCannotChangeHandOrTrainingRecord(t *testing.T) {
@@ -71,10 +72,13 @@ func TestRejectedLeaveKeepsRedealAndRecordingUsable(t *testing.T) {
 // including ones the deliberately simple timeout policy does not generate.
 func TestTurnAllowsComplexRepliesBeforeAndAfterReconnect(t *testing.T) {
 	cases := []struct{ name, lead, reply string }{
-		{"straight", "34567", "45678"}, {"pair straight", "334455", "445566"},
-		{"plane", "333444", "444555"}, {"plane singles", "33344489", "4445559T"},
+		{"straight", "34567", "45678"},
+		{"pair straight", "334455", "445566"},
+		{"plane", "333444", "444555"},
+		{"plane singles", "33344489", "4445559T"},
 		{"plane pairs", "3334448899", "44455599TT"},
-		{"four with two", "333389", "44449T"}, {"four with pairs", "33338899", "444499TT"},
+		{"four with two", "333389", "44449T"},
+		{"four with pairs", "33338899", "444499TT"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

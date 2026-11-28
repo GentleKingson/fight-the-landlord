@@ -1,12 +1,15 @@
 from .utils import MIN_SINGLE_CARDS, MIN_PAIRS, MIN_TRIPLES, select
-from .move_detector import get_move_type, TYPE_11_SERIAL_3_1
+from .move_detector import get_move_type
+from .utils import TYPE_11_SERIAL_3_1
 import collections
 import itertools
+
 
 class MovesGener(object):
     """
     This is for generating the possible combinations
     """
+
     def __init__(self, cards_list):
         self.cards_list = cards_list
         self.cards_dict = collections.defaultdict(int)
@@ -49,14 +52,16 @@ class MovesGener(object):
             if seq[1] < min_serial:
                 continue
             start, longest = seq[0], seq[1]
-            longest_list = single_cards[start: start + longest]
+            longest_list = single_cards[start : start + longest]
 
             if repeat_num == 0:  # No limitation on how many sequences
                 steps = min_serial
                 while steps <= longest:
                     index = 0
                     while steps + index <= longest:
-                        target_moves = sorted(longest_list[index: index + steps] * repeat)
+                        target_moves = sorted(
+                            longest_list[index : index + steps] * repeat
+                        )
                         moves.append(target_moves)
                         index += 1
                     steps += 1
@@ -66,7 +71,9 @@ class MovesGener(object):
                     continue
                 index = 0
                 while index + repeat_num <= longest:
-                    target_moves = sorted(longest_list[index: index + repeat_num] * repeat)
+                    target_moves = sorted(
+                        longest_list[index : index + repeat_num] * repeat
+                    )
                     moves.append(target_moves)
                     index += 1
 
@@ -110,7 +117,7 @@ class MovesGener(object):
         for t in self.single_card_moves:
             for i in self.triple_cards_moves:
                 if t[0] != i[0]:
-                    result.append(t+i)
+                    result.append(t + i)
         return result
 
     def gen_type_7_3_2(self):
@@ -118,11 +125,13 @@ class MovesGener(object):
         for t in self.pair_moves:
             for i in self.triple_cards_moves:
                 if t[0] != i[0]:
-                    result.append(t+i)
+                    result.append(t + i)
         return result
 
     def gen_type_8_serial_single(self, repeat_num=0):
-        return self._gen_serial_moves(self.cards_list, MIN_SINGLE_CARDS, repeat=1, repeat_num=repeat_num)
+        return self._gen_serial_moves(
+            self.cards_list, MIN_SINGLE_CARDS, repeat=1, repeat_num=repeat_num
+        )
 
     def gen_type_9_serial_pair(self, repeat_num=0):
         single_pairs = list()
@@ -130,7 +139,9 @@ class MovesGener(object):
             if v >= 2:
                 single_pairs.append(k)
 
-        return self._gen_serial_moves(single_pairs, MIN_PAIRS, repeat=2, repeat_num=repeat_num)
+        return self._gen_serial_moves(
+            single_pairs, MIN_PAIRS, repeat=2, repeat_num=repeat_num
+        )
 
     def gen_type_10_serial_triple(self, repeat_num=0):
         single_triples = list()
@@ -138,7 +149,9 @@ class MovesGener(object):
             if v >= 3:
                 single_triples.append(k)
 
-        return self._gen_serial_moves(single_triples, MIN_TRIPLES, repeat=3, repeat_num=repeat_num)
+        return self._gen_serial_moves(
+            single_triples, MIN_TRIPLES, repeat=3, repeat_num=repeat_num
+        )
 
     def gen_type_11_serial_3_1(self, repeat_num=0):
         serial_3_moves = self.gen_type_10_serial_triple(repeat_num=repeat_num)
@@ -155,7 +168,7 @@ class MovesGener(object):
                 move = s3 + i
                 # Do not offer triple/bomb wings or a pure plane as a winged plane.
                 # See docs/classic-rules.md for the shared server rule boundary.
-                if get_move_type(move)['type'] == TYPE_11_SERIAL_3_1:
+                if get_move_type(move)["type"] == TYPE_11_SERIAL_3_1:
                     serial_3_1_moves.append(move)
 
         return list(k for k, _ in itertools.groupby(serial_3_1_moves))
@@ -187,7 +200,7 @@ class MovesGener(object):
             cards_list = [k for k in self.cards_list if k != fc]
             subcards = select(cards_list, 2)
             for i in subcards:
-                result.append([fc]*4 + i)
+                result.append([fc] * 4 + i)
         return list(k for k, _ in itertools.groupby(result))
 
     def gen_type_14_4_22(self):
@@ -198,7 +211,7 @@ class MovesGener(object):
 
         result = list()
         for fc in four_cards:
-            cards_list = [k for k, v in self.cards_dict.items() if k != fc and v>=2]
+            cards_list = [k for k, v in self.cards_dict.items() if k != fc and v >= 2]
             subcards = select(cards_list, 2)
             for i in subcards:
                 result.append([fc] * 4 + [i[0], i[0], i[1], i[1]])

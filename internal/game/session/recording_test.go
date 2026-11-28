@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/card"
 	"github.com/palemoky/fight-the-landlord/internal/game/room"
 	"github.com/palemoky/fight-the-landlord/internal/game/rule"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/convert"
 	"github.com/palemoky/fight-the-landlord/internal/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func recordingGame(t *testing.T) *GameSession {

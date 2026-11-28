@@ -1,225 +1,21 @@
 #!/usr/bin/env python3
-"""
-DouZero HTTP service — ONNX runtime edition.
+"""MARVEL HTTP inference service using the existing DouZero wire protocol."""
 
-Models are downloaded from HuggingFace on first startup.
-No torch required.
-"""
-
-import os
 import json
-import shutil
-import tempfile
+import os
 import traceback
-import urllib.request
-from collections import Counter
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-import numpy as np
+from src.inference import legal_actions_for_request
+from src.marvel_backend import MarvelBackend, POSITIONS
 
-
-from src import move_detector as md, move_selector as ms
-from src.move_generator import MovesGener
-from src.game import InfoSet
-from src.env import get_obs
-
-MODEL_DIR = os.environ.get("DOUZERO_MODELS", os.path.join(os.path.dirname(__file__), "models"))
+MODEL_DIR = os.environ.get(
+    "DOUZERO_MODELS", os.path.join(os.path.dirname(__file__), "models")
+)
 PORT = int(os.environ.get("PORT", 2021))
-HF_BASE = "https://huggingface.co/palemoky/douzero-baselines/resolve/main/models_onnx/douzero_WP"
-
-POSITIONS = ["landlord", "landlord_down", "landlord_up"]
-
-sessions: dict = {}
+BACKEND = os.environ.get("AI_BACKEND", "marvel")
 backend = None
-BACKEND = os.environ.get("AI_BACKEND", "onnx")
 
-
-def download_models() -> None:
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    for pos in POSITIONS:
-        path = os.path.join(MODEL_DIR, f"{pos}.onnx")
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            print(f"  Found   {pos}.onnx")
-            continue
-        url = f"{HF_BASE}/{pos}.onnx"
-        print(f"  Downloading {pos}.onnx ...")
-        fd, tmp_path = tempfile.mkstemp(dir=MODEL_DIR, prefix=f".{pos}.onnx.", suffix=".part")
-        try:
-            with os.fdopen(fd, "wb") as dst, urllib.request.urlopen(url) as resp:
-                shutil.copyfileobj(resp, dst)
-                dst.flush()
-                os.fsync(dst.fileno())
-            if os.path.getsize(tmp_path) <= 0:
-                raise RuntimeError(f"Downloaded empty ONNX model from {url}")
-            os.replace(tmp_path, path)
-        except BaseException:
-            try:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-        print(f"  Saved → {path}")
-
-
-def load_sessions() -> None:
-    import onnxruntime as ort
-    providers = ["CPUExecutionProvider"]
-    for pos in POSITIONS:
-        path = os.path.join(MODEL_DIR, f"{pos}.onnx")
-        sessions[pos] = ort.InferenceSession(path, providers=providers)
-        print(f"  Loaded  {pos}")
-
-
-def _act(position: str, infoset) -> list:
-    if len(infoset.legal_actions) == 1:
-        return infoset.legal_actions[0]
-
-    obs = get_obs(infoset)
-    z_batch = obs["z_batch"].astype(np.float32)
-    x_batch = obs["x_batch"].astype(np.float32)
-
-    y_pred = sessions[position].run(["values"], {"z": z_batch, "x": x_batch})[0]
-    best_idx = int(np.argmax(y_pred[:, 0]))
-    return infoset.legal_actions[best_idx]
-
-
-# ---------------------------------------------------------------------------
-# Legal-action generation
-# ---------------------------------------------------------------------------
-
-def get_legal_card_play_actions(hand: list, rival_move: list) -> list:
-    mg = MovesGener(hand)
-    rival_type = md.get_move_type(rival_move)
-    rival_move_type = rival_type["type"]
-    rival_move_len = rival_type.get("len", 1)
-    moves = []
-
-    if rival_move_type == md.TYPE_0_PASS:
-        moves = mg.gen_moves()
-    elif rival_move_type == md.TYPE_1_SINGLE:
-        moves = ms.filter_type_1_single(mg.gen_type_1_single(), rival_move)
-    elif rival_move_type == md.TYPE_2_PAIR:
-        moves = ms.filter_type_2_pair(mg.gen_type_2_pair(), rival_move)
-    elif rival_move_type == md.TYPE_3_TRIPLE:
-        moves = ms.filter_type_3_triple(mg.gen_type_3_triple(), rival_move)
-    elif rival_move_type == md.TYPE_4_BOMB:
-        moves = ms.filter_type_4_bomb(mg.gen_type_4_bomb() + mg.gen_type_5_king_bomb(), rival_move)
-    elif rival_move_type == md.TYPE_5_KING_BOMB:
-        moves = []
-    elif rival_move_type == md.TYPE_6_3_1:
-        moves = ms.filter_type_6_3_1(mg.gen_type_6_3_1(), rival_move)
-    elif rival_move_type == md.TYPE_7_3_2:
-        moves = ms.filter_type_7_3_2(mg.gen_type_7_3_2(), rival_move)
-    elif rival_move_type == md.TYPE_8_SERIAL_SINGLE:
-        moves = ms.filter_type_8_serial_single(mg.gen_type_8_serial_single(repeat_num=rival_move_len), rival_move)
-    elif rival_move_type == md.TYPE_9_SERIAL_PAIR:
-        moves = ms.filter_type_9_serial_pair(mg.gen_type_9_serial_pair(repeat_num=rival_move_len), rival_move)
-    elif rival_move_type == md.TYPE_10_SERIAL_TRIPLE:
-        moves = ms.filter_type_10_serial_triple(mg.gen_type_10_serial_triple(repeat_num=rival_move_len), rival_move)
-    elif rival_move_type == md.TYPE_11_SERIAL_3_1:
-        moves = ms.filter_type_11_serial_3_1(mg.gen_type_11_serial_3_1(repeat_num=rival_move_len), rival_move)
-    elif rival_move_type == md.TYPE_12_SERIAL_3_2:
-        moves = ms.filter_type_12_serial_3_2(mg.gen_type_12_serial_3_2(repeat_num=rival_move_len), rival_move)
-    elif rival_move_type == md.TYPE_13_4_2:
-        moves = ms.filter_type_13_4_2(mg.gen_type_13_4_2(), rival_move)
-    elif rival_move_type == md.TYPE_14_4_22:
-        moves = ms.filter_type_14_4_22(mg.gen_type_14_4_22(), rival_move)
-
-    if rival_move_type not in (md.TYPE_0_PASS, md.TYPE_4_BOMB, md.TYPE_5_KING_BOMB):
-        moves = moves + mg.gen_type_4_bomb() + mg.gen_type_5_king_bomb()
-
-    if len(rival_move) != 0:
-        moves = moves + [[]]
-
-    for m in moves:
-        m.sort()
-    return moves
-
-
-# ---------------------------------------------------------------------------
-# InfoSet construction
-# ---------------------------------------------------------------------------
-
-def _all_54_cards() -> list:
-    cards = []
-    for rank in range(3, 15):
-        cards.extend([rank] * 4)
-    cards.extend([17] * 4)
-    cards.append(20)
-    cards.append(30)
-    return cards
-
-
-def _multiset_subtract(base: list, remove: list) -> list:
-    c = Counter(base)
-    for v in remove:
-        if c[v] > 0:
-            c[v] -= 1
-    result = []
-    for v, count in c.items():
-        result.extend([v] * count)
-    result.sort()
-    return result
-
-
-def build_infoset(data: dict) -> InfoSet:
-    position = data["position"]
-    hand = sorted(data["hand"])
-    bottom_cards = sorted(data.get("bottom_cards") or [])
-    must_play: bool = data.get("must_play", True)
-    last_move: list = sorted(data.get("last_move") or [])
-    last_move_pos: str = data.get("last_move_position") or ""
-    num_cards_left: dict = data.get("num_cards_left") or {}
-
-    played = {
-        "landlord":      sorted(data.get("played_cards_landlord") or []),
-        "landlord_down": sorted(data.get("played_cards_landlord_down") or []),
-        "landlord_up":   sorted(data.get("played_cards_landlord_up") or []),
-    }
-
-    raw_seq = data.get("card_play_action_seq") or []
-    action_seq = [sorted(m) if m else [] for m in raw_seq]
-
-    all_played = played["landlord"] + played["landlord_down"] + played["landlord_up"]
-    other_hand_cards = _multiset_subtract(
-        _multiset_subtract(_all_54_cards(), hand),
-        all_played,
-    )
-
-    last_two = list(reversed(action_seq[-2:]))
-    last_two += [[]] * (2 - len(last_two))
-
-    rival_move = [] if must_play else last_move
-    legal = get_legal_card_play_actions(hand, rival_move)
-    if not must_play and [] not in legal:
-        legal.append([])
-
-    infoset = InfoSet(position)
-    infoset.player_hand_cards = hand
-    infoset.num_cards_left_dict = num_cards_left
-    infoset.three_landlord_cards = bottom_cards
-    infoset.card_play_action_seq = action_seq
-    infoset.other_hand_cards = other_hand_cards
-    infoset.legal_actions = legal
-    infoset.played_cards = played
-    infoset.last_move = last_move
-    infoset.last_two_moves = last_two
-    infoset.num_cards_left = num_cards_left
-    infoset.bomb_num = sum(m == [20, 30] or (len(m) == 4 and len(set(m)) == 1) for m in action_seq)
-    infoset.last_pid = last_move_pos
-    infoset.last_move_dict = {p: [] for p in POSITIONS}
-    infoset.all_handcards = {position: hand}
-
-    for i, move in enumerate(action_seq):
-        infoset.last_move_dict[POSITIONS[i % 3]] = move
-
-    return infoset
-
-
-# ---------------------------------------------------------------------------
-# HTTP server
-# ---------------------------------------------------------------------------
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -227,7 +23,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json(200, {"status": "ok", "backend": BACKEND, "agents": POSITIONS, "models": backend.metadata if backend else {}})
+            self._json(
+                200,
+                {
+                    "status": "ok",
+                    "backend": BACKEND,
+                    "agents": POSITIONS,
+                    "models": backend.metadata if backend else {},
+                },
+            )
         else:
             self.send_error(404)
 
@@ -241,16 +45,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "invalid request size"})
                 return
             body = json.loads(self.rfile.read(length))
-            infoset = build_infoset(body)
-            position = body["position"]
+            body["position"]  # Required by the request contract, including empty hands.
+            legal_actions = legal_actions_for_request(body)
 
-            if not infoset.legal_actions:
+            if not legal_actions:
                 action = []
             else:
-                action = backend.act(body) if backend else _act(position, infoset)
+                action = backend.act(body)
                 action = list(action) if action is not None else []
 
-            if sorted(action) not in infoset.legal_actions:
+            if sorted(action) not in legal_actions:
                 raise ValueError("model returned an illegal action")
             self._json(200, {"action": action})
         except Exception:
@@ -267,20 +71,21 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-if __name__ == "__main__":
-    if BACKEND == "marvel":
-        from src.marvel_backend import MarvelBackend
-        backend = MarvelBackend(MODEL_DIR)
-        print("Loaded MARVEL landlord.pt and farmers.pt", flush=True)
-    elif BACKEND == "onnx":
-        download_models()
-        load_sessions()
-    else:
+def main():
+    global backend
+    if BACKEND != "marvel":
         raise ValueError(f"Unknown AI_BACKEND: {BACKEND}")
+    backend = MarvelBackend(MODEL_DIR)
+    print("Loaded MARVEL landlord.pt and farmers.pt", flush=True)
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"\nDouZero service listening on port {PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nDouZero service stopped.")
+    finally:
         server.server_close()
+
+
+if __name__ == "__main__":
+    main()

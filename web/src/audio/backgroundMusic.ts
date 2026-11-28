@@ -1,5 +1,5 @@
 import lobbyMusic from '../assets/audio/lobby/bgm_welcome.mp3?url&no-inline';
-import type { Phase } from '../protocol/types';
+import type { Phase } from '../stores/types';
 import { useAppStore } from '../stores/appStore';
 import { gameAudio, SFX_VOLUME, type GameAudio } from './gameAudio';
 
@@ -28,14 +28,7 @@ export function connectBackgroundMusic(audio: GameAudio = gameAudio): () => void
   const sync = () => {
     const state = useAppStore.getState();
     const inLobby = LOBBY_PHASES.has(state.phase);
-    if (
-      disposed ||
-      !unlocked ||
-      document.hidden ||
-      !state.connected ||
-      !audio.getEnabled() ||
-      !inLobby
-    ) {
+    if (disposed || !unlocked || document.hidden || !state.connected || !audio.getEnabled() || !inLobby) {
       pause();
       if (!inLobby && music.currentTime > 0) {
         music.currentTime = 0;

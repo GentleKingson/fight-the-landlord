@@ -6,14 +6,15 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/palemoky/fight-the-landlord/internal/config"
-	"github.com/palemoky/fight-the-landlord/internal/game/room"
-	"github.com/palemoky/fight-the-landlord/internal/server/handler"
-	"github.com/palemoky/fight-the-landlord/internal/server/session"
-	"github.com/palemoky/fight-the-landlord/internal/server/storage"
-	"github.com/palemoky/fight-the-landlord/internal/testutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+
+	"github.com/palemoky/fight-the-landlord/internal/config"
+	"github.com/palemoky/fight-the-landlord/internal/game/room"
+	"github.com/palemoky/fight-the-landlord/internal/game/session"
+	"github.com/palemoky/fight-the-landlord/internal/server/handler"
+	"github.com/palemoky/fight-the-landlord/internal/storage"
+	"github.com/palemoky/fight-the-landlord/internal/testutil"
 )
 
 func TestSnapshotCleanupWaitsForSessionAndHandlesMissingOfflineCheckpoint(t *testing.T) {

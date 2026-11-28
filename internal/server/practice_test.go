@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/palemoky/fight-the-landlord/internal/config"
 	"github.com/palemoky/fight-the-landlord/internal/game/match"
+	"github.com/palemoky/fight-the-landlord/internal/game/session"
 	"github.com/palemoky/fight-the-landlord/internal/protocol"
 	"github.com/palemoky/fight-the-landlord/internal/protocol/codec"
 	"github.com/palemoky/fight-the-landlord/internal/server/handler"
-	"github.com/palemoky/fight-the-landlord/internal/server/session"
-	"github.com/stretchr/testify/require"
 )
 
 type blockedPracticeClient struct {
